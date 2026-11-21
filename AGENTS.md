@@ -12,7 +12,7 @@ Windows 单平台的桌面邮件客户端，只收信（IMAP + SMTP 仅用于登
 
 Electron 45 · electron-vite 6 · Vite 8 · React 19 · TypeScript 5.9 · Tailwind v4（`@tailwindcss/vite`，无 postcss 配置）· shadcn/ui（new-york，`rsc: false`）· lucide-react · Radix。
 数据层已落地（M2）：`node:sqlite`（Electron 内置 Node 24，FTS5 可用，**不要引 better-sqlite3**）· zod（IPC 入参校验）· safeStorage（凭据加密，async API）。
-后续接同步层时用：imapflow · mailparser · iconv-lite · electron-log。设置存 SQLite `setting` 表，**不要引 electron-store**。
+同步层已落地（M3）：`imapflow`（IDLE + 增量 + UIDVALIDITY）、`mailparser` + `iconv-lite`（正文与编码兜底）；`src/main/net/probe.ts` 的「测试连接」= verifyOnly 真实登录，不拉信。`electron-log` 尚未接入，排 M4。设置存 SQLite `setting` 表，**不要引 electron-store**。
 
 不要引入 Next.js 生态（`next/*`、`next-themes`、`next/font`、`next/image`），本项目是纯 Vite + file:// 加载，路由用 `HashRouter`（如需要），构建 `base: './'`。
 
@@ -31,7 +31,7 @@ npm run package    # Windows NSIS 安装包到 release/
 ## 目录
 
 ```
-src/main/            主进程：窗口、IPC 注册、后续 db/sync/parser
+src/main/            主进程：窗口、IPC 注册（ipc/）、数据层（db/）、同步引擎（sync/）、探测（net/）、凭据（security/）
 src/preload/         contextBridge，唯一对外出口 window.mail
 src/renderer/src/     React UI（唯一的重构区域）
   components/        业务组件（TitleBar/Sidebar/MessageList/Reader）
@@ -74,13 +74,18 @@ docs/                PRD、UI 参考、截图
 ## 已知坑
 
 - `MAILDESK_CAPTURE` 走 bash 时，MSYS 会把 `/d/...` 转成 `D:\d\...`：值用 Windows 反斜杠路径并加 `MSYS_NO_PATHCONV=1`。
+- **Vite 在 Windows 上会吞掉同一秒内的 mtime 事件**：磁盘已是新代码、dev server 也能 `curl http://localhost:5173/src/components/X.tsx` 看到新内容，但窗口不刷新。判断方法就是 curl 一次；确认是新代码后重启 dev（`job_kill` 旧 job 再 `npm run dev`），不要靠反复改文件赌 HMR。
 - 主进程有单实例锁，第二个实例会直接退出——所以「dev 在跑」时截图会静默失败（`cap.log` 无 `captured`）。
 - 主题持久化 key 是 `localStorage["maildesk.theme"]`（`dark`/`light`/`system`），截图前必须显式设置，否则会沿用上次的。
 - 需要看「选中邮件」的阅读器状态时，加 `MAILDESK_CAPTURE_SELECT=1`，截图前会自动点第一行；列表密度与侧栏折叠的持久化 key 是 `localStorage["maildesk.density"]`（`compact`/`standard`/`comfortable`）与 `localStorage["maildesk.sidebarCollapsed"]`。
 - 在 MSYS bash 里跑 `npx shadcn add` 会把别名 `@/` 当成路径：文件被写进字面量目录 `./@/components/ui/`，且 `import { cn } from "cn"` 是坏的。跑完检查一次路径与 import，必要时手动搬到 `src/renderer/src/components/ui/` 并把 import 改成 `@/lib/utils`。
 - 后台 job 里直接启动 GUI 版 electron（`electron.exe .`）会在 2.5s 内以 `exit code: 2147483651`（STATUS_BREAKPOINT）退出且日志为空；前台 `timeout 6 electron.exe .` 正常。验数据层用 `MAILDESK_SELFTEST=1 MAILDESK_DATA_DIR=<tmp> electron.exe .`，它跑完自行退出并打印 `SELFTEST {...}`。
 - `safeStorage` 的同步 API 在 Electron 45 已废弃，用 `isAsyncEncryptionAvailable` / `encryptStringAsync` / `decryptStringAsync`（后者返回 `{ result, shouldReEncrypt }`，需要时重新加密落库）。
-- `titleBarStyle: hidden` 下窗口圆角/底色由 `titleBarOverlay` 决定，改主题时同步改 `src/main/index.ts` 里的 `backgroundColor` 与 `titleBarOverlay.color`，否则标题栏会露出一条异色。
+- 标题栏是**自绘**的（`frame: false` + `titleBarOverlay` 已移除）：窗口控制走 `mail.app.minimizeWindow/toggleMaximizeWindow/closeWindow`，底色走 `mail.app.setChrome`；窗口底色改 `src/main/index.ts` 的 `backgroundColor`。
+- `MAILDESK_SELFTEST` 跑的是 `out/main`，不是 TS 源码：**先 `npm run build` 再跑自检/同步**，否则改了主进程代码却测的是旧包（会误判成“修复没生效”）。
+- selftest 会往库里写测试账户与 `density=compact / sidebarCollapsed=true` 设置，跑完记得清理，否则 UI 打开就是折叠态。
+- `mailparser`/自建解码只管正文；列表 snippet 必须在首屏同步时按 `Content-Transfer-Encoding`（base64 / quoted-printable）还原再按 charset 解码，否则中文摘要全是乱码。
+- imapflow 的 `mailbox.uidValidity` / `uidNext` 是 **bigint**，直接绑定 `node:sqlite` 会报 `Provided value cannot be bound to SQLite parameter`，先 `Number()`。
 
 ## 非目标
 

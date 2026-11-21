@@ -166,18 +166,20 @@
 1. 文件夹名需处理 **modified UTF-7** 解码（中文文件夹名常见）。
 2. 角色识别优先级：`\\Inbox` → inbox；`\\Sent` → sent；`\\Trash` → trash；`\\Junk` → junk；`\\Archive` → archive；其余为普通文件夹。
 3. 未读数来自 IMAP `STATUS (UNSEEN)`，进入文件夹后本地清零并回写。
-4. 只读文件夹（`\\Noselect`）不显示为可点击项。
+4. 只读文件夹（`\\Noselect`，即容器目录）与普通文件夹**同款样式**，但不参与选中：整行只负责展开/收起，右侧给 chevron（展开 `ChevronDown` / 收起 `ChevronRight`），点整行或箭头都切换；不显示未读数。子文件夹每级缩进 14px、可正常选中，层级按路径段数递归。QQ 邮箱的 `其他文件夹/Steam`、`其他文件夹/QQ邮件订阅` 即此结构。侧栏折叠为 64px 时省略容器行，只留可点的子项图标。
+5. 当前选中项若指向容器（服务器改了层级等），自动落回收件箱，不出现「列表空且无选中」的死状态。
 
 **验收标准**：
 - [ ] 中文命名的文件夹显示正确，不出现 `&UXZO1mWHTvZZOQ-` 这类编码串。
 - [ ] 未读徽标与实际未读数一致（±0）。
+- [ ] 重复点击当前文件夹不会重新加载，列表不出现空骨架或空占位。
 
 ### FR-03 邮件列表（P0）
 
 **描述**：按时间倒序展示当前文件夹邮件摘要。
 
 **规则**：
-1. **三行结构**（标准密度行高 72px）：第一行 发件人（13px/500，无则显示邮箱）+ 右侧时间；第二行 主题（14px，未读 600 / 已读 400，单行省略）；第三行 摘要（13px、`--muted-foreground`、单行省略），附件图标与星标贴第三行右侧。时间格式：当天 `HH:mm`，本年 `M月d日`，跨年 `yyyy/M/d`。
+1. **行结构**（标准密度行高 72px）：行首 28px 彩色圆形头像（首字母，见 6.3 第 7 条），右侧三行内容——第一行 未读蓝点（6px）+ 发件人（13px/500，无则显示邮箱）+ 右侧时间；第二行 主题（14px，未读 600 / 已读 400，单行省略）；第三行 摘要（13px、`--muted-foreground`、单行省略），附件图标与星标贴第三行右侧。时间格式：当天 `HH:mm`，本年 `M月d日`，跨年 `yyyy/M/d`。
 2. **必须虚拟滚动**，DOM 节点数恒定在可视区 + 10 行缓冲；行高随密度切换（60 / 72 / 88px），切换后需重新测量。
 3. 分页：每次从本地库取 50 条，滚动到底部再取；本地无更多时触发一次后台补拉。
 4. 选中态与"已读态"分离：键盘移动不自动已读，停留 1.5 s 或点击才标记已读（防止误标）。
@@ -330,10 +332,10 @@
 
 | 层 | 色值 | 用途 |
 | --- | --- | --- |
-| L0 应用底 | `#0B0D10` | 窗口背景、栏间缝隙 |
-| L1 面板 | `#12151A` | 侧栏、列表、阅读器面板 |
-| L2 抬升 | `#1A1F26` | 悬停、输入框、阅读器正文卡片 |
-| L3 浮层 | `#21262E` | 下拉、命令面板、Dialog |
+| L0 应用底 | `#1B1A18` | 窗口背景、侧栏 |
+| L1 面板 | `#1E1D1B` | 列表、阅读器（左右同一画布） |
+| L2 抬升 | `#24221F` | 悬停、输入框、阅读器正文卡片 |
+| L3 浮层 | `#262421` | 下拉、命令面板、Dialog |
 
 **具体规则**
 
@@ -343,9 +345,12 @@
 4. **列表行之间不画线**，靠 8px 垂直间距与留白分隔。
 5. **分割线**：仅在列表与阅读器之间保留 1px `--border`（`#2B2825`）；侧栏与列表之间用明度差区分，不加线。
 6. **标签胶囊**：底色为标签色 18% alpha，文字为该色提亮 20%，高 20px，圆角 999px。
-7. **头像**：首字母 + 由名字 hash 出的低饱和色，32px 圆形；未读时右下角 6px 蓝点。
+7. **头像**：首字母（英文取首字母大写，中文取首字）+ 由名字 hash 出的固定底色，白字 600。色盘 8 色：`#6D5AE6 #2F9E6E #E08A3C #2E6BFF #C0567F #23879B #A855C7 #B08A3E`，同一个人永远同色。尺寸随场景：列表 24 / 28 / 32px（对应紧凑 / 标准 / 宽松）、阅读器 32px。列表未读态在行首占用 6px 蓝点槽位（点 + 8px 间隙），蓝点与下方主题、摘要左对齐，发件人名字随之后移 14px；已读行不占槽位，发件人直接与主题、摘要左对齐。选中行头像颜色不变、蓝点转白，主文字转纯白。
 8. **滚动条**：宽 8px，thumb `rgba(255,255,255,.12)`，hover `.2`，无轨道背景。
 9. **空状态**：居中，图标 48px + `--muted-foreground`，一句文案 + 一个主按钮，不使用大插画。
+10. **标题栏自绘且承载功能**：窗口 `frame: false`，无系统标题栏与系统按钮。标题栏高 36px，横向两段同色延续——左段宽度等于侧栏（240 / 折叠 64）用 L0 并放账户胶囊，右段用 L1 并放当前列表标题 + 未读数 + 搜索 + 密度 + 窗口三键，形成「每个平面一直顶到窗口上沿」的连续感，不做横向色带、不加下边框。
+    - 因为这条 36px 已被功能占满，**列表不再有独立的标题行与搜索行**（原 52px 标题行 + 40px 搜索行一并上移），列表从筛选条开始，纵向多出约 90px 给邮件。
+    - 右侧三个按钮各 46×36px，图标 10px 1px 描边；悬停叠加 6% 前景色，关闭键悬停填充 `#C42B1C` + 白图标。窗口缩放边框、Aero Snap、双击最大化仍走 Windows 原生行为。
 
 **密度**
 
@@ -470,10 +475,10 @@
     │  ├─ main/                  # 主进程（Node 能力）
     │  │  ├─ index.ts            # 窗口、生命周期、单实例
     │  │  ├─ ipc/                # IPC handler（入参 zod 校验）
-    │  │  ├─ db/                 # sqlite 连接、迁移、query
-    │  │  ├─ sync/               # imap.ts、scheduler.ts、state.ts
-    │  │  ├─ parser/             # mime.ts、charset.ts、sanitize.ts
-    │  │  └─ security/           # safeStorage 封装
+    │  │  ├─ db/                 # node:sqlite 连接、迁移、accounts/folders/messages/settings
+    │  │  ├─ sync/               # engine.ts（单账户状态机 + IDLE）、manager.ts、parse.ts（BODYSTRUCTURE/预览）
+    │  │  ├─ net/probe.ts        # 「测试连接」= imapflow 真实登录（只列文件夹，不拉信）
+    │  │  └─ security/           # safeStorage 凭据封装（DPAPI）
     │  ├─ preload/
     │  │  └─ index.ts            # contextBridge 暴露 window.mail
     │  ├─ renderer/              # React（UI 重构区域）
@@ -582,19 +587,19 @@
 
 ### 7.5 IPC 契约
 
-    // src/shared/api.ts —— 唯一契约来源，main 与 renderer 共用
+    // src/shared/types.ts —— 唯一契约来源，main 与 renderer 共用（channel 名在 src/shared/channels.ts）
     export interface MailApi {
       accounts: {
         list(): Promise<Account[]>;
-        test(input: AccountInput): Promise<{ ok: true } | { ok: false; code: ErrCode; message: string }>;
+        test(input: AccountInput): Promise<TestResult>;   // TestResult = {ok:true,folders?} | {ok:false,code,message}
         create(input: AccountInput): Promise<Account>;
         update(id: string, patch: Partial<AccountInput>): Promise<Account>;
         remove(id: string): Promise<void>;
       };
       folders: { list(accountId?: string): Promise<Folder[]> };
       messages: {
-        page(q: { folderId: string; cursor?: number; limit?: number }): Promise<{ items: MessageSummary[]; nextCursor?: number }>;
-        get(id: string): Promise<MessageDetail>;
+        page(q: { folderId: string; cursor?: number; limit?: number }): Promise<MessagePage>;  // cursor 为 sent_at
+        get(id: string): Promise<MessageDetail>;                 // 懒加载正文 + 附件
         setRead(ids: string[], read: boolean): Promise<void>;
         setFlagged(ids: string[], flagged: boolean): Promise<void>;
       };
@@ -605,7 +610,15 @@
         onEvent(cb: (e: SyncEvent) => void): () => void;   // 订阅式，preload 内做监听清理
       };
       settings: { get(): Promise<Settings>; set(patch: Partial<Settings>): Promise<Settings> };
-      app: { openExternal(url: string): Promise<void>; saveAttachment(id: string): Promise<string | null> };
+      app: {
+        getInfo(): Promise<AppInfo>;
+        openExternal(url: string): Promise<void>;               // 仅 http/https
+        setChrome(color: { background: string; symbol: string }): Promise<void>;
+        minimizeWindow(): Promise<void>;                        // frame:false，标题栏自绘
+        toggleMaximizeWindow(): Promise<void>;
+        closeWindow(): Promise<void>;
+        onMaximizeChange(cb: (maximized: boolean) => void): () => void;
+      };
     }
 
 约束：所有 IPC channel 名常量集中定义；主进程对每个入参做 zod 解析；渲染进程**不得**直接访问 `fs`/`net`。
@@ -622,7 +635,9 @@
 - 首次同步：`UID FETCH 1:* (FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER])` 只取头部，正文懒加载（`BODY.PEEK[]` 按需）。
 - 正文懒加载策略：列表只存 header + snippet；用户点开时才拉全文并落盘（显著降低首次同步时间与磁盘占用）。
 - 收到 `EXISTS` 后按 `last_synced_uid+1:*` 增量，不重复解析已有 UID。
-- 所有失败写 electron-log，UI 只展示归一化错误码。
+- 所有失败归一化为 `ErrCode`（network/tls/auth/unsupported/db/internal），UI 只展示错误码与一句话说明；electron-log 落盘排在 M4。
+- 连接用 imapflow 的 `IDLE`；持久化 `uid_validity`，变化即整箱重拉；`uid_next` 只增不减，断线重连按 `last_synced_uid+1:*` 续传。
+- 正文预览（snippet）在首屏同步时顺带取 `BODY.PEEK[1]`，必须按 `Content-Transfer-Encoding`（base64 / quoted-printable）还原后再按 charset 解码，否则中文摘要会变成乱码。
 
 ---
 
@@ -656,7 +671,7 @@
 | M0 骨架 | electron-vite + React + TS + Tailwind v4 + shadcn init；三栏静态布局；主题切换 | 可运行空壳，HMR 正常 | 0.5 天 |
 | M1 UI 完成 | 假数据驱动：侧栏、列表（虚拟滚动）、阅读器、搜索面板、空/错/载状态、快捷键 | 可用假数据完整体验 UI | 2–3 天 |
 | M2 数据层 | SQLite schema + 迁移、IPC 契约与 preload、账户表单（可 mock 测试）、设置持久化 | UI 接真库，但邮件仍是 fixtures | 2 天 |
-| M3 同步 | imapflow 接入：连接测试、文件夹、首次+增量、IDLE、UIDVALIDITY、重连、编码兜底 | 能收真邮件 | 3 天 |
+| M3 同步 | imapflow 接入：连接测试、文件夹、首次+增量、IDLE、UIDVALIDITY、重连、编码兜底 | 能收真邮件（2026-11-21 已跑通真实 QQ 邮箱：13 封、8 个文件夹、正文懒加载） | 3 天 |
 | M4 打磨 | 附件、搜索、图片放行、托盘/通知、打包 | 可日常使用的 v1.0 | 1–2 天 |
 
 **关键顺序原则**：M1 必须在 M2 之前完成，因为本项目的第一目标是 UI；同步层任何阻塞都不应妨碍界面迭代。

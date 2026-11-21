@@ -39,7 +39,19 @@ const api: MailApi = {
   },
   app: {
     getInfo: () => ipcRenderer.invoke(CH.appInfo),
-    openExternal: (url) => ipcRenderer.invoke(CH.appOpenExternal, url)
+    openExternal: (url) => ipcRenderer.invoke(CH.appOpenExternal, url),
+    setChrome: (color) => ipcRenderer.invoke(CH.appChrome, color),
+    minimizeWindow: () => ipcRenderer.invoke(CH.windowMinimize),
+    toggleMaximizeWindow: () => ipcRenderer.invoke(CH.windowToggleMaximize),
+    closeWindow: () => ipcRenderer.invoke(CH.windowClose),
+    onMaximizeChange: (cb) => {
+      const listener = (_event: unknown, maximized: boolean) => cb(maximized)
+      ipcRenderer.on(CH.windowStateEvent, listener)
+      void ipcRenderer.invoke(CH.windowStateGet).then((maximized: boolean) => cb(maximized))
+      return () => {
+        ipcRenderer.removeListener(CH.windowStateEvent, listener)
+      }
+    }
   }
 }
 

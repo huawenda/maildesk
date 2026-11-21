@@ -29,7 +29,11 @@ const SECURITY_OPTIONS: { value: Security; label: string }[] = [
   { value: "none", label: "不加密" }
 ]
 
-type TestState = { kind: "idle" } | { kind: "testing" } | { kind: "ok" } | { kind: "fail"; message: string }
+type TestState =
+  | { kind: "idle" }
+  | { kind: "testing" }
+  | { kind: "ok"; message: string }
+  | { kind: "fail"; message: string }
 
 interface AccountDialogProps {
   open: boolean
@@ -93,7 +97,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
     try {
       const result = await mail.accounts.test(buildInput())
       if (result.ok) {
-        setTest({ kind: "ok" })
+        setTest({ kind: "ok", message: result.message ?? "登录成功" })
       } else {
         setTest({ kind: "fail", message: result.message })
       }
@@ -296,7 +300,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                   </button>
                   {test.kind === "ok" ? (
                     <span className="flex items-center gap-1 text-[12px] text-emerald-400">
-                      <Check className="size-3.5" /> 端口可达
+                      <Check className="size-3.5" /> {test.message}
                     </span>
                   ) : null}
                   {test.kind === "fail" ? (
@@ -304,7 +308,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                       {test.message}
                     </span>
                   ) : null}
-                  <span className="ml-auto text-[11px] text-muted-foreground/70">M2 仅探测端口可达性</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground/70">会真实登录一次，只读</span>
                 </div>
 
                 {error ? <div className="rounded-lg bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{error}</div> : null}

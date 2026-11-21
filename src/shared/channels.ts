@@ -2,6 +2,13 @@
 export const CH = {
   appInfo: "app:info",
   appOpenExternal: "app:open-external",
+  appChrome: "app:chrome",
+
+  windowMinimize: "window:minimize",
+  windowToggleMaximize: "window:toggle-maximize",
+  windowClose: "window:close",
+  windowStateGet: "window:is-maximized",
+  windowStateEvent: "window:state",
 
   accountsList: "accounts:list",
   accountsTest: "accounts:test",

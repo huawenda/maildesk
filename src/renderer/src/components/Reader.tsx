@@ -13,7 +13,7 @@ import {
   Star,
   Trash2
 } from "lucide-react"
-import { formatFullTime, formatSize, initials } from "@/lib/format"
+import { avatarColor, formatFullTime, formatSize, initials } from "@/lib/format"
 import type { Attachment, Message } from "@/lib/mock"
 import { cn } from "@/lib/utils"
 
@@ -104,7 +104,10 @@ export function Reader({ message, onToggleStar, onToggleUnread }: ReaderProps) {
           </h2>
 
           <div className="mt-4 flex items-center gap-3">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-[12px] font-medium text-foreground">
+            <span
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold text-white"
+              style={{ backgroundColor: avatarColor(message.fromName || message.fromEmail) }}
+            >
               {initials(message.fromName || message.fromEmail)}
             </span>
             <div className="min-w-0">

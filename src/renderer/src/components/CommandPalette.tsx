@@ -9,15 +9,48 @@ interface CommandPaletteProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   messages: Message[]
-  onOpen: (id: string) => void
+  /** 真实库模式下走 FTS 查询；不传则只在内存里过滤 */
+  search?: (query: string) => Promise<Message[]>
+  onOpen: (message: Message) => void
 }
 
 const MAX_RESULTS = 8
 
-export function CommandPalette({ open, onOpenChange, messages, onOpen }: CommandPaletteProps) {
+export function CommandPalette({ open, onOpenChange, messages, search, onOpen }: CommandPaletteProps) {
   const [query, setQuery] = useState("")
   const [activeIndex, setActiveIndex] = useState(0)
+  const [remote, setRemote] = useState<Message[]>([])
   const listRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (open) {
+      setQuery("")
+      setActiveIndex(0)
+      setRemote([])
+    }
+  }, [open])
+
+  // 真实库走主进程 FTS，输入 200ms 内只发一次
+  useEffect(() => {
+    if (!search) return
+    const keyword = query.trim()
+    if (!keyword) {
+      setRemote([])
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      search(keyword)
+        .then((result) => {
+          if (!cancelled) setRemote(result)
+        })
+        .catch(() => undefined)
+    }, 200)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [query, search])
 
   useEffect(() => {
     if (open) {
@@ -29,6 +62,7 @@ export function CommandPalette({ open, onOpenChange, messages, onOpen }: Command
   const results = useMemo(() => {
     const keyword = query.trim().toLowerCase()
     if (!keyword) return []
+    if (search) return remote.slice(0, MAX_RESULTS)
     return messages
       .filter((message) =>
         [message.subject, message.fromName, message.fromEmail, message.snippet, ...message.labels]
@@ -37,7 +71,7 @@ export function CommandPalette({ open, onOpenChange, messages, onOpen }: Command
           .includes(keyword)
       )
       .slice(0, MAX_RESULTS)
-  }, [messages, query])
+  }, [messages, query, search, remote])
 
   useEffect(() => {
     setActiveIndex(0)
@@ -47,8 +81,8 @@ export function CommandPalette({ open, onOpenChange, messages, onOpen }: Command
     listRef.current?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`)?.scrollIntoView({ block: "nearest" })
   }, [activeIndex])
 
-  const commit = (id: string) => {
-    onOpen(id)
+  const commit = (message: Message) => {
+    onOpen(message)
     onOpenChange(false)
   }
 
@@ -70,7 +104,7 @@ export function CommandPalette({ open, onOpenChange, messages, onOpen }: Command
               const target = results[activeIndex]
               if (target) {
                 event.preventDefault()
-                commit(target.id)
+                commit(target)
               }
             }
           }}
@@ -102,7 +136,7 @@ export function CommandPalette({ open, onOpenChange, messages, onOpen }: Command
                   key={message.id}
                   data-index={index}
                   onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => commit(message.id)}
+                  onClick={() => commit(message)}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors",
                     index === activeIndex ? "bg-accent" : "hover:bg-accent/60"

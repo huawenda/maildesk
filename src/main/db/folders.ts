@@ -1,5 +1,5 @@
 import type { Folder, FolderRole } from "@shared/types"
-import { all, run } from "./index"
+import { all, get, run } from "./index"
 
 interface FolderRow {
   id: string
@@ -38,6 +38,34 @@ export function listFolders(accountId?: string): Folder[] {
     ? all<FolderRow>("SELECT * FROM folder WHERE account_id = ? ORDER BY sort_order ASC, name ASC", accountId)
     : all<FolderRow>("SELECT * FROM folder ORDER BY sort_order ASC, name ASC")
   return rows.map(toFolder)
+}
+
+export function getFolder(id: string): Folder | null {
+  const row = get<FolderRow>("SELECT * FROM folder WHERE id = ?", id)
+  return row ? toFolder(row) : null
+}
+
+export function findFolderByPath(accountId: string, path: string): Folder | null {
+  const row = get<FolderRow>("SELECT * FROM folder WHERE account_id = ? AND path = ?", accountId, path)
+  return row ? toFolder(row) : null
+}
+
+/** 同步完成后回写 UIDVALIDITY / UIDNEXT / 游标（upsertFolder 不碰这几列）。 */
+export function updateFolderCursor(
+  id: string,
+  cursor: { uidValidity: number; uidNext: number; lastSyncedUid: number }
+): void {
+  run(
+    "UPDATE folder SET uid_validity = ?, uid_next = ?, last_synced_uid = ? WHERE id = ?",
+    cursor.uidValidity,
+    cursor.uidNext,
+    cursor.lastSyncedUid,
+    id
+  )
+}
+
+export function updateFolderCounts(id: string, counts: { total: number; unread: number }): void {
+  run("UPDATE folder SET total_count = ?, unread_count = ? WHERE id = ?", counts.total, counts.unread, id)
 }
 
 /** 供 M3 同步写入；role 为 null 的普通文件夹排在系统文件夹之后。 */

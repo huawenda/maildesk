@@ -11,7 +11,8 @@ export interface Attachment {
 
 export interface Message {
   id: string
-  folderId: FolderId
+  /** 真实库里是文件夹 UUID；演示数据用 DemoFolderId 字面量 */
+  folderId: string
   fromName: string
   fromEmail: string
   to: string[]
@@ -23,6 +24,7 @@ export interface Message {
   unread: boolean
   starred: boolean
   labels: string[]
+  hasAttachments: boolean
   attachments: Attachment[]
   body: string[]
 }
@@ -54,7 +56,7 @@ export const labels: Label[] = [
   { name: "订阅", color: "#34D399" }
 ]
 
-interface FixtureMessage extends Omit<Message, "date" | "attachments"> {
+interface FixtureMessage extends Omit<Message, "date" | "attachments" | "hasAttachments"> {
   receivedAgoMinutes: number
   attachments: Attachment[]
 }
@@ -64,6 +66,7 @@ const byDateDesc = (a: Message, b: Message) => (a.date < b.date ? 1 : a.date > b
 function hydrate(fixtures: FixtureMessage[], now: number): Message[] {
   return fixtures.map(({ receivedAgoMinutes, ...rest }) => ({
     ...rest,
+    hasAttachments: rest.attachments.length > 0,
     date: new Date(now - receivedAgoMinutes * 60_000).toISOString()
   }))
 }

@@ -1,21 +1,24 @@
+import { useState } from "react"
 import {
   Archive,
   ChevronDown,
+  ChevronRight,
+  FilePenLine,
+  Folder,
   Inbox,
   Monitor,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  Plus,
   RefreshCw,
+  Send,
   Settings,
   ShieldAlert,
   Sun,
   Trash2
 } from "lucide-react"
-import type { Account } from "@shared/types"
-import type { FolderId, Message } from "@/lib/mock"
-import { folders, labels } from "@/lib/mock"
+import type { NavFolder } from "@/lib/live"
+import { labels } from "@/lib/mock"
 import type { ThemeMode } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -23,7 +26,10 @@ const folderIcons = {
   inbox: Inbox,
   archive: Archive,
   junk: ShieldAlert,
-  trash: Trash2
+  trash: Trash2,
+  sent: Send,
+  drafts: FilePenLine,
+  folder: Folder
 } as const
 
 const themeOptions: { mode: ThemeMode; icon: typeof Moon; label: string }[] = [
@@ -38,16 +44,15 @@ interface SidebarProps {
   mode: ThemeMode
   onModeChange: (mode: ThemeMode) => void
   version?: string
-  accounts: Account[]
-  activeAccountId: string | null
-  onOpenAccounts: () => void
-  folderId: FolderId
-  messages: Message[]
+  folders: NavFolder[]
+  folderId: string
   activeLabel: string | null
-  onSelectFolder: (id: FolderId) => void
+  unreadOf: (id: string) => number
+  onSelectFolder: (id: string) => void
   onSelectLabel: (label: string) => void
+  showLabels: boolean
   syncing: boolean
-  lastSync: string
+  syncLabel: string
   onSync: () => void
 }
 
@@ -57,59 +62,71 @@ export function Sidebar({
   mode,
   onModeChange,
   version,
-  accounts,
-  activeAccountId,
-  onOpenAccounts,
+  folders,
   folderId,
-  messages,
   activeLabel,
+  unreadOf,
   onSelectFolder,
   onSelectLabel,
+  showLabels,
   syncing,
-  lastSync,
+  syncLabel,
   onSync
 }: SidebarProps) {
-  const unreadIn = (id: FolderId) => messages.filter((message) => message.folderId === id && message.unread).length
-  const account = accounts.find((item) => item.id === activeAccountId) ?? accounts[0] ?? null
-  const accountName = account ? account.displayName || account.email.split("@")[0] : "添加账户"
+  // 容器目录默认展开，点右侧箭头（或整行）收起子项
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([])
+  const toggleGroup = (id: string) =>
+    setCollapsedGroups((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
+
+  const hidden = new Set<string>()
+  for (const folder of folders) {
+    if (folder.parentId && (collapsedGroups.includes(folder.parentId) || hidden.has(folder.parentId))) {
+      hidden.add(folder.id)
+    }
+  }
 
   return (
     <aside
       className={cn(
-        "flex shrink-0 flex-col pb-2 pt-1 transition-[width] duration-150 ease-out",
+        "flex shrink-0 flex-col pb-2 pt-2.5 transition-[width] duration-150 ease-out",
         collapsed ? "w-16 px-2" : "w-[240px] px-2.5"
       )}
     >
-      <button
-        onClick={onOpenAccounts}
-        title={account ? account.email : "添加账户"}
-        className={cn(
-          "mb-3 flex h-9 items-center gap-2 rounded-md text-left transition-colors hover:bg-white/[0.04]",
-          collapsed ? "justify-center" : "px-1.5"
-        )}
-      >
-        {account ? (
-          <span className="flex size-[22px] shrink-0 items-center justify-center rounded-md bg-primary/15 text-[11px] font-semibold text-primary">
-            {accountName.slice(0, 1).toUpperCase()}
-          </span>
-        ) : (
-          <span className="flex size-[22px] shrink-0 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground">
-            <Plus className="size-3" />
-          </span>
-        )}
-        {collapsed ? null : (
-          <>
-            <span className="truncate text-[13px] font-medium">{accountName}</span>
-            <ChevronDown className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
-          </>
-        )}
-      </button>
-
-      <nav className="flex flex-col gap-px" aria-label="文件夹">
+      <nav className="flex max-h-[45vh] flex-col gap-px overflow-y-auto" aria-label="文件夹">
         {folders.map((folder) => {
-          const Icon = folderIcons[folder.icon]
+          const Icon = folderIcons[folder.icon] ?? Folder
+          // 折叠态没有缩进空间，容器行直接省略，只留可点条目
+          if (collapsed && !folder.selectable) return null
+          if (!collapsed && hidden.has(folder.id)) return null
+          const indent = collapsed ? 0 : folder.depth * 14
+          const expanded = !collapsedGroups.includes(folder.id)
+
+          if (!folder.selectable) {
+            return (
+              <button
+                key={folder.id}
+                title={folder.label}
+                aria-expanded={expanded}
+                onClick={() => toggleGroup(folder.id)}
+                className={cn(
+                  "flex h-8 shrink-0 items-center gap-2.5 rounded-md text-[13.5px] text-foreground/85 transition-colors hover:bg-white/[0.04]",
+                  collapsed ? "justify-center px-0" : "px-2"
+                )}
+                style={indent ? { paddingLeft: 8 + indent } : undefined}
+              >
+                <Icon className="size-[15px] shrink-0 text-muted-foreground" />
+                {collapsed ? null : <span className="truncate">{folder.label}</span>}
+                {collapsed ? null : (
+                  <span className="ml-auto text-muted-foreground/70">
+                    {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                  </span>
+                )}
+              </button>
+            )
+          }
+
           const active = folder.id === folderId && !activeLabel
-          const count = unreadIn(folder.id)
+          const count = unreadOf(folder.id)
           return (
             <button
               key={folder.id}
@@ -117,10 +134,11 @@ export function Sidebar({
               aria-current={active ? "true" : undefined}
               onClick={() => onSelectFolder(folder.id)}
               className={cn(
-                "flex h-8 items-center gap-2.5 rounded-md text-[13.5px] transition-colors",
+                "flex h-8 shrink-0 items-center gap-2.5 rounded-md text-[13.5px] transition-colors",
                 collapsed ? "justify-center px-0" : "px-2",
                 active ? "bg-accent font-medium text-foreground" : "text-foreground/85 hover:bg-white/[0.04]"
               )}
+              style={indent ? { paddingLeft: 8 + indent } : undefined}
             >
               <Icon className={cn("size-[15px] shrink-0", active ? "text-primary" : "text-muted-foreground")} />
               {collapsed ? null : <span className="truncate">{folder.label}</span>}
@@ -132,7 +150,7 @@ export function Sidebar({
         })}
       </nav>
 
-      {collapsed ? null : (
+      {collapsed || !showLabels ? null : (
         <>
           <div className="mt-5 mb-1.5 px-2 text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
             标签
@@ -168,7 +186,7 @@ export function Sidebar({
           )}
         >
           <RefreshCw className={cn("size-3 shrink-0", syncing && "animate-spin text-primary")} />
-          {collapsed ? null : <span className="truncate">{syncing ? "正在同步…" : `已同步 · ${lastSync}`}</span>}
+          {collapsed ? null : <span className="truncate">{syncLabel}</span>}
         </button>
 
         <div className={cn("flex items-center gap-1", collapsed ? "flex-col" : "px-1")}>

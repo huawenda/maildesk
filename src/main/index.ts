@@ -1,9 +1,11 @@
 import { app, BrowserWindow, Menu, session, shell } from "electron"
 import { join } from "node:path"
 import { writeFile } from "node:fs/promises"
+import { CH } from "@shared/channels"
 import { closeDb, openDb } from "./db"
 import { registerIpc } from "./ipc"
 import { runSelfTest } from "./selftest"
+import { startSync, stopSync } from "./sync/manager"
 
 const isDev = !app.isPackaged
 const CAPTURE_PATH = process.env.MAILDESK_CAPTURE
@@ -27,9 +29,10 @@ function createWindow(): BrowserWindow {
     minWidth: 1000,
     minHeight: 640,
     show: false,
-    backgroundColor: "#1B1A18",
-    titleBarStyle: "hidden",
-    titleBarOverlay: { color: "#1B1A18", symbolColor: "#F2EFEA", height: 36 },
+    backgroundColor: "#1E1D1B",
+    // 完全自绘标题栏：不要系统标题栏，也不要系统绘制的窗口按钮。
+    // 保留 thickFrame（默认 true）才能继续用原生的缩放边框、Aero Snap 与阴影。
+    frame: false,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: true,
@@ -40,6 +43,13 @@ function createWindow(): BrowserWindow {
   })
 
   win.on("ready-to-show", () => win.show())
+
+  // 自绘标题栏需要知道最大化状态来换图标。
+  const pushWindowState = () => {
+    if (!win.isDestroyed()) win.webContents.send(CH.windowStateEvent, win.isMaximized())
+  }
+  win.on("maximize", pushWindowState)
+  win.on("unmaximize", pushWindowState)
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) void shell.openExternal(url)
@@ -130,6 +140,8 @@ app.whenReady().then(() => {
   }
 
   createWindow()
+  // 窗口建好后再起同步：事件广播需要窗口来接收
+  startSync()
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -141,5 +153,6 @@ app.on("window-all-closed", () => {
 })
 
 app.on("will-quit", () => {
+  stopSync()
   closeDb()
 })

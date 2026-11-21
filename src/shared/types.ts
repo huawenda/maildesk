@@ -119,7 +119,9 @@ export interface Settings {
   remoteImages: boolean
 }
 
-export type TestResult = { ok: true } | { ok: false; code: ErrCode; message: string }
+export type TestResult =
+  | { ok: true; message?: string; folders?: number }
+  | { ok: false; code: ErrCode; message: string }
 
 export type SyncState =
   | "disconnected"
@@ -175,5 +177,13 @@ export interface MailApi {
   app: {
     getInfo(): Promise<AppInfo>
     openExternal(url: string): Promise<void>
+    /** 让窗口底色跟随页面主题，避免拖动/缩放时闪出白色。 */
+    setChrome(color: { background: string; symbol: string }): Promise<void>
+    /** 自绘标题栏的窗口控制（窗口是 frame: false，系统按钮不存在）。 */
+    minimizeWindow(): Promise<void>
+    toggleMaximizeWindow(): Promise<void>
+    closeWindow(): Promise<void>
+    /** 订阅最大化状态变化，返回取消订阅函数。 */
+    onMaximizeChange(cb: (maximized: boolean) => void): () => void
   }
 }

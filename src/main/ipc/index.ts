@@ -1,4 +1,4 @@
-import { app, ipcMain, shell } from "electron"
+import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { z, type ZodType } from "zod"
 import { CH } from "@shared/channels"
 import {
@@ -14,7 +14,13 @@ import { listAccounts, createAccount, updateAccount, removeAccount } from "../db
 import { listFolders } from "../db/folders"
 import { getMessage, pageMessages, searchMessages, setFlagged, setRead } from "../db/messages"
 import { getSettings, setSettings } from "../db/settings"
-import { probeTcp } from "../net/probe"
+import { probeImap } from "../net/probe"
+import { loadMessageBody, startAccountSync, stopAccountSync, syncNow, syncStatus } from "../sync/manager"
+
+function windowOf(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  return win && !win.isDestroyed() ? win : null
+}
 
 /**
  * 入参一律先过 zod。失败抛 `code: message` 形式的 Error，
@@ -45,25 +51,53 @@ export function registerIpc(): void {
     await shell.openExternal(url)
   })
 
+  // 窗口是 frame: false 自绘标题栏，主题切换时只同步窗口底色，避免缩放/最小化动画闪白。
+  ipcMain.handle(CH.appChrome, (event, raw: unknown) => {
+    const { background } = parse(
+      z.object({ background: z.string().regex(/^#[0-9a-fA-F]{6}$/), symbol: z.string().regex(/^#[0-9a-fA-F]{6}$/) }),
+      raw
+    )
+    windowOf(event)?.setBackgroundColor(background)
+  })
+
+  ipcMain.handle(CH.windowMinimize, (event) => windowOf(event)?.minimize())
+  ipcMain.handle(CH.windowToggleMaximize, (event) => {
+    const win = windowOf(event)
+    if (!win) return
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+  })
+  ipcMain.handle(CH.windowClose, (event) => windowOf(event)?.close())
+  ipcMain.handle(CH.windowStateGet, (event) => windowOf(event)?.isMaximized() ?? false)
+
   ipcMain.handle(CH.accountsList, (): Account[] => listAccounts())
 
-  // 表单里的「测试连接」：M2 只探测 TCP 可达性，TLS/认证在 M3 由 imapflow 完成。
+  // 表单里的「测试连接」：真实登录一次（verifyOnly），失败按 auth / tls / network 分类返回。
   ipcMain.handle(CH.accountsTest, async (_event, raw: unknown): Promise<TestResult> => {
     const input = accountInputSchema.safeParse(raw)
     if (!input.success) {
       return { ok: false, code: "bad-request", message: "请检查邮箱地址、主机与端口" }
     }
-    return probeTcp(input.data.imapHost, input.data.imapPort)
+    return probeImap(input.data)
   })
 
-  ipcMain.handle(CH.accountsCreate, (_event, raw: unknown) => createAccount(parse(accountInputSchema, raw)))
+  ipcMain.handle(CH.accountsCreate, async (_event, raw: unknown) => {
+    const account = await createAccount(parse(accountInputSchema, raw))
+    // 新账户立刻开始首轮同步，UI 不用手动点
+    startAccountSync(account.id)
+    return account
+  })
 
   ipcMain.handle(CH.accountsUpdate, (_event, raw: unknown) => {
     const { id, patch } = parse(updatePayloadSchema, raw)
     return updateAccount(id, patch)
   })
 
-  ipcMain.handle(CH.accountsRemove, (_event, raw: unknown) => removeAccount(parse(idSchema, raw)))
+  ipcMain.handle(CH.accountsRemove, async (_event, raw: unknown) => {
+    const id = parse(idSchema, raw)
+    stopAccountSync(id)
+    await removeAccount(id)
+  })
 
   ipcMain.handle(CH.foldersList, (_event, raw: unknown) => listFolders(parse(idSchema.optional(), raw)))
 
@@ -72,7 +106,14 @@ export function registerIpc(): void {
     return pageMessages(query.folderId, query.cursor, query.limit ?? 50)
   })
 
-  ipcMain.handle(CH.messagesGet, (_event, raw: unknown) => getMessage(parse(idSchema, raw)))
+  // 正文懒加载：库里没有就回源头拉一次（PRD 7.6）
+  ipcMain.handle(CH.messagesGet, async (_event, raw: unknown) => {
+    const id = parse(idSchema, raw)
+    const detail = getMessage(id)
+    if (detail.bodyText !== null) return detail
+    const loaded = await loadMessageBody(id)
+    return loaded ? getMessage(id) : detail
+  })
 
   ipcMain.handle(CH.messagesSetRead, (_event, raw: unknown) => {
     const payload = parse(readPayloadSchema, raw)
@@ -89,9 +130,10 @@ export function registerIpc(): void {
     return searchMessages(q, opts)
   })
 
-  // 同步引擎属于 M3：这里只提供确定的「未连接」状态，让 UI 订阅链路可测。
-  ipcMain.handle(CH.syncNow, () => undefined)
-  ipcMain.handle(CH.syncStatus, () => ({ state: "disconnected" as const }))
+  ipcMain.handle(CH.syncNow, async (_event, raw: unknown) => {
+    await syncNow(parse(idSchema.optional(), raw))
+  })
+  ipcMain.handle(CH.syncStatus, () => syncStatus())
 
   ipcMain.handle(CH.settingsGet, () => getSettings())
   ipcMain.handle(CH.settingsSet, (_event, raw: unknown) => setSettings(parse(settingsPatchSchema, raw)))

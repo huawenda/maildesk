@@ -103,7 +103,8 @@ export function registerIpc(): void {
 
   ipcMain.handle(CH.appOpenExternal, async (_event, raw: unknown) => {
     const url = parse(z.string().url().max(2048), raw)
-    if (!/^https?:\/\//i.test(url)) throw new Error("bad-request: 仅允许 http/https 链接")
+    // 邮件里的链接：网页外链与 mailto/tel 交给系统；file:/javascript: 等一律拒绝
+    if (!/^(https?:\/\/|mailto:|tel:)/i.test(url)) throw new Error("bad-request: 仅允许 http/https/mailto/tel 链接")
     await shell.openExternal(url)
   })
 

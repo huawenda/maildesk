@@ -252,7 +252,7 @@ export function Reader({
       </div>
 
       <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto">
-        <article className="w-full px-8 pb-16">
+        <article className="w-full select-text px-8 pb-16">
           <h2 className="text-[22px] font-semibold leading-[30px] tracking-[-0.01em]">
             {message.subject || "（无主题）"}
           </h2>

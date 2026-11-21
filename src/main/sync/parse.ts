@@ -11,6 +11,39 @@ const toAddresses = (list?: EnvelopeAddress[]): Address[] =>
     .filter((item) => Boolean(item.address))
     .map((item) => ({ name: item.name ?? "", address: item.address ?? "" }))
 
+/** BODYSTRUCTURE 里的一个附件节点：part 号用于 IMAP 下载（BODY[part]）。 */
+export interface AttachmentPart {
+  part: string
+  filename: string | null
+  mime: string | null
+  size: number | null
+}
+
+/**
+ * 从 BODYSTRUCTURE 收集附件节点（按 IMAP 自然顺序）。
+ * 下载时用 part 号只取那一段，不必重拉整封信。
+ */
+export function collectAttachmentParts(root?: MessageStructureObject): AttachmentPart[] {
+  const parts: AttachmentPart[] = []
+  const walk = (node: MessageStructureObject) => {
+    if (node.childNodes?.length) {
+      for (const child of node.childNodes) walk(child)
+      return
+    }
+    const filename = node.dispositionParameters?.filename || node.parameters?.name || null
+    const isAttachment = node.disposition === "attachment" || Boolean(filename)
+    if (!isAttachment) return
+    parts.push({
+      part: node.part || "1",
+      filename,
+      mime: node.type || null,
+      size: typeof node.size === "number" ? node.size : null
+    })
+  }
+  if (root) walk(root)
+  return parts
+}
+
 /** BODYSTRUCTURE 里挑出可读的正文预览入口。 */
 export interface StructureInfo {
   hasHtml: boolean
@@ -148,6 +181,7 @@ export function toIncoming(msg: FetchMessageObject): IncomingMessage {
 
 export interface ParsedBody {
   text: string
+  html: string | null
   hasHtml: boolean
   attachments: Attachment[]
 }
@@ -166,5 +200,6 @@ export async function parseBody(id: string, source: Buffer): Promise<ParsedBody>
     contentId: item.contentId ?? null,
     localPath: null
   }))
-  return { text: text.slice(0, 512 * 1024), hasHtml: typeof mail.html === "string", attachments }
+  const html = typeof mail.html === "string" && mail.html.trim() ? mail.html.slice(0, 2 * 1024 * 1024) : null
+  return { text: text.slice(0, 512 * 1024), html, hasHtml: html !== null, attachments }
 }

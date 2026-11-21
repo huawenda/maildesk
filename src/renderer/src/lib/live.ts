@@ -146,13 +146,15 @@ export function summaryToMessage(summary: MessageSummary): Message {
     hasAttachments: summary.hasAttachments,
     labels: summary.labels ?? [],
     attachments: [],
-    body: []
+    body: [],
+    bodyHtml: null
   }
 }
 
 export function detailToMessage(detail: MessageDetail): Message {
   const base = summaryToMessage(detail)
   const attachments: Attachment[] = detail.attachments.map((item) => ({
+    id: item.id,
     name: item.filename ?? "未命名附件",
     size: item.size ?? 0,
     type: attachmentKind(item.filename, item.mime)
@@ -161,6 +163,7 @@ export function detailToMessage(detail: MessageDetail): Message {
     ...base,
     hasAttachments: attachments.length > 0 || base.hasAttachments,
     attachments,
-    body: toParagraphs(detail.bodyText)
+    body: toParagraphs(detail.bodyText),
+    bodyHtml: detail.bodyHtml
   }
 }

@@ -5,8 +5,10 @@ export const DEFAULT_SETTINGS: Settings = {
   density: "standard",
   sidebarCollapsed: false,
   theme: "dark",
-  pageSize: 50,
-  remoteImages: false
+  fontSize: 14,
+  pageSize: 200,
+  historyPolicy: "all",
+  remoteImages: true
 }
 
 export function getSettings(): Settings {

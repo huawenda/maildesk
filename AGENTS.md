@@ -12,7 +12,8 @@ Windows 单平台的桌面邮件客户端，只收信（IMAP + SMTP 仅用于登
 
 Electron 45 · electron-vite 6 · Vite 8 · React 19 · TypeScript 5.9 · Tailwind v4（`@tailwindcss/vite`，无 postcss 配置）· shadcn/ui（new-york，`rsc: false`）· lucide-react · Radix。
 数据层已落地（M2）：`node:sqlite`（Electron 内置 Node 24，FTS5 可用，**不要引 better-sqlite3**）· zod（IPC 入参校验）· safeStorage（凭据加密，async API）。
-同步层已落地（M3）：`imapflow`（IDLE + 增量 + UIDVALIDITY）、`mailparser` + `iconv-lite`（正文与编码兜底）；`src/main/net/probe.ts` 的「测试连接」= verifyOnly 真实登录，不拉信。`electron-log` 尚未接入，排 M4。设置存 SQLite `setting` 表，**不要引 electron-store**。
+同步层已落地（M3）：`imapflow`（IDLE + 增量 + UIDVALIDITY）、`mailparser` + `iconv-lite`（正文与编码兜底）；`src/main/net/probe.ts` 的「测试连接」= verifyOnly 真实登录，不拉信。设置存 SQLite `setting` 表，**不要引 electron-store**。
+M4 已落地：`dompurify`（正文清洗）、`electron-log`（`src/main/log.ts`，`initLogging()` 必须在 `app.whenReady` 里、`openDb` 之前后都行但只能调一次）、托盘与 Toast（`src/main/tray.ts`，图标走 `resources/`，打包由 `extraResources` 拷贝）。
 
 不要引入 Next.js 生态（`next/*`、`next-themes`、`next/font`、`next/image`），本项目是纯 Vite + file:// 加载，路由用 `HashRouter`（如需要），构建 `base: './'`。
 
@@ -31,7 +32,9 @@ npm run package    # Windows NSIS 安装包到 release/
 ## 目录
 
 ```
-src/main/            主进程：窗口、IPC 注册（ipc/）、数据层（db/）、同步引擎（sync/）、探测（net/）、凭据（security/）
+src/main/            主进程：窗口、IPC 注册（ipc/）、数据层（db/）、同步引擎（sync/）、探测（net/）、凭据（security/）、托盘（tray.ts）、日志（log.ts）
+resources/           运行时资源（托盘图标），打包走 electron-builder 的 extraResources，不进 asar
+build/               打包图标（icon.ico / icon.png），electron-builder 的 buildResources
 src/preload/         contextBridge，唯一对外出口 window.mail
 src/renderer/src/     React UI（唯一的重构区域）
   components/        业务组件（TitleBar/Sidebar/MessageList/Reader）
@@ -77,7 +80,9 @@ docs/                PRD、UI 参考、截图
 - **Vite 在 Windows 上会吞掉同一秒内的 mtime 事件**：磁盘已是新代码、dev server 也能 `curl http://localhost:5173/src/components/X.tsx` 看到新内容，但窗口不刷新。判断方法就是 curl 一次；确认是新代码后重启 dev（`job_kill` 旧 job 再 `npm run dev`），不要靠反复改文件赌 HMR。
 - 主进程有单实例锁，第二个实例会直接退出——所以「dev 在跑」时截图会静默失败（`cap.log` 无 `captured`）。
 - 主题持久化 key 是 `localStorage["maildesk.theme"]`（`dark`/`light`/`system`），截图前必须显式设置，否则会沿用上次的。
-- 需要看「选中邮件」的阅读器状态时，加 `MAILDESK_CAPTURE_SELECT=1`，截图前会自动点第一行；列表密度与侧栏折叠的持久化 key 是 `localStorage["maildesk.density"]`（`compact`/`standard`/`comfortable`）与 `localStorage["maildesk.sidebarCollapsed"]`。
+- 需要看「选中邮件」的阅读器状态时，加 `MAILDESK_CAPTURE_SELECT=1`，截图前会自动点第一行；`MAILDESK_CAPTURE_ROW=n` 点第 n 行、`MAILDESK_CAPTURE_ACCOUNT=<邮箱片段>` 先切账户、`MAILDESK_CAPTURE_SCROLL=<px|1>` 滚动阅读器（1 表示滚到底）。列表密度与侧栏折叠的持久化 key 是 `localStorage["maildesk.density"]`（`compact`/`standard`/`comfortable`）与 `localStorage["maildesk.sidebarCollapsed"]`。
+- Radix 的触发器只认真实指针事件：截图脚本里 `.click()` 打不开下拉菜单，必须依次 dispatch `pointerdown/mousedown/pointerup/mouseup/click`。
+- **HTML 正文不要反色、不要抹平浅色底板**：邮件按浅色印刷品设计，抹掉 `bgcolor` 后深色字落在深色卡片上完全不可读（招商银行账单那次翻车）。现在的做法是整块白纸卡片 + `color-scheme: light`，保留 `bgcolor`/`background`/`<style>`。另外别给 `td/th` 加 padding、别加全局 `* { max-width: 100% !important }`，会把定宽单元格压窄导致数字折行。
 - 在 MSYS bash 里跑 `npx shadcn add` 会把别名 `@/` 当成路径：文件被写进字面量目录 `./@/components/ui/`，且 `import { cn } from "cn"` 是坏的。跑完检查一次路径与 import，必要时手动搬到 `src/renderer/src/components/ui/` 并把 import 改成 `@/lib/utils`。
 - 后台 job 里直接启动 GUI 版 electron（`electron.exe .`）会在 2.5s 内以 `exit code: 2147483651`（STATUS_BREAKPOINT）退出且日志为空；前台 `timeout 6 electron.exe .` 正常。验数据层用 `MAILDESK_SELFTEST=1 MAILDESK_DATA_DIR=<tmp> electron.exe .`，它跑完自行退出并打印 `SELFTEST {...}`。
 - `safeStorage` 的同步 API 在 Electron 45 已废弃，用 `isAsyncEncryptionAvailable` / `encryptStringAsync` / `decryptStringAsync`（后者返回 `{ result, shouldReEncrypt }`，需要时重新加密落库）。
@@ -85,7 +90,22 @@ docs/                PRD、UI 参考、截图
 - `MAILDESK_SELFTEST` 跑的是 `out/main`，不是 TS 源码：**先 `npm run build` 再跑自检/同步**，否则改了主进程代码却测的是旧包（会误判成“修复没生效”）。
 - selftest 会往库里写测试账户与 `density=compact / sidebarCollapsed=true` 设置，跑完记得清理，否则 UI 打开就是折叠态。
 - `mailparser`/自建解码只管正文；列表 snippet 必须在首屏同步时按 `Content-Transfer-Encoding`（base64 / quoted-printable）还原再按 charset 解码，否则中文摘要全是乱码。
+- 附件二进制**不进 SQLite**：`attachment` 表只存元数据，且只有在解析正文时才会写入（`setMessageBody`）；下载走 `engine.downloadAttachment` —— 先 `fetchOne(uid, { bodyStructure: true })` 找出 part，再 `client.download(uid, part, { uid: true })` 取那一段。图片预览复用同一条下载链路，转成 data URL（上限 8MB）。
+- `fetchOne` 返回 `FetchMessageObject | false`，写成 `if (!found?.bodyStructure)` 不会窄化类型（报 TS2339），必须 `if (!found || !found.bodyStructure)`。
+- 截图时想看图片附件预览：`MAILDESK_CAPTURE_SELECT=1 MAILDESK_CAPTURE_ATT=0`（点第 0 个附件 chip，图片会打开预览层）。
+- 截图时想拍设置面板：`MAILDESK_CAPTURE_SETTINGS=1`（点标题栏齿轮，等 600ms）。
+- 设置项全部存 SQLite `setting` 表（`density`/`sidebarCollapsed`/`fontSize` 额外冗余到 localStorage 防首帧闪）；新加的默认值只改 `src/main/db/settings.ts` 的 `DEFAULT_SETTINGS`，但**旧库里已存在的行不会自动更新**，改默认值时要顺手删掉对应 key。
+- `pageSize` 默认 200，只是**首屏窗口**（不再暴露成设置项），用户可见的是 `historyPolicy`（`all`/`recent`/`off`，默认 `all`）。首屏之外的历史由 `engine.ts` 的 `backfillLoop` 后台分批补齐。
+- 历史回溯的游标必须持久化在 `folder.backfill_uid`：服务端 UID 有空洞（删过邮件），用 `MIN(uid) - 1` 当上界会拿到空批次，`MIN` 不动 → 同一段 UID 无限重试。每批结束无条件写 `backfill_uid = from - 1`，`< 1` 视为翻到底，`null` 视为没开始；`UIDVALIDITY` 变化清空文件夹时要一并 `resetBackfillUid`。
+- 判断「这箱拉完了没」不能看 `folder.total_count`：`updateFolderCounts` 写的是**本地行数**，永远等于本地。要在取到 mailbox 锁后用 `mailbox.exists`（服务端真实封数）比较。
+- 单实例锁：跑隔离同步测试或截图前必须先停 dev，否则新实例静默退出；`MAILDESK_DATA_DIR` 指向测试库即可不影响真实库。
+- 托盘/Toast 在 `src/main/tray.ts`：`app.setAppUserModelId("com.maildesk.app")` 缺失会导致 Windows Toast 静默不显示；窗口聚焦时不弹通知，`MAILDESK_TEST_NOTIFY=1` 可在启动 4s 后触发一条测试通知。
+- 日志：`src/main/log.ts` 的 electron-log，落 `%APPDATA%/maildesk/logs/main.log`（5MB 轮转）。打包命令见 README，需带 `ELECTRON_MIRROR` 与 `ELECTRON_BUILDER_BINARIES_MIRROR`。
 - imapflow 的 `mailbox.uidValidity` / `uidNext` 是 **bigint**，直接绑定 `node:sqlite` 会报 `Provided value cannot be bound to SQLite parameter`，先 `Number()`。
+- 托盘图标要在打包后还能读到：`resources/` 由 `electron-builder.yml` 的 `extraResources` 拷到 `process.resourcesPath/resources`，代码里用 `app.isPackaged` 分支（见 `src/main/tray.ts` 的 `resourcePath()`）。只放 asar 里会读不到。
+- Windows Toast 必须 `app.setAppUserModelId("com.maildesk.app")`，且只在窗口不在前台时弹（`notifyNewMail` 里有 `force` 参数给调试用）。
+- `MAILDESK_TEST_NOTIFY=1` 启动后 4s 会强制弹一条通知，用来验证 Toast 通路（日志里出现 `[tray] notify`）。
+- 打包验证：`npm run package` 会重新 typecheck + build 再出包；产物在 `release/`（安装包约 120MB，`win-unpacked/` 可单独跑）。国内构建加 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/`。
 
 ## 非目标
 

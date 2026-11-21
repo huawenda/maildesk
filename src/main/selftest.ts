@@ -6,6 +6,8 @@ import { getSettings, setSettings } from "./db/settings"
 import { openPassword } from "./security/credentials"
 import { get } from "./db"
 import { probeImap } from "./net/probe"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 
 /**
  * 开发期自检：`MAILDESK_SELFTEST=1` 时在主进程跑一遍数据层，打印 JSON 后退出。
@@ -111,6 +113,33 @@ export async function runSelfTest(): Promise<void> {
             report.bodyPreview = detail.bodyText ? detail.bodyText.slice(0, 160) : null
             report.attachments = detail.attachments.length
           }
+        }
+      }
+    }
+    // 可选：验证附件按需下载——挑最新一封带附件的信，拉正文（解析出附件行），再逐个下载
+    if (process.env.MAILDESK_TEST_ATTACHMENT) {
+      const manager = await import("./sync/manager")
+      const target = get<{ id: string; subject: string | null }>(
+        "SELECT id, subject FROM message WHERE has_attachments = 1 ORDER BY sent_at DESC LIMIT 1"
+      )
+      if (!target) {
+        report.attachmentTest = { ok: false, error: "库里没有带附件的邮件" }
+      } else {
+        await manager.loadMessageBody(target.id)
+        const detail = getMessage(target.id)
+        const dir = join(app.getAppPath(), ".capture", "dl")
+        mkdirSync(dir, { recursive: true })
+        const saved: Array<{ filename: string | null; bytes: number }> = []
+        for (const item of detail.attachments) {
+          const file = await manager.downloadAttachment(target.id, item.id)
+          if (!file) continue
+          writeFileSync(join(dir, String(item.filename ?? item.id)), file.buffer)
+          saved.push({ filename: item.filename, bytes: file.buffer.length })
+        }
+        report.attachmentTest = {
+          subject: target.subject,
+          declared: detail.attachments.map((item) => ({ filename: item.filename, size: item.size, mime: item.mime })),
+          saved
         }
       }
     }

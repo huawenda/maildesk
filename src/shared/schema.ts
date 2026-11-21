@@ -25,7 +25,9 @@ export const settingsSchema = z.object({
   density: densitySchema,
   sidebarCollapsed: z.boolean(),
   theme: themeModeSchema,
-  pageSize: z.number().int().min(20).max(500),
+  fontSize: z.number().int().min(12).max(18),
+  pageSize: z.number().int().min(20).max(5000),
+  historyPolicy: z.enum(["all", "recent", "off"]),
   remoteImages: z.boolean()
 })
 
@@ -49,3 +51,8 @@ export const searchQuerySchema = z.object({
 })
 
 export const idsSchema = z.array(idSchema).min(1).max(500)
+
+export const attachmentRefSchema = z.object({
+  messageId: idSchema,
+  attachmentId: idSchema
+})

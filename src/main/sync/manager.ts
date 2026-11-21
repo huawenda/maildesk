@@ -8,8 +8,24 @@ import { SyncEngine } from "./engine"
 
 const engines = new Map<string, SyncEngine>()
 
+type SyncListener = (event: SyncEvent) => void
+const listeners = new Set<SyncListener>()
+
+/** 主进程内部订阅（托盘、通知）：与渲染层共用同一批事件，避免各写一套轮询。 */
+export function onSyncEvent(listener: SyncListener): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
 /** 所有同步事件统一从这里广播，渲染层只订阅一个 channel。 */
 export function emitSync(event: SyncEvent): void {
+  for (const listener of listeners) {
+    try {
+      listener(event)
+    } catch (error) {
+      console.error("[sync] listener failed", String(error))
+    }
+  }
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send(CH.syncEvent, event)
   }
@@ -54,6 +70,19 @@ export async function syncNow(accountId?: string): Promise<void> {
     if (engine.status().state === "disconnected") await engine.start()
     else await engine.syncNow()
   }
+}
+
+/** 附件下载按邮件所属账户路由到对应引擎（多账户时不能下错账号）。 */
+export async function downloadAttachment(
+  messageId: string,
+  attachmentId: string
+): Promise<{ filename: string; mime: string | null; buffer: Buffer } | null> {
+  const locator = getMessageLocator(messageId)
+  const folder = getFolder(locator.folderId)
+  if (!folder) return null
+  const engine = engineFor(folder.accountId)
+  if (!engine) return null
+  return engine.downloadAttachment(messageId, attachmentId)
 }
 
 const PRECEDENCE: SyncState[] = ["error", "fetching", "selecting", "connecting", "idling", "disconnected"]

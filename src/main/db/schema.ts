@@ -101,5 +101,14 @@ export const MIGRATIONS: string[] = [
   );
 
   CREATE INDEX idx_folder_account ON folder(account_id, sort_order);
+  `,
+  // v2：正文 HTML 单独一列，纯文本继续留在 body_text 供搜索与降级显示
+  `
+  ALTER TABLE message ADD COLUMN body_html TEXT;
+  `,
+  // v3：历史回溯游标。不能靠 MIN(uid) 推——服务端 UID 有空洞（删信后残留），
+  // 空批次会让 MIN 原地不动，循环卡死。
+  `
+  ALTER TABLE folder ADD COLUMN backfill_uid INTEGER;
   `
 ]

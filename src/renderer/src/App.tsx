@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { Account, Folder, SyncState } from "@shared/types"
+import type { Account, Folder, HistoryPolicy, SyncState } from "@shared/types"
 import { AccountCapsule } from "@/components/AccountCapsule"
 import { AccountDialog } from "@/components/AccountDialog"
 import { CommandPalette } from "@/components/CommandPalette"
 import { MessageList, type ListFilter } from "@/components/MessageList"
 import { Reader } from "@/components/Reader"
+import { SettingsDialog } from "@/components/SettingsDialog"
 import { Sidebar } from "@/components/Sidebar"
 import { TitleBar } from "@/components/TitleBar"
 import { useHotkeys } from "@/lib/hotkeys"
@@ -68,11 +69,18 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [density, setDensity] = useState<Density>(() => readStored("maildesk.density", "standard"))
   const [collapsed, setCollapsed] = useState<boolean>(() => readStored("maildesk.sidebarCollapsed", false))
+  const [fontSize, setFontSize] = useState<number>(() => readStored("maildesk.fontSize", 14))
+  const [historyPolicy, setHistoryPolicy] = useState<HistoryPolicy>("all")
+  const [backfill, setBackfill] = useState<{ done: number; total: number } | null>(null)
+  const [remoteImages, setRemoteImages] = useState<boolean>(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
   const [syncState, setSyncState] = useState<SyncState>("disconnected")
   const [syncError, setSyncError] = useState<string | undefined>()
   const [lastSyncAt, setLastSyncAt] = useState<number | undefined>()
+  // 只为了让「已同步 · N 分钟前」随时间自己走，不参与业务逻辑
+  const [clock, setClock] = useState(0)
 
   const live = accounts.length > 0
 
@@ -87,6 +95,9 @@ export default function App() {
         if (cancelled) return
         setDensity(settings.density)
         setCollapsed(settings.sidebarCollapsed)
+        setFontSize(settings.fontSize)
+        setHistoryPolicy(settings.historyPolicy)
+        setRemoteImages(settings.remoteImages)
       })
       .catch(() => undefined)
       .finally(() => {
@@ -106,6 +117,21 @@ export default function App() {
     store("maildesk.sidebarCollapsed", collapsed)
     if (settingsReady.current) void mail.settings.set({ sidebarCollapsed: collapsed }).catch(() => undefined)
   }, [collapsed])
+
+  useEffect(() => {
+    store("maildesk.fontSize", fontSize)
+    if (settingsReady.current) void mail.settings.set({ fontSize }).catch(() => undefined)
+  }, [fontSize])
+
+  useEffect(() => {
+    if (!settingsReady.current) return
+    void mail.settings.set({ historyPolicy }).catch(() => undefined)
+  }, [historyPolicy])
+
+  useEffect(() => {
+    if (!settingsReady.current) return
+    void mail.settings.set({ remoteImages }).catch(() => undefined)
+  }, [remoteImages])
 
   useEffect(() => {
     let cancelled = false
@@ -187,6 +213,8 @@ export default function App() {
       } else if (event.type === "messages") {
         setFolderTick((tick) => tick + 1)
         setRefreshTick((tick) => tick + 1)
+      } else if (event.type === "backfill") {
+        setBackfill(event.finished ? null : { done: event.done, total: event.total })
       }
     })
     mail.sync
@@ -199,6 +227,11 @@ export default function App() {
       .catch(() => undefined)
     return off
   }, [live])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock((value) => value + 1), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   // 选中邮件后才拉正文（PRD 7.6 懒加载）
   useEffect(() => {
@@ -244,12 +277,24 @@ export default function App() {
     const base = items.find((message) => message.id === selectedId)
     if (!base) return null
     if (detail && detail.id === base.id) {
-      return { ...base, attachments: detail.attachments, body: detail.body, hasAttachments: detail.hasAttachments }
+      return {
+        ...base,
+        attachments: detail.attachments,
+        body: detail.body,
+        bodyHtml: detail.bodyHtml,
+        hasAttachments: detail.hasAttachments
+      }
     }
     return base
   }, [items, selectedId, detail])
 
-  const activeAccount = accounts.find((account) => account.id === activeAccountId) ?? accounts[0] ?? null
+  // 切换账户：文件夹/列表由 activeAccountId 依赖自动重取，这里只清掉跨账户的选中态
+  const switchAccount = useCallback((id: string) => {
+    setActiveAccountId(id)
+    setActiveLabel(null)
+    setSelectedId(null)
+    setDetail(null)
+  }, [])
   const listTitle = activeLabel
     ? `「${activeLabel}」`
     : (navList.find((folder) => folder.id === folderId)?.label ?? "收件箱")
@@ -343,7 +388,11 @@ export default function App() {
       "/": () => setPaletteOpen(true),
       "ctrl+k": () => setPaletteOpen(true),
       "ctrl+r": () => runSync(),
-      escape: () => setPaletteOpen(false)
+      "ctrl+,": () => setSettingsOpen(true),
+      escape: () => {
+        setPaletteOpen(false)
+        setSettingsOpen(false)
+      }
     },
     !paletteOpen
   )
@@ -353,10 +402,14 @@ export default function App() {
     return result.map(summaryToMessage)
   }, [])
 
+  // clock 每 30s 自增一次，触发重渲染让相对时间跟着走
+  void clock
   const syncing = syncState === "connecting" || syncState === "selecting" || syncState === "fetching"
   const syncLabel = syncing
     ? "正在同步…"
-    : syncState === "error"
+    : backfill
+      ? `补全历史 ${backfill.done} / ${backfill.total}`
+      : syncState === "error"
       ? (syncError ?? "同步出错")
       : lastSyncAt
         ? `已同步 · ${timeAgo(lastSyncAt)}`
@@ -369,10 +422,19 @@ export default function App() {
       <TitleBar
         sidebarWidth={collapsed ? 64 : 240}
         listWidth={380}
-        left={<AccountCapsule account={activeAccount} collapsed={collapsed} onClick={() => setAccountsOpen(true)} />}
+        left={
+          <AccountCapsule
+            accounts={accounts}
+            activeAccountId={activeAccountId}
+            collapsed={collapsed}
+            onSelect={switchAccount}
+            onManage={() => setAccountsOpen(true)}
+          />
+        }
         title={listTitle}
         unread={unreadInFolder}
         onOpenSearch={() => setPaletteOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
         density={density}
         onDensityChange={setDensity}
       />
@@ -415,6 +477,8 @@ export default function App() {
         />
         <Reader
           message={selected}
+          fontSize={fontSize}
+          remoteImages={remoteImages}
           onToggleStar={() => selectedId && toggleStar(selectedId)}
           onToggleUnread={() => selectedId && markRead(selectedId, false)}
         />
@@ -430,6 +494,27 @@ export default function App() {
           setActiveLabel(null)
           setSelectedId(message.id)
           markRead(message.id)
+        }}
+      />
+
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        theme={mode}
+        onThemeChange={setMode}
+        density={density}
+        onDensityChange={setDensity}
+        fontSize={fontSize}
+        onFontSizeChange={setFontSize}
+        historyPolicy={historyPolicy}
+        onHistoryPolicyChange={setHistoryPolicy}
+        remoteImages={remoteImages}
+        onRemoteImagesChange={setRemoteImages}
+        accounts={accounts}
+        version={version}
+        onManageAccounts={() => {
+          setSettingsOpen(false)
+          setAccountsOpen(true)
         }}
       />
 

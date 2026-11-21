@@ -38,6 +38,7 @@ interface MessageRow {
   has_attachments: number
   snippet: string | null
   body_text: string | null
+  body_html: string | null
 }
 
 interface AttachmentRow {
@@ -120,7 +121,18 @@ export function getMessage(id: string): MessageDetail {
     "SELECT * FROM attachment WHERE message_id = ? ORDER BY filename ASC",
     id
   ).map(toAttachment)
-  return { ...toSummary(row), bodyText: row.body_text, attachments }
+  return { ...toSummary(row), bodyText: row.body_text, bodyHtml: row.body_html, attachments }
+}
+
+/** 下载附件时需要文件名与 mime，单独取一条，避免整封信的 detail 往返。 */
+export function getAttachment(id: string): Attachment | null {
+  const row = get<AttachmentRow>("SELECT * FROM attachment WHERE id = ?", id)
+  return row ? toAttachment(row) : null
+}
+
+/** 记下已保存到本地磁盘的副本（PRD FR-04.5：不把附件二进制塞进库）。 */
+export function setAttachmentPath(id: string, localPath: string): void {
+  run("UPDATE attachment SET local_path = ? WHERE id = ?", localPath, id)
 }
 
 const boolean = (value: boolean) => (value ? 1 : 0)
@@ -194,6 +206,24 @@ export function clearFolderMessages(folderId: string): void {
 }
 
 /** 目录计数以本地库为准，避免服务器 STATUS 与本地差集打架。 */
+/** 托盘角标用：全库未读总数（所有账户所有文件夹）。 */
+export function countUnread(): number {
+  const row = get<{ c: number }>("SELECT COUNT(*) AS c FROM message WHERE is_read = 0")
+  return row ? Number(row.c) : 0
+}
+
+/** 通知气泡用：某文件夹里最新的一封（按 sent_at，缺时间用 rowid）。 */
+export function latestInFolder(
+  folderId: string
+): { subject: string | null; fromName: string | null; fromAddr: string | null; snippet: string | null } | null {
+  return (
+    get<{ subject: string | null; fromName: string | null; fromAddr: string | null; snippet: string | null }>(
+      "SELECT subject, from_name AS fromName, from_addr AS fromAddr, snippet FROM message WHERE folder_id = ? ORDER BY COALESCE(sent_at, 0) DESC, rowid DESC LIMIT 1",
+      folderId
+    ) ?? null
+  )
+}
+
 export function countFolder(folderId: string): { total: number; unread: number } {
   const row = get<{ total: number; unread: number }>(
     "SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0) AS unread FROM message WHERE folder_id = ?",
@@ -202,19 +232,38 @@ export function countFolder(folderId: string): { total: number; unread: number }
   return { total: row?.total ?? 0, unread: row?.unread ?? 0 }
 }
 
+/** 该文件夹已落库的最小 UID，历史回溯从这里往前翻；空文件夹返回 null。 */
+export function oldestUid(folderId: string): number | null {
+  const row = get<{ uid: number | null }>("SELECT MIN(uid) AS uid FROM message WHERE folder_id = ?", folderId)
+  return row?.uid ?? null
+}
+
 /** 正文懒加载需要知道这条邮件在哪个文件夹、UID 多少。 */
 export function getMessageLocator(id: string): { folderId: string; uid: number; hasBody: boolean } {
-  const row = get<{ folder_id: string; uid: number; body_text: string | null }>(
-    "SELECT folder_id, uid, body_text FROM message WHERE id = ?",
+  const row = get<{ folder_id: string; uid: number; body_text: string | null; body_html: string | null; has_html: number }>(
+    "SELECT folder_id, uid, body_text, body_html, has_html FROM message WHERE id = ?",
     id
   )
   if (!row) throw new Error("not-found: message")
-  return { folderId: row.folder_id, uid: row.uid, hasBody: row.body_text !== null }
+  // 声明为 HTML 却只有纯文本，说明是加 body_html 列之前缓存的老邮件，再取一次
+  const missingHtml = row.has_html === 1 && row.body_html === null
+  return { folderId: row.folder_id, uid: row.uid, hasBody: row.body_text !== null && !missingHtml }
+}
+
+/** 库里的正文是否完整：缺纯文本，或缺 HTML 正文（老数据只缓存了纯文本）都算缺。 */
+export function needsBody(id: string): boolean {
+  return !getMessageLocator(id).hasBody
 }
 
 /** 懒加载回来的正文与附件。 */
-export function setMessageBody(id: string, bodyText: string, hasHtml: boolean, attachments: Attachment[] = []): void {
-  run("UPDATE message SET body_text = ?, has_html = ? WHERE id = ?", bodyText, boolean(hasHtml), id)
+export function setMessageBody(
+  id: string,
+  bodyText: string,
+  bodyHtml: string | null,
+  hasHtml: boolean,
+  attachments: Attachment[] = []
+): void {
+  run("UPDATE message SET body_text = ?, body_html = ?, has_html = ? WHERE id = ?", bodyText, bodyHtml, boolean(hasHtml), id)
   if (attachments.length === 0) return
   run("DELETE FROM attachment WHERE message_id = ?", id)
   for (const item of attachments) {

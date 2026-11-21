@@ -57,6 +57,8 @@ export interface Folder {
   totalCount: number
   unreadCount: number
   sortOrder: number
+  /** 历史回溯游标：下一批从哪里往前翻，null 表示还没开始过；< 1 表示已经翻到最底。 */
+  backfillUid: number | null
 }
 
 export interface Address {
@@ -96,8 +98,18 @@ export interface MessageSummary {
 
 export interface MessageDetail extends MessageSummary {
   bodyText: string | null
+  /** 原始 HTML（未净化）；渲染前一律过 DOMPurify 并按设置拦截远程资源 */
+  bodyHtml: string | null
   attachments: Attachment[]
 }
+
+/** 附件保存结果：用户取消时 saved=false 且没有 error。 */
+export type AttachmentSaveResult = { saved: boolean; path?: string; error?: string }
+
+/** 图片附件内联预览：失败时 error 用 ErrCode 前缀，超大图返回 too-large。 */
+export type AttachmentPreviewResult =
+  | { ok: true; dataUrl: string; mime: string; name: string }
+  | { ok: false; error: string }
 
 export interface MessagePage {
   items: MessageSummary[]
@@ -111,11 +123,20 @@ export interface SearchOptions {
   limit?: number
 }
 
+/** 历史邮件同步策略：全部 / 仅最近 5000 封 / 不自动。 */
+export type HistoryPolicy = "all" | "recent" | "off"
+
 export interface Settings {
   density: Density
   sidebarCollapsed: boolean
   theme: ThemeMode
+  /** 正文字号（px），13–16 */
+  fontSize: number
+  /** 首次同步每个文件夹拉取的封数（首屏窗口，不对外暴露） */
   pageSize: number
+  /** 是否在后台把历史邮件补齐 */
+  historyPolicy: HistoryPolicy
+  /** 是否默认放行邮件里的远程图片 */
   remoteImages: boolean
 }
 
@@ -142,6 +163,16 @@ export interface SyncStatus {
 export type SyncEvent =
   | { type: "state"; status: SyncStatus }
   | { type: "progress"; accountId?: string; folder: string; fetched: number }
+  | {
+      type: "backfill"
+      accountId?: string
+      folderId: string
+      folder: string
+      done: number
+      total: number
+      /** 该文件夹的历史已经补完（或没得补） */
+      finished?: boolean
+    }
   | { type: "messages"; folderId: string; added: number }
 
 export interface MailApi {
@@ -160,6 +191,14 @@ export interface MailApi {
     get(id: string): Promise<MessageDetail>
     setRead(ids: string[], read: boolean): Promise<void>
     setFlagged(ids: string[], flagged: boolean): Promise<void>
+  }
+  attachments: {
+    /** 弹保存对话框，把远程附件取下来写到用户选的路径。 */
+    save(messageId: string, attachmentId: string): Promise<AttachmentSaveResult>
+    /** 一次选目录，把这封邮件的所有附件落盘。 */
+    saveAll(messageId: string): Promise<{ saved: number; dir?: string; error?: string }>
+    /** 图片附件的 data URL，只用于内联预览（上限 8MB）。 */
+    preview(messageId: string, attachmentId: string): Promise<AttachmentPreviewResult>
   }
   search: {
     query(q: string, opts?: SearchOptions): Promise<MessageSummary[]>

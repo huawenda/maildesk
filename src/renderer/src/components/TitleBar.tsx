@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { Rows3, Search } from "lucide-react"
+import { Rows3, Search, Settings2 } from "lucide-react"
 import type { Density } from "@/App"
 import {
   DropdownMenu,
@@ -70,6 +70,7 @@ interface TitleBarProps {
   title: string
   unread: number
   onOpenSearch: () => void
+  onOpenSettings: () => void
   density: Density
   onDensityChange: (density: Density) => void
 }
@@ -81,6 +82,7 @@ export function TitleBar({
   title,
   unread,
   onOpenSearch,
+  onOpenSettings,
   density,
   onDensityChange
 }: TitleBarProps) {
@@ -108,6 +110,10 @@ export function TitleBar({
 
         <button type="button" onClick={onOpenSearch} title="搜索 (Ctrl K)" className={ICON_BUTTON}>
           <Search className="size-4" />
+        </button>
+
+        <button type="button" onClick={onOpenSettings} title="设置 (Ctrl ,)" className={ICON_BUTTON}>
+          <Settings2 className="size-4" />
         </button>
 
         <DropdownMenu>

@@ -3,6 +3,8 @@ import raw from "@fixtures/messages.json"
 export type AttachmentKind = "image" | "pdf" | "doc" | "sheet" | "zip" | "other"
 
 export interface Attachment {
+  /** 真实库里的附件 UUID；演示数据没有 id，因此无法保存 */
+  id?: string
   name: string
   /** bytes */
   size: number
@@ -27,6 +29,8 @@ export interface Message {
   hasAttachments: boolean
   attachments: Attachment[]
   body: string[]
+  /** 原始 HTML 正文；演示数据没有，真实邮件才有 */
+  bodyHtml: string | null
 }
 
 export type FolderId = "inbox" | "archive" | "junk" | "trash"
@@ -56,7 +60,7 @@ export const labels: Label[] = [
   { name: "订阅", color: "#34D399" }
 ]
 
-interface FixtureMessage extends Omit<Message, "date" | "attachments" | "hasAttachments"> {
+interface FixtureMessage extends Omit<Message, "date" | "attachments" | "hasAttachments" | "bodyHtml"> {
   receivedAgoMinutes: number
   attachments: Attachment[]
 }
@@ -66,6 +70,7 @@ const byDateDesc = (a: Message, b: Message) => (a.date < b.date ? 1 : a.date > b
 function hydrate(fixtures: FixtureMessage[], now: number): Message[] {
   return fixtures.map(({ receivedAgoMinutes, ...rest }) => ({
     ...rest,
+    bodyHtml: null,
     hasAttachments: rest.attachments.length > 0,
     date: new Date(now - receivedAgoMinutes * 60_000).toISOString()
   }))

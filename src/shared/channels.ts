@@ -23,6 +23,10 @@ export const CH = {
   messagesSetRead: "messages:set-read",
   messagesSetFlagged: "messages:set-flagged",
 
+  attachmentsSave: "attachments:save",
+  attachmentsSaveAll: "attachments:save-all",
+  attachmentsPreview: "attachments:preview",
+
   searchQuery: "search:query",
 
   syncNow: "sync:now",

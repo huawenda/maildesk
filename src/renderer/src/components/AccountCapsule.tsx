@@ -59,6 +59,7 @@ export function AccountCapsule({ accounts, activeAccountId, collapsed, onSelect,
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-[236px]">
         <DropdownMenuLabel className="text-[11px] text-muted-foreground">账户</DropdownMenuLabel>
+        <DropdownMenuSeparator />
         {accounts.length === 0 ? (
           <DropdownMenuItem onSelect={onManage}>添加账户…</DropdownMenuItem>
         ) : (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   ChevronDown,
   Download,
@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { HtmlBody } from "@/components/HtmlBody"
+import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { ipcErrorMessage, mail } from "@/lib/ipc"
 import { avatarColor, formatFullTime, formatSize, initials } from "@/lib/format"
 import type { Attachment, Message } from "@/lib/mock"
@@ -36,6 +37,16 @@ const attachmentIcons = {
 } as const
 
 const MAX_VISIBLE_ATTACHMENTS = 3
+
+const PREVIEWABLE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"])
+
+/** 能内联预览的判断只看 MIME / 扩展名：不能拿列表图标类型（type）当准绳，
+ * 否则 application/octet-stream 的压缩包会走到预览接口被服务器拒绝。 */
+function isPreviewable(attachment: Attachment): boolean {
+  if (attachment.mime?.startsWith("image/")) return true
+  const ext = attachment.name.split(".").pop()?.toLowerCase() ?? ""
+  return PREVIEWABLE_EXT.has(ext)
+}
 
 interface ReaderProps {
   message: Message | null
@@ -66,6 +77,7 @@ export function Reader({
   onDelete,
   permanentDelete
 }: ReaderProps) {
+  const bodyRef = useRef<HTMLDivElement>(null)
   const [showAllAttachments, setShowAllAttachments] = useState(false)
   // 附件不落库，按附件 id 记录本次会话内的保存状态（已保存的会显示对勾）
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({})
@@ -75,14 +87,23 @@ export function Reader({
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
 
+  // 浮层只要处于「加载中 / 出错 / 已加载」任一状态就得能关掉：
+  // 预览失败时 preview 是 null，只清 preview 会把错误提示永久钉在屏幕上（用户实测卡死）。
+  const previewOpen = Boolean(preview || previewBusy || previewError)
+  const closePreview = () => {
+    setPreview(null)
+    setPreviewError(null)
+    setPreviewBusy(false)
+  }
+
   useEffect(() => {
-    if (!preview) return
+    if (!previewOpen) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPreview(null)
+      if (event.key === "Escape") closePreview()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [preview])
+  }, [previewOpen])
 
   function patchSaveState(id: string, state: SaveState | null) {
     setSaveStates((prev) => {
@@ -230,7 +251,7 @@ export function Reader({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto">
         <article className="w-full px-8 pb-16">
           <h2 className="text-[22px] font-semibold leading-[30px] tracking-[-0.01em]">
             {message.subject || "（无主题）"}
@@ -267,7 +288,7 @@ export function Reader({
                   attachment={attachment}
                   state={attachment.id ? saveStates[attachment.id] : undefined}
                   onSave={() =>
-                    attachment.type === "image" ? void openPreview(attachment) : void saveAttachment(attachment)
+                    isPreviewable(attachment) ? void openPreview(attachment) : void saveAttachment(attachment)
                   }
                 />
               ))}
@@ -298,15 +319,16 @@ export function Reader({
           )}
         </article>
       </div>
+      <OverlayScrollbar target={bodyRef} />
 
-      {preview || previewBusy || previewError ? (
+      {previewOpen ? (
         <div
           role="dialog"
           aria-modal="true"
           aria-label="图片附件预览"
           className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-black/85 p-8 backdrop-blur-sm"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setPreview(null)
+            if (event.target === event.currentTarget) closePreview()
           }}
         >
           <div className="max-w-[70vw] truncate text-[12.5px] text-white/70">{preview?.name ?? "图片预览"}</div>
@@ -329,7 +351,7 @@ export function Reader({
               保存
             </button>
             <button
-              onClick={() => setPreview(null)}
+              onClick={closePreview}
               className="flex h-7 items-center gap-1.5 rounded-md bg-white/10 px-3 text-[12.5px] text-white transition-colors hover:bg-white/20"
             >
               <X className="size-3.5" />

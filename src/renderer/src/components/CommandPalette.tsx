@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Dialog } from "radix-ui"
 import { CornerDownLeft, Search } from "lucide-react"
+import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { formatListTime } from "@/lib/format"
 import type { Message } from "@/lib/mock"
 import { cn } from "@/lib/utils"
@@ -123,7 +124,7 @@ export function CommandPalette({ open, onOpenChange, messages, search, onOpen }:
             <kbd className="rounded border border-border px-1 py-px text-[10.5px] text-muted-foreground">Esc</kbd>
           </div>
 
-          <div ref={listRef} className="max-h-[340px] overflow-y-auto p-1.5">
+          <div ref={listRef} className="scrollbar-overlay max-h-[340px] overflow-y-auto p-1.5">
             {query.trim() === "" ? (
               <div className="px-3 py-6 text-center text-[12.5px] text-muted-foreground">
                 输入关键词搜索全部本地邮件
@@ -156,6 +157,7 @@ export function CommandPalette({ open, onOpenChange, messages, search, onOpen }:
               ))
             )}
           </div>
+          <OverlayScrollbar target={listRef} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

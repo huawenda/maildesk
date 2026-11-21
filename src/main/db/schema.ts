@@ -115,5 +115,11 @@ export const MIGRATIONS: string[] = [
   // 把历史库里已写入的 archive 角色清掉，refresh 时才会按普通目录处理。
   `
   UPDATE folder SET role = NULL WHERE role = 'archive';
+  `,
+  // v5：旧版本解析正文时只下载前 512KB，附件尺寸因此记成残片长度（40MB 的附件显示 369KB）。
+  // 清掉带附件邮件的正文缓存，下次点开按 BODYSTRUCTURE 重新解析，尺寸才会纠正。
+  `
+  DELETE FROM attachment;
+  UPDATE message SET body_text = NULL, body_html = NULL WHERE has_attachments = 1;
   `
 ]

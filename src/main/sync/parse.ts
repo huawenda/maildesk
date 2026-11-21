@@ -16,6 +16,8 @@ export interface AttachmentPart {
   part: string
   filename: string | null
   mime: string | null
+  /** BODYSTRUCTURE 给的传输编码（base64 / quoted-printable / 7bit），size 是编码后的 octets。 */
+  encoding: string | null
   size: number | null
 }
 
@@ -37,6 +39,7 @@ export function collectAttachmentParts(root?: MessageStructureObject): Attachmen
       part: node.part || "1",
       filename,
       mime: node.type || null,
+      encoding: node.encoding ?? null,
       size: typeof node.size === "number" ? node.size : null
     })
   }
@@ -186,8 +189,28 @@ export interface ParsedBody {
   attachments: Attachment[]
 }
 
-/** 点开邮件时解析全文：优先 text，没有就退到 html 去标签。 */
-export async function parseBody(id: string, source: Buffer): Promise<ParsedBody> {
+/**
+ * BODYSTRUCTURE 的 size 是「传输编码后」的 octets，mailparser 的 item.size 是解码后的字节数。
+ * base64 除了 4/3 膨胀，每 76 个字符还跟一个 CRLF（78 字节对应 57 字节原文），
+ * 直接乘 0.75 会偏大约 3%（40MB 的附件会显示成 41.1MB），所以按行折算。
+ */
+const codedToDecoded = (size: number | null, encoding: string | null): number | null => {
+  if (typeof size !== "number") return null
+  if ((encoding ?? "").toLowerCase() !== "base64") return size
+  const lines = Math.ceil(size / 78)
+  return Math.round((Math.max(0, size - lines * 2) * 3) / 4)
+}
+
+/**
+ * 点开邮件时解析全文：优先 text，没有就退到 html 去标签。
+ * parts 来自 BODYSTRUCTURE：正文只取前 MAX_SOURCE 字节，附件内容会被截断，
+ * mailparser 给出的 item.size 只是残片长度（40MB 的附件可能报 369KB），必须用结构里的真实尺寸覆盖。
+ */
+export async function parseBody(
+  id: string,
+  source: Buffer,
+  parts?: AttachmentPart[]
+): Promise<ParsedBody> {
   const mail = await simpleParser(source)
   const rawText = (mail.text || "").trim()
   const text = rawText || (typeof mail.html === "string" ? mail.html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<[^>]+>/g, "").trim() : "")
@@ -200,6 +223,32 @@ export async function parseBody(id: string, source: Buffer): Promise<ParsedBody>
     contentId: item.contentId ?? null,
     localPath: null
   }))
+  if (parts && parts.length > 0) {
+    const pool = [...parts]
+    const take = (filename: string | null): AttachmentPart | null => {
+      const key = (filename ?? "").toLowerCase()
+      let index = key ? pool.findIndex((part) => (part.filename ?? "").toLowerCase() === key) : -1
+      if (index < 0) index = 0
+      return pool.length > 0 ? (pool.splice(index, 1)[0] ?? null) : null
+    }
+    for (const attachment of attachments) {
+      const part = take(attachment.filename)
+      const size = codedToDecoded(part?.size ?? null, part?.encoding ?? null)
+      if (size !== null) attachment.size = size
+    }
+    // 截断位置之后的附件 mailparser 根本没看到，按结构补齐元数据
+    for (const part of pool) {
+      attachments.push({
+        id: "",
+        messageId: id,
+        filename: part.filename,
+        mime: part.mime,
+        size: codedToDecoded(part.size, part.encoding),
+        contentId: null,
+        localPath: null
+      })
+    }
+  }
   const html = typeof mail.html === "string" && mail.html.trim() ? mail.html.slice(0, 2 * 1024 * 1024) : null
   return { text: text.slice(0, 512 * 1024), html, hasHtml: html !== null, attachments }
 }

@@ -27,17 +27,13 @@ export const settingsSchema = z.object({
   theme: themeModeSchema,
   fontSize: z.number().int().min(12).max(18),
   pageSize: z.number().int().min(20).max(5000),
-  historyPolicy: z.enum(["all", "recent", "off"]),
   remoteImages: z.boolean()
 })
 
 export const settingsPatchSchema = settingsSchema.partial()
 
-export const pageQuerySchema = z.object({
-  folderId: idSchema,
-  // 不透明游标：上一页最后一条的 `sentAt:rowid`（同一秒多封邮件时靠 rowid 保证不漏不重）
-  cursor: z.string().regex(/^\d+:\d+$/, "cursor must be sentAt:rowid").optional(),
-  limit: z.number().int().min(1).max(200).optional()
+export const listQuerySchema = z.object({
+  folderId: idSchema
 })
 
 export const searchQuerySchema = z.object({

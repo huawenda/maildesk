@@ -13,7 +13,7 @@ export function Notice({ message }: { message: string | null }) {
         role="status"
         aria-live="polite"
         className={cn(
-          "flex items-center gap-2 rounded-lg bg-card px-3.5 py-2 text-[13px] text-foreground shadow-lg",
+          "flex items-center gap-2 rounded-lg bg-popover px-3.5 py-2 text-[13px] text-foreground shadow-lg",
           "ring-1 ring-destructive/40"
         )}
       >

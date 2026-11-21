@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import {
   Archive,
   ChevronDown,
@@ -12,6 +12,7 @@ import {
   ShieldAlert,
   Trash2
 } from "lucide-react"
+import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import type { NavFolder } from "@/lib/live"
 import { labels } from "@/lib/mock"
 import { cn } from "@/lib/utils"
@@ -58,6 +59,7 @@ export function Sidebar({
   onSync
 }: SidebarProps) {
   // 容器目录默认展开，点右侧箭头（或整行）收起子项
+  const navRef = useRef<HTMLElement>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([])
   const toggleGroup = (id: string) =>
     setCollapsedGroups((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))
@@ -76,7 +78,11 @@ export function Sidebar({
         collapsed ? "w-16 px-2" : "w-[240px] px-2.5"
       )}
     >
-      <nav className="flex max-h-[45vh] flex-col gap-px overflow-y-auto" aria-label="文件夹">
+      <nav
+        ref={navRef}
+        className="scrollbar-overlay flex max-h-[45vh] flex-col gap-px overflow-y-auto"
+        aria-label="文件夹"
+      >
         {folders.map((folder) => {
           const Icon = folderIcons[folder.icon] ?? Folder
           // 折叠态没有缩进空间，容器行直接省略，只留可点条目
@@ -93,7 +99,7 @@ export function Sidebar({
                 aria-expanded={expanded}
                 onClick={() => toggleGroup(folder.id)}
                 className={cn(
-                  "flex h-8 shrink-0 items-center gap-2.5 rounded-md text-[13.5px] text-foreground/85 transition-colors hover:bg-white/[0.04]",
+                  "flex h-8 shrink-0 items-center gap-2.5 rounded-md text-[13.5px] text-foreground/92 transition-colors hover:bg-white/[0.05]",
                   collapsed ? "justify-center px-0" : "px-2"
                 )}
                 style={indent ? { paddingLeft: 8 + indent } : undefined}
@@ -101,7 +107,7 @@ export function Sidebar({
                 <Icon className="size-[15px] shrink-0 text-muted-foreground" />
                 {collapsed ? null : <span className="truncate">{folder.label}</span>}
                 {collapsed ? null : (
-                  <span className="ml-auto text-muted-foreground/70">
+                  <span className="ml-auto text-muted-foreground">
                     {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                   </span>
                 )}
@@ -120,7 +126,7 @@ export function Sidebar({
               className={cn(
                 "flex h-8 shrink-0 items-center gap-2.5 rounded-md text-[13.5px] transition-colors",
                 collapsed ? "justify-center px-0" : "px-2",
-                active ? "bg-accent font-medium text-foreground" : "text-foreground/85 hover:bg-white/[0.04]"
+                active ? "bg-accent font-medium text-foreground" : "text-foreground/92 hover:bg-white/[0.05]"
               )}
               style={indent ? { paddingLeft: 8 + indent } : undefined}
             >
@@ -133,6 +139,7 @@ export function Sidebar({
           )
         })}
       </nav>
+      <OverlayScrollbar target={navRef} />
 
       {collapsed || !showLabels ? null : (
         <>
@@ -148,7 +155,7 @@ export function Sidebar({
                   onClick={() => onSelectLabel(label.name)}
                   className={cn(
                     "flex h-8 items-center gap-2.5 rounded-md px-2 text-[13.5px] transition-colors",
-                    active ? "bg-accent font-medium text-foreground" : "text-foreground/85 hover:bg-white/[0.04]"
+                    active ? "bg-accent font-medium text-foreground" : "text-foreground/92 hover:bg-white/[0.05]"
                   )}
                 >
                   <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: label.color }} />

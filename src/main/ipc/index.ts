@@ -8,7 +8,7 @@ import {
   accountPatchSchema,
   attachmentRefSchema,
   idSchema,
-  pageQuerySchema,
+  listQuerySchema,
   searchQuerySchema,
   settingsPatchSchema
 } from "@shared/schema"
@@ -19,7 +19,7 @@ import {
   getAttachment,
   getMessage,
   needsBody,
-  pageMessages,
+  listMessages,
   searchMessages,
   setAttachmentPath,
   setFlagged,
@@ -157,9 +157,9 @@ export function registerIpc(): void {
 
   ipcMain.handle(CH.foldersList, (_event, raw: unknown) => listFolders(parse(idSchema.optional(), raw)))
 
-  ipcMain.handle(CH.messagesPage, (_event, raw: unknown) => {
-    const query = parse(pageQuerySchema, raw)
-    return pageMessages(query.folderId, query.cursor, query.limit ?? 50)
+  ipcMain.handle(CH.messagesList, (_event, raw: unknown) => {
+    const query = parse(listQuerySchema, raw)
+    return listMessages(query.folderId)
   })
 
   // 正文懒加载：库里没有就回源头拉一次（PRD 7.6）

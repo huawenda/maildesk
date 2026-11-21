@@ -14,7 +14,7 @@ const api: MailApi = {
     list: (accountId) => ipcRenderer.invoke(CH.foldersList, accountId)
   },
   messages: {
-    page: (q) => ipcRenderer.invoke(CH.messagesPage, q),
+    list: (folderId) => ipcRenderer.invoke(CH.messagesList, { folderId }),
     get: (id) => ipcRenderer.invoke(CH.messagesGet, id),
     setRead: (ids, read) => ipcRenderer.invoke(CH.messagesSetRead, { ids, read }),
     setFlagged: (ids, flagged) => ipcRenderer.invoke(CH.messagesSetFlagged, { ids, flagged }),

@@ -9,6 +9,8 @@ export interface Attachment {
   /** bytes */
   size: number
   type: AttachmentKind
+  /** 真实 MIME；演示数据没有。预览判断只能看它或扩展名，不要用 type（图标分类） */
+  mime?: string | null
 }
 
 export interface Message {

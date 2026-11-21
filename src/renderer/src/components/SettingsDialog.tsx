@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Check, Minus, Plus, X } from "lucide-react"
-import type { Account, HistoryPolicy, ThemeMode } from "@shared/types"
+import type { Account, ThemeMode } from "@shared/types"
+import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import type { Density } from "@/App"
 import { cn } from "@/lib/utils"
 
@@ -26,11 +27,6 @@ const THEMES: { id: ThemeMode; label: string }[] = [
 ]
 
 const FONT_SIZES = [13, 14, 15, 16]
-const HISTORY_POLICIES: { id: HistoryPolicy; label: string }[] = [
-  { id: "all", label: "全部" },
-  { id: "recent", label: "最近 5000 封" },
-  { id: "off", label: "不自动" }
-]
 
 interface SettingsDialogProps {
   open: boolean
@@ -41,8 +37,6 @@ interface SettingsDialogProps {
   onDensityChange: (density: Density) => void
   fontSize: number
   onFontSizeChange: (size: number) => void
-  historyPolicy: HistoryPolicy
-  onHistoryPolicyChange: (policy: HistoryPolicy) => void
   remoteImages: boolean
   onRemoteImagesChange: (value: boolean) => void
   accounts: Account[]
@@ -124,14 +118,13 @@ export function SettingsDialog({
   onDensityChange,
   fontSize,
   onFontSizeChange,
-  historyPolicy,
-  onHistoryPolicyChange,
   remoteImages,
   onRemoteImagesChange,
   accounts,
   version,
   onManageAccounts
 }: SettingsDialogProps) {
+  const bodyRef = useRef<HTMLDivElement>(null)
   const [section, setSection] = useState<Section>("appearance")
 
   useEffect(() => {
@@ -192,7 +185,7 @@ export function SettingsDialog({
             </button>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
+          <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto px-5 pb-4">
             {section === "appearance" ? (
               <>
                 <Row label="主题" hint="深色为默认设计态">
@@ -275,19 +268,11 @@ export function SettingsDialog({
 
             {section === "sync" ? (
               <>
-                <Row
-                  label="历史邮件"
-                  hint="首屏先取最近 200 封，其余在后台按批补齐；只同步头部，正文仍在点开时加载"
-                >
-                  <Segmented
-                    value={historyPolicy}
-                    options={HISTORY_POLICIES.map((item) => ({ value: item.id, label: item.label }))}
-                    onChange={onHistoryPolicyChange}
-                  />
-                </Row>
-                <div className="mt-4 space-y-2 rounded-lg bg-muted/60 px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
+                <div className="mt-1 space-y-2 rounded-lg bg-muted/60 px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
+                  <div>连接账户后会无条件把该邮箱里的全部邮件下载到本地：首屏先同步最近 200 封，其余在后台按批补齐，一直补到服务端最后一封，不做策略截断，也不是按需分页。</div>
+                  <div>只同步邮件头部，正文仍在点开时加载；列表一次载入整个文件夹，不再滚动分页。</div>
                   <div>同步间隔：服务器支持 IDLE 时实时推送；QQ 等不主动推送的服务商由 60 秒兜底轮询补齐。</div>
-                  <div>后台补全历史时，侧栏底部会显示「补全历史 已同步 / 总数」，随时可以点同步打断。</div>
+                  <div>后台补全历史时，侧栏底部会显示「补全历史 已同步 / 总数」。</div>
                 </div>
               </>
             ) : null}
@@ -303,6 +288,7 @@ export function SettingsDialog({
               </div>
             ) : null}
           </div>
+          <OverlayScrollbar target={bodyRef} />
         </div>
       </div>
     </div>

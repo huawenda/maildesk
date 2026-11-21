@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { Address, Attachment, MessageDetail, MessagePage, MessageSummary, SearchOptions } from "@shared/types"
+import type { Address, Attachment, MessageDetail, MessageSummary, SearchOptions } from "@shared/types"
 import { all, get, run } from "./index"
 
 /** 同步层交给数据层的原始字段，id / folder_id 由这里补齐。 */
@@ -93,31 +93,14 @@ const toAttachment = (row: AttachmentRow): Attachment => ({
 })
 
 /**
- * 游标是上一页最后一条的 `sentAt:rowid`（不透明字符串，渲染层原样回传）。
- * 只用 sent_at 会因为同一秒多封邮件在页边界上漏掉一封，所以必须带 rowid 兜底。
+ * 一次返回该文件夹的全部邮件（按时间倒序）：本地库已经全量下载，界面不再分页。
  * 列表只读 header + snippet，正文由 get() 懒加载（PRD 7.6）。
  */
-export function pageMessages(folderId: string, cursor: string | undefined, limit: number): MessagePage {
-  const parsed = cursor && /^\d+:\d+$/.test(cursor) ? cursor.split(":").map(Number) : null
-  const rows = parsed
-    ? all<MessageRow>(
-        "SELECT rowid, * FROM message WHERE folder_id = ? AND (sent_at < ? OR (sent_at = ? AND rowid < ?)) ORDER BY sent_at DESC, rowid DESC LIMIT ?",
-        folderId,
-        parsed[0],
-        parsed[0],
-        parsed[1],
-        limit
-      )
-    : all<MessageRow>(
-        "SELECT rowid, * FROM message WHERE folder_id = ? ORDER BY sent_at DESC, rowid DESC LIMIT ?",
-        folderId,
-        limit
-      )
-  const items = rows.map(toSummary)
-  const last = rows.at(-1)
-  return rows.length === limit && last
-    ? { items, nextCursor: `${last.sent_at ?? 0}:${last.rowid ?? 0}` }
-    : { items }
+export function listMessages(folderId: string): MessageSummary[] {
+  return all<MessageRow>(
+    "SELECT rowid, * FROM message WHERE folder_id = ? ORDER BY sent_at DESC, rowid DESC",
+    folderId
+  ).map(toSummary)
 }
 
 export function getMessage(id: string): MessageDetail {

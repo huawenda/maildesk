@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Dialog } from "radix-ui"
 import { ArrowLeft, Check, Loader2, Plus, Trash2 } from "lucide-react"
 import type { Account, Security } from "@shared/types"
+import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { ipcErrorMessage, mail } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
 
@@ -32,6 +33,7 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 export function AccountDialog({ open, onOpenChange, accounts, onChanged }: AccountDialogProps) {
+  const bodyRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<"list" | "form">("list")
   const [email, setEmail] = useState("")
   const [displayName, setDisplayName] = useState("")
@@ -130,7 +132,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
             <kbd className="ml-auto rounded border border-border px-1 py-px text-[10.5px] text-muted-foreground">Esc</kbd>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto p-4">
             {view === "list" ? (
               <div className="flex flex-col gap-1.5">
                 {accounts.map((account) => (
@@ -275,6 +277,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
               </div>
             )}
           </div>
+          <OverlayScrollbar target={bodyRef} />
 
           {view === "form" ? (
             <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-3">

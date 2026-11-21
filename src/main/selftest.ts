@@ -1,7 +1,7 @@
 import { app } from "electron"
 import { createAccount, listAccounts, removeAccount, updateAccount } from "./db/accounts"
 import { listFolders } from "./db/folders"
-import { getMessage, pageMessages, searchMessages } from "./db/messages"
+import { getMessage, listMessages, searchMessages } from "./db/messages"
 import { getSettings, setSettings } from "./db/settings"
 import { openPassword } from "./security/credentials"
 import { all, get } from "./db"
@@ -225,7 +225,8 @@ export async function runSelfTest(): Promise<void> {
     report.updatedName = updated.displayName
 
     report.folders = listFolders().length
-    report.page = pageMessages("no-such-folder", undefined, 20)
+    // 空文件夹一次取全部也是空数组；顺手把全量列表的条数报出来
+    report.list = listMessages("no-such-folder").length
     report.search = searchMessages("hello").length
 
     setSettings({ density: "compact", sidebarCollapsed: true })
@@ -291,7 +292,7 @@ export async function runSelfTest(): Promise<void> {
         }
         const inbox = folders.find((folder) => folder.role === "inbox")
         if (inbox) {
-          const sample = pageMessages(inbox.id, undefined, 1).items[0]
+          const sample = listMessages(inbox.id)[0]
           if (sample) {
             report.sampleSubject = sample.subject
             report.sampleFrom = sample.fromAddr

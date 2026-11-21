@@ -7,7 +7,6 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   fontSize: 14,
   pageSize: 200,
-  historyPolicy: "all",
   remoteImages: true
 }
 

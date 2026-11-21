@@ -178,7 +178,8 @@ export function detailToMessage(detail: MessageDetail): Message {
     id: item.id,
     name: item.filename ?? "未命名附件",
     size: item.size ?? 0,
-    type: attachmentKind(item.filename, item.mime)
+    type: attachmentKind(item.filename, item.mime),
+    mime: item.mime
   }))
   return {
     ...base,

@@ -75,6 +75,15 @@ export function updateBackfillUid(id: string, uid: number): void {
   run("UPDATE folder SET backfill_uid = ? WHERE id = ?", uid, id)
 }
 
+/**
+ * 服务器上已经不存在的文件夹。
+ * 先显式删邮件：外键级联删除不会触发 message 的 AFTER DELETE 触发器（FTS 会留残影）。
+ */
+export function deleteFolder(id: string): void {
+  run("DELETE FROM message WHERE folder_id = ?", id)
+  run("DELETE FROM folder WHERE id = ?", id)
+}
+
 /** UIDVALIDITY 变化后清空重拉，回溯游标一起归零。 */
 export function resetBackfillUid(id: string): void {
   run("UPDATE folder SET backfill_uid = NULL WHERE id = ?", id)

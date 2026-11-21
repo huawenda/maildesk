@@ -31,7 +31,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1000,
     minHeight: 640,
     show: false,
-    backgroundColor: "#1E1D1B",
+    backgroundColor: "#1B1B1B",
     // 完全自绘标题栏：不要系统标题栏，也不要系统绘制的窗口按钮。
     // 保留 thickFrame（默认 true）才能继续用原生的缩放边框、Aero Snap 与阴影。
     frame: false,
@@ -241,6 +241,17 @@ function createWindow(): BrowserWindow {
                 .catch(() => undefined)
               await new Promise((resolve) => setTimeout(resolve, 500))
             }
+            // 验证 Ctrl+A 多选：发真实按键事件，再读 aria-selected 的行数
+            if (process.env.MAILDESK_CAPTURE_CTRLA) {
+              win.webContents.focus()
+              const count = "document.querySelectorAll('[aria-selected=\"true\"]').length"
+              const before = await win.webContents.executeJavaScript(count).catch(() => -1)
+              win.webContents.sendInputEvent({ type: "keyDown", keyCode: "A", modifiers: ["control"] })
+              win.webContents.sendInputEvent({ type: "keyUp", keyCode: "A", modifiers: ["control"] })
+              await new Promise((resolve) => setTimeout(resolve, 700))
+              const after = await win.webContents.executeJavaScript(count).catch(() => -1)
+              console.log("capture-ctrla", JSON.stringify({ before, after }))
+            }
             if (process.env.MAILDESK_CAPTURE_PROBE) {
               const info = await win.webContents
                 .executeJavaScript(
@@ -311,6 +322,22 @@ app.whenReady().then(() => {
     void import("./selftest").then(({ runServerOp }) =>
       runServerOp(op ?? "delete", subject ?? "", target).then(() => app.exit(0))
     )
+    return
+  }
+
+  // 诊断：按 message id 触发正文懒加载，打印解析出的附件元数据（验证附件尺寸口径）
+  if (process.env.MAILDESK_FETCH_BODY) {
+    const messageId = process.env.MAILDESK_FETCH_BODY as string
+    void import("./sync/manager").then(async ({ startSync, loadMessageBody }) => {
+      startSync()
+      const ok = await loadMessageBody(messageId)
+      const { getMessage } = await import("./db/messages")
+      const detail = getMessage(messageId)
+      console.log(
+        "FETCHBODY " + JSON.stringify({ ok, attachments: detail.attachments, bodyText: detail.bodyText?.length ?? 0 })
+      )
+      app.exit(0)
+    })
     return
   }
 

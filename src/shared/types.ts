@@ -111,21 +111,11 @@ export type AttachmentPreviewResult =
   | { ok: true; dataUrl: string; mime: string; name: string }
   | { ok: false; error: string }
 
-export interface MessagePage {
-  items: MessageSummary[]
-  /** 传回 `page` 作为 cursor 取下一页；undefined 表示到底。 */
-  /** 不透明游标 `<sentAt>:<rowid>`，原样回传给 page() 取下一页 */
-  nextCursor?: string
-}
-
 export interface SearchOptions {
   folderId?: string
   accountId?: string
   limit?: number
 }
-
-/** 历史邮件同步策略：全部 / 仅最近 5000 封 / 不自动。 */
-export type HistoryPolicy = "all" | "recent" | "off"
 
 export interface Settings {
   density: Density
@@ -135,8 +125,6 @@ export interface Settings {
   fontSize: number
   /** 首次同步每个文件夹拉取的封数（首屏窗口，不对外暴露） */
   pageSize: number
-  /** 是否在后台把历史邮件补齐 */
-  historyPolicy: HistoryPolicy
   /** 是否默认放行邮件里的远程图片 */
   remoteImages: boolean
 }
@@ -190,7 +178,8 @@ export interface MailApi {
     list(accountId?: string): Promise<Folder[]>
   }
   messages: {
-    page(q: { folderId: string; cursor?: string; limit?: number }): Promise<MessagePage>
+    /** 一次返回该文件夹全部邮件：连接上账户就全量下载，不做渐进式分页。 */
+    list(folderId: string): Promise<MessageSummary[]>
     get(id: string): Promise<MessageDetail>
     setRead(ids: string[], read: boolean): Promise<void>
     setFlagged(ids: string[], flagged: boolean): Promise<void>

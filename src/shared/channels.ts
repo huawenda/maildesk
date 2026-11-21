@@ -18,7 +18,7 @@ export const CH = {
 
   foldersList: "folders:list",
 
-  messagesPage: "messages:page",
+  messagesList: "messages:list",
   messagesGet: "messages:get",
   messagesSetRead: "messages:set-read",
   messagesSetFlagged: "messages:set-flagged",

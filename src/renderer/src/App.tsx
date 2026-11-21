@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { Account, Folder, HistoryPolicy, SyncState } from "@shared/types"
+import type { Account, Folder, SyncState } from "@shared/types"
 import { AccountCapsule } from "@/components/AccountCapsule"
 import { AccountDialog } from "@/components/AccountDialog"
 import { CommandPalette } from "@/components/CommandPalette"
@@ -85,14 +85,12 @@ export default function App() {
   const itemsRef = useRef<Message[]>(seedMessages)
 
   const [items, setItems] = useState<Message[]>(seedMessages)
-  // 真实模式分页：先取一页，滚动到底再取下一页（本地库按 sent_at 游标）
-  const [pageCursor, setPageCursor] = useState<string | undefined>(undefined)
-  const [hasMorePages, setHasMorePages] = useState(false)
-  const loadingMore = useRef(false)
   const [folderId, setFolderId] = useState<string>("inbox")
   const [filter, setFilter] = useState<ListFilter>("all")
   const [activeLabel, setActiveLabel] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // 多选集合：Ctrl+点击逐条增减、Ctrl+A 全选；selectedId 同时是其中的「活动行」
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [detail, setDetail] = useState<Message | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [density, setDensity] = useState<Density>(() => readStored("maildesk.density", "standard"))
@@ -104,7 +102,6 @@ export default function App() {
   // 拖拽分隔线时临时关掉过渡与文本选择，避免列表跟着抖动
   const [resizing, setResizing] = useState(false)
   const dragRef = useRef<{ x: number; width: number } | null>(null)
-  const [historyPolicy, setHistoryPolicy] = useState<HistoryPolicy>("all")
   const [backfill, setBackfill] = useState<{ done: number; total: number } | null>(null)
   const [remoteImages, setRemoteImages] = useState<boolean>(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -130,7 +127,6 @@ export default function App() {
         setDensity(settings.density)
         setCollapsed(settings.sidebarCollapsed)
         setFontSize(settings.fontSize)
-        setHistoryPolicy(settings.historyPolicy)
         setRemoteImages(settings.remoteImages)
       })
       .catch(() => undefined)
@@ -156,11 +152,6 @@ export default function App() {
     store("maildesk.fontSize", fontSize)
     if (settingsReady.current) void mail.settings.set({ fontSize }).catch(() => undefined)
   }, [fontSize])
-
-  useEffect(() => {
-    if (!settingsReady.current) return
-    void mail.settings.set({ historyPolicy }).catch(() => undefined)
-  }, [historyPolicy])
 
   useEffect(() => {
     if (!settingsReady.current) return
@@ -216,18 +207,16 @@ export default function App() {
     }
   }, [live, activeAccountId, folderTick])
 
-  // 真实模式：按文件夹取第一页（本地库），其余滚动到底时按游标续取
+  // 真实模式：一次取整个文件夹（本地库已全量下载，界面不再分页）
   useEffect(() => {
     if (!live) return
     let cancelled = false
     setLoading(true)
     mail.messages
-      .page({ folderId, limit: 200 })
-      .then((page) => {
+      .list(folderId)
+      .then((list) => {
         if (cancelled) return
-        setItems(page.items.map(summaryToMessage))
-        setPageCursor(page.nextCursor)
-        setHasMorePages(page.nextCursor != null)
+        setItems(list.map(summaryToMessage))
         setLoading(false)
       })
       .catch(() => {
@@ -237,26 +226,6 @@ export default function App() {
       cancelled = true
     }
   }, [live, folderId, refreshTick])
-
-  const loadMoreMessages = useCallback(() => {
-    if (!live || pageCursor == null || loadingMore.current) return
-    loadingMore.current = true
-    void mail.messages
-      .page({ folderId, cursor: pageCursor, limit: 200 })
-      .then((page) => {
-        setItems((prev) => {
-          const seen = new Set(prev.map((message) => message.id))
-          const next = page.items.map(summaryToMessage).filter((message) => !seen.has(message.id))
-          return next.length > 0 ? [...prev, ...next] : prev
-        })
-        setPageCursor(page.nextCursor)
-        setHasMorePages(page.nextCursor != null)
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        loadingMore.current = false
-      })
-  }, [live, folderId, pageCursor])
 
   useEffect(() => {
     itemsRef.current = items
@@ -402,16 +371,9 @@ export default function App() {
     setActiveAccountId(id)
     setActiveLabel(null)
     setSelectedId(null)
+    setSelectedIds([])
     setDetail(null)
   }, [])
-  const listTitle = activeLabel
-    ? `「${activeLabel}」`
-    : (navList.find((folder) => folder.id === folderId)?.label ?? "收件箱")
-  // 标题栏「N 封未读」与侧栏同一数据源；演示模式退回内存统计
-  const unreadInFolder = live
-    ? (unreadCounts[folderId] ?? 0)
-    : folderMessages.filter((message) => message.unread).length
-
   const switchFolder = useCallback(
     (next: string) => {
       setActiveLabel(null)
@@ -419,6 +381,7 @@ export default function App() {
       if (next === folderId) return
       setFolderId(next)
       setSelectedId(null)
+      setSelectedIds([])
       // 真实模式的骨架屏由取数 effect 自己开关，避免两条 loading 路径互相打脸
       if (!live) {
         setLoading(true)
@@ -488,6 +451,19 @@ export default function App() {
     [navList, folderId]
   )
 
+  // 「标为垃圾邮件」的目标：当前就在垃圾箱时不显示这一项
+  const junkFolderId = useMemo(() => {
+    if (!live) return undefined
+    const junk = liveFolders.find((folder) => folder.role === "junk")
+    return junk && junk.id !== folderId ? junk.id : undefined
+  }, [live, liveFolders, folderId])
+
+  // 「复原」的目标：垃圾箱里的邮件一律移回收件箱
+  const inboxFolderId = useMemo(
+    () => liveFolders.find((folder) => folder.role === "inbox")?.id,
+    [liveFolders]
+  )
+
   const moveMessage = useCallback(
     (id: string, targetFolderId: string) => {
       if (!live) return
@@ -505,6 +481,17 @@ export default function App() {
         .catch((error) => showNotice("移动失败 · " + describeError(error)))
     },
     [live, showNotice]
+  )
+
+  const restoreMessage = useCallback(
+    (id: string) => {
+      if (!inboxFolderId) {
+        showNotice("复原失败 · 找不到收件箱")
+        return
+      }
+      moveMessage(id, inboxFolderId)
+    },
+    [inboxFolderId, moveMessage, showNotice]
   )
 
   const deleteMessage = useCallback(
@@ -527,27 +514,68 @@ export default function App() {
     [live, inTrash, showNotice]
   )
 
+  // Delete / Backspace：有选中就批量删（与单条删除同一条 IPC，仍是服务器先行）
+  const deleteSelected = useCallback(() => {
+    const ids = selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : []
+    if (ids.length === 0 || !live) return
+    const idSet = new Set(ids)
+    void mail.messages
+      .remove(ids, inTrash)
+      .then((result) => {
+        if (result.failed > 0) showNotice("删除失败 · 服务器拒绝了其中 " + result.failed + " 封")
+        if (result.deleted === 0) return
+        setItems((current) => current.filter((message) => !idSet.has(message.id)))
+        setSelectedId((current) => (current && idSet.has(current) ? null : current))
+        setSelectedIds([])
+        setFolderTick((tick) => tick + 1)
+        setRefreshTick((tick) => tick + 1)
+        setUnreadTick((tick) => tick + 1)
+      })
+      .catch((error) => showNotice("删除失败 · " + describeError(error)))
+  }, [selectedIds, selectedId, live, inTrash, showNotice])
+
   const select = useCallback(
-    (id: string) => {
-      setSelectedId(id)
-      markRead(id)
+    (id: string, additive = false) => {
+      if (!additive) {
+        setSelectedIds([id])
+        setSelectedId(id)
+        markRead(id)
+        return
+      }
+      // Ctrl+点击：只增减多选，不标已读（批量选中不该顺手把一堆信变成已读）
+      const has = selectedIds.includes(id)
+      const next = has ? selectedIds.filter((item) => item !== id) : [...selectedIds, id]
+      setSelectedIds(next)
+      setSelectedId(has ? (next[next.length - 1] ?? null) : id)
     },
-    [markRead]
+    [markRead, selectedIds]
   )
 
-  // 键盘移动不自动已读，停留 1.5s 才回写（PRD FR-03.4）
+  // Ctrl+A：选中整个当前文件夹（不受过滤页签限制），并切回「全部」让每一行都可见地变蓝
+  const selectAll = useCallback(() => {
+    if (folderMessages.length === 0) return
+    setFilter("all")
+    setSelectedIds(folderMessages.map((message) => message.id))
+    setSelectedId((current) =>
+      current && folderMessages.some((message) => message.id === current) ? current : folderMessages[0].id
+    )
+  }, [folderMessages])
+
+  // 键盘移动不自动已读，停留 1.5s 才回写（PRD FR-03.4）；多选态（Ctrl+A/Ctrl+点击）不触发
   useEffect(() => {
-    if (!selectedId || selected?.unread !== true) return
+    if (!selectedId || selectedIds.length > 1 || selected?.unread !== true) return
     const timer = window.setTimeout(() => markRead(selectedId), 1500)
     return () => window.clearTimeout(timer)
-  }, [selectedId, selected?.unread, markRead])
+  }, [selectedId, selectedIds.length, selected?.unread, markRead])
 
   const moveSelection = useCallback(
     (delta: number) => {
       if (visible.length === 0) return
       const index = visible.findIndex((message) => message.id === selectedId)
       const nextIndex = Math.min(Math.max(index === -1 ? 0 : index + delta, 0), visible.length - 1)
-      setSelectedId(visible[nextIndex].id)
+      const nextId = visible[nextIndex].id
+      setSelectedId(nextId)
+      setSelectedIds([nextId])
     },
     [visible, selectedId]
   )
@@ -573,13 +601,15 @@ export default function App() {
       enter: () => selectedId && markRead(selectedId),
       u: () => selectedId && markRead(selectedId, false),
       s: () => selectedId && toggleStar(selectedId),
-      delete: () => selectedId && deleteMessage(selectedId),
+      delete: () => deleteSelected(),
+      // Ctrl+A 只在已有选中时全选整箱（没有选中时什么也不做，但要吃掉浏览器的「全选文本」）
+      "ctrl+a": () => selectAll(),
       "/": () => setPaletteOpen(true),
       "ctrl+k": () => setPaletteOpen(true),
       "ctrl+r": () => runSync(),
       "ctrl+,": () => setSettingsOpen(true),
       // 垃圾箱里 Delete 是永久删除，其余是移到垃圾箱；没有确认弹窗，靠回收站兜底
-      backspace: () => selectedId && deleteMessage(selectedId),
+      backspace: () => deleteSelected(),
       escape: () => {
         setPaletteOpen(false)
         setSettingsOpen(false)
@@ -650,7 +680,6 @@ export default function App() {
     >
       <TitleBar
         sidebarWidth={collapsed ? 64 : 240}
-        listWidth={listWidth}
         left={
           <AccountCapsule
             accounts={accounts}
@@ -662,8 +691,6 @@ export default function App() {
         }
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((value) => !value)}
-        title={listTitle}
-        unread={unreadInFolder}
         onOpenSearch={() => setPaletteOpen(true)}
         density={density}
         onDensityChange={setDensity}
@@ -695,52 +722,65 @@ export default function App() {
           syncLabel={syncLabel}
           onSync={runSync}
         />
-        <MessageList
-          messages={visible}
-          countLabel={listCount}
-          hasMore={hasMorePages}
-          onLoadMore={loadMoreMessages}
-          selectedId={selectedId}
-          onSelect={select}
-          onToggleStar={toggleStar}
-          density={density}
-          filter={filter}
-          onFilterChange={setFilter}
-          loading={loading}
-          width={listWidth}
-        />
-        {/* 1px 分隔线本身就是拖拽把手：5px 命中区，跨在两栏边界上 */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="拖动调整列表宽度"
-          title="拖动调整列表宽度，双击复位"
-          onPointerDown={startResize}
-          onDoubleClick={() => {
-            setListWidth(LIST_DEFAULT)
-            store("maildesk.listWidth", LIST_DEFAULT)
-          }}
-          className="group relative z-10 -ml-[2px] mr-[-3px] w-[5px] shrink-0 cursor-col-resize"
-        >
-          {/* 线固定落在整数像素上（left:2px），不能用 -translate-x-1/2，否则半像素会被抗锯齿成 2px */}
-          <span
-            className={cn(
-              "absolute inset-y-0 left-[2px] w-px transition-colors",
-              resizing ? "bg-primary" : "bg-border group-hover:bg-primary/70"
-            )}
+        {/* 画布区（列表 + 阅读器）：左、上各一条 1px 框线，左上角随 8px 圆角收边 */}
+        <div className="flex min-w-0 flex-1 overflow-hidden rounded-tl-lg border-t border-l border-border">
+          <MessageList
+            messages={visible}
+            countLabel={listCount}
+            selectedId={selectedId}
+            selectedIds={selectedIds}
+            onSelect={select}
+            onToggleStar={toggleStar}
+            onContextSelect={(id) => {
+              setSelectedId(id)
+              setSelectedIds((current) => (current.includes(id) ? current : [id]))
+            }}
+            onSetRead={markRead}
+            onMove={moveMessage}
+            moveTargets={moveTargets}
+            onDelete={deleteMessage}
+            permanentDelete={inTrash === true}
+            onRestore={inTrash ? restoreMessage : undefined}
+            junkFolderId={junkFolderId}
+            density={density}
+            filter={filter}
+            onFilterChange={setFilter}
+            loading={loading}
+            width={listWidth}
+          />
+          {/* 1px 分隔线本身就是拖拽把手：5px 命中区，跨在两栏边界上 */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="拖动调整列表宽度"
+            title="拖动调整列表宽度，双击复位"
+            onPointerDown={startResize}
+            onDoubleClick={() => {
+              setListWidth(LIST_DEFAULT)
+              store("maildesk.listWidth", LIST_DEFAULT)
+            }}
+            className="group relative z-10 -ml-[2px] mr-[-3px] w-[5px] shrink-0 cursor-col-resize"
+          >
+            {/* 线固定落在整数像素上（left:2px），不能用 -translate-x-1/2，否则半像素会被抗锯齿成 2px */}
+            <span
+              className={cn(
+                "absolute inset-y-0 left-[2px] w-px transition-colors",
+                resizing ? "bg-primary" : "bg-border group-hover:bg-primary/70"
+              )}
+            />
+          </div>
+          <Reader
+            message={selected}
+            fontSize={fontSize}
+            remoteImages={remoteImages}
+            onToggleStar={() => selectedId && toggleStar(selectedId)}
+            onToggleUnread={() => selectedId && markRead(selectedId, false)}
+            moveTargets={moveTargets}
+            onMove={(targetFolderId) => selectedId && moveMessage(selectedId, targetFolderId)}
+            onDelete={() => selectedId && deleteMessage(selectedId)}
+            permanentDelete={inTrash === true}
           />
         </div>
-        <Reader
-          message={selected}
-          fontSize={fontSize}
-          remoteImages={remoteImages}
-          onToggleStar={() => selectedId && toggleStar(selectedId)}
-          onToggleUnread={() => selectedId && markRead(selectedId, false)}
-          moveTargets={moveTargets}
-          onMove={(targetFolderId) => selectedId && moveMessage(selectedId, targetFolderId)}
-          onDelete={() => selectedId && deleteMessage(selectedId)}
-          permanentDelete={inTrash === true}
-        />
       </div>
 
       <Notice message={notice} />
@@ -767,8 +807,6 @@ export default function App() {
         onDensityChange={setDensity}
         fontSize={fontSize}
         onFontSizeChange={setFontSize}
-        historyPolicy={historyPolicy}
-        onHistoryPolicyChange={setHistoryPolicy}
         remoteImages={remoteImages}
         onRemoteImagesChange={setRemoteImages}
         accounts={accounts}

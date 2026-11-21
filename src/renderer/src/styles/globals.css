@@ -34,48 +34,49 @@
 }
 
 :root {
-  --background: #f6f5f2;
-  --foreground: #1b1a18;
+  --background: #f4f4f4;
+  --foreground: #1a1a1a;
   --card: #ffffff;
-  --card-foreground: #1b1a18;
+  --card-foreground: #1a1a1a;
   --popover: #ffffff;
-  --popover-foreground: #1b1a18;
+  --popover-foreground: #1a1a1a;
   --primary: #2659cc;
   --primary-foreground: #ffffff;
-  --secondary: #efede8;
-  --secondary-foreground: #1b1a18;
-  --muted: #edebe6;
-  --muted-foreground: #6f6a63;
-  --accent: #e9e6df;
-  --accent-foreground: #1b1a18;
+  --secondary: #f0f0f0;
+  --secondary-foreground: #1a1a1a;
+  --muted: #efefef;
+  --muted-foreground: #5c5c5c;
+  --accent: #e6e6e6;
+  --accent-foreground: #1a1a1a;
   --destructive: #d93a3a;
   --destructive-foreground: #ffffff;
-  --border: #e3e0d9;
-  --input: #e3e0d9;
+  --border: #e2e2e2;
+  --input: #e2e2e2;
   --ring: #2659cc;
   --star: #c98a1e;
   --radius: 10px;
 }
 
 .dark {
-  --background: #1b1a18;
-  --foreground: #f2efea;
-  --card: #1e1d1b;
-  --card-foreground: #f2efea;
-  --popover: #262421;
-  --popover-foreground: #f2efea;
+  /* 取自 Workhorse 参照：侧栏/标题栏 #1B1B1B、内容画布 #121212、卡片 #242424、选中 #323232 */
+  --background: #1b1b1b;
+  --foreground: #e9e9e9;
+  --card: #121212;
+  --card-foreground: #e9e9e9;
+  --popover: #242424;
+  --popover-foreground: #e9e9e9;
   --primary: #2659cc;
   --primary-foreground: #ffffff;
-  --secondary: #242220;
-  --secondary-foreground: #f2efea;
-  --muted: #24221f;
-  --muted-foreground: #9a938b;
-  --accent: #272421;
-  --accent-foreground: #f2efea;
+  --secondary: #242424;
+  --secondary-foreground: #e9e9e9;
+  --muted: #242424;
+  --muted-foreground: #a6a6a6;
+  --accent: #323232;
+  --accent-foreground: #f2f2f2;
   --destructive: #f05252;
   --destructive-foreground: #ffffff;
-  --border: #2b2825;
-  --input: #2b2825;
+  --border: #2a2a2a;
+  --input: #2a2a2a;
   --ring: #2659cc;
   --star: #f0b65c;
   --radius: 10px;
@@ -103,6 +104,12 @@
     overflow: hidden;
   }
 
+  /* Chromium 在 Windows 上会用系统强调色画聚焦环（截图里那圈红框），应用内的按钮/菜单项
+     已经有 hover 与选中底色，这里统一去掉；输入框与文本域不受影响，仍保留原生的输入焦点样式 */
+  :where(button, a, [role="button"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):focus-visible {
+    outline: none;
+  }
+
   ::selection {
     background: color-mix(in oklab, var(--color-primary) 35%, transparent);
   }
@@ -128,3 +135,14 @@
     background-clip: content-box;
   }
 }
+
+/* 浮层滚动条：配合 OverlayScrollbar.tsx，隐藏原生滚动条（不占宽度），由固定的细条绘制 */
+.scrollbar-overlay {
+  scrollbar-width: none;
+}
+
+.scrollbar-overlay::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+

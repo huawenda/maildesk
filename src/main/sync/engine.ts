@@ -3,6 +3,7 @@ import { ImapFlow } from "imapflow"
 import type { Account, Folder, FolderRole, SyncEvent, SyncState, SyncStatus } from "@shared/types"
 import {
   findFolderByPath,
+  deleteFolder,
   getFolder,
   listFolders,
   updateFolderCounts,
@@ -36,8 +37,6 @@ const SECONDARY_LIMIT = 200
 const BATCH_SIZE = 50
 /** 历史回溯每批的封数：只取头部（ENVELOPE/FLAGS/SIZE），一个往返能拿一整批。 */
 const BACKFILL_BATCH = 200
-/** historyPolicy = "recent" 时每个文件夹最多回溯到这么多封。 */
-const RECENT_LIMIT = 5000
 const MAX_SOURCE = 512 * 1024
 const BACKOFF_MAX = 60_000
 /**
@@ -181,9 +180,14 @@ export class SyncEngine {
       if (!client) return false
       const lock = await client.getMailboxLock(folder.path)
       try {
-        const found = await client.fetchOne(String(locator.uid), { source: { maxLength: MAX_SOURCE } }, { uid: true })
+        const found = await client.fetchOne(
+          String(locator.uid),
+          { source: { maxLength: MAX_SOURCE }, bodyStructure: true },
+          { uid: true }
+        )
         if (!found || !found.source) return false
-        const parsed = await parseBody(messageId, found.source)
+        // 正文只取前 MAX_SOURCE 字节：附件会被截断，尺寸必须靠 BODYSTRUCTURE 纠正
+        const parsed = await parseBody(messageId, found.source, collectAttachmentParts(found.bodyStructure))
         setMessageBody(messageId, parsed.text, parsed.html, parsed.hasHtml, parsed.attachments)
         return true
       } finally {
@@ -245,7 +249,8 @@ export class SyncEngine {
   private async bootstrap(): Promise<void> {
     if (this.stopped) return
     await this.ensureConnected()
-    await this.refreshFolders()
+    // refreshFolders 由 reconcileAccount 开头调用（手动同步 / 3 分钟对账也会走一遍，
+    // 网页版删掉的文件夹不必等重启才消失）。
     // 先对账再增量：网页版/手机端「移动」过的邮件能在对账里按 Message-ID 认领回本地行，
     // 正文缓存与已读态都不丢；顺序反过来的话 syncAll 会把它当新邮件插一行，旧行再被删掉。
     // 新文件夹（uidValidity 还是 null）对账会跳过，交给随后的 syncAll 建立游标。
@@ -363,9 +368,9 @@ export class SyncEngine {
   }
 
   /** 拉文件夹清单与计数。UIDVALIDITY / 游标保留本地值，等同步时再核对。 */
-  private async refreshFolders(): Promise<void> {
+  private async refreshFolders(): Promise<number> {
     const client = this.client
-    if (!client) return
+    if (!client) return 0
     const listed = await client.list({ statusQuery: { messages: true, unseen: true } })
     for (const item of listed) {
       const existing = findFolderByPath(this.account.id, item.path)
@@ -386,6 +391,16 @@ export class SyncEngine {
       }
       upsertFolder(folder)
     }
+    // 服务器上删掉的文件夹（网页版/手机端）要跟着删，否则侧栏会永远留着空壳
+    const seen = new Set(listed.map((item) => item.path))
+    let removed = 0
+    for (const folder of listFolders(this.account.id)) {
+      if (seen.has(folder.path)) continue
+      deleteFolder(folder.id)
+      removed += 1
+      console.log("[sync] folder removed", this.account.email, folder.path)
+    }
+    return removed
   }
 
   private async syncAll(): Promise<void> {
@@ -406,7 +421,7 @@ export class SyncEngine {
    */
   private startBackfill(): void {
     if (this.backfilling || this.stopped) return
-    if (getSettings().historyPolicy === "off") return
+    // 连上账户就无条件把邮箱里的邮件全部下载到本地（不做策略截断、不做渐进式）
     console.log("[sync] backfill start", this.account.email)
     this.backfilling = true
     void this.backfillLoop()
@@ -419,16 +434,14 @@ export class SyncEngine {
   private async backfillLoop(): Promise<void> {
     let idleRounds = 0
     while (!this.stopped) {
-      const policy = getSettings().historyPolicy
-      if (policy === "off") return
-      const folder = this.nextBackfillFolder(policy)
+      const folder = this.nextBackfillFolder()
       if (!folder) {
         console.log("[sync] backfill done", this.account.email)
         return
       }
       let progressed = false
       try {
-        progressed = await this.backfillBatch(folder, policy)
+        progressed = await this.backfillBatch(folder)
       } catch (error) {
         // 连接抖动时让出，靠普通同步的重连逻辑恢复，不要把整个循环打死
         console.error("[sync] backfill batch failed", folder.path, String(error))
@@ -447,21 +460,19 @@ export class SyncEngine {
   }
 
   /** 挑下一个还能往前翻的文件夹：收件箱优先，其次按侧栏顺序。 */
-  private nextBackfillFolder(policy: "all" | "recent"): Folder | undefined {
+  private nextBackfillFolder(): Folder | undefined {
     const folders = listFolders(this.account.id)
     for (const folder of folders) {
-      const local = countFolder(folder.id).total
       // 游标为 0 表示已经翻到最底；null 表示还没开始，用当前最小 UID 当起点
       if (folder.backfillUid !== null && folder.backfillUid < 1) continue
       if (folder.backfillUid === null && oldestUid(folder.id) === null) continue
-      if (policy === "recent" && local >= RECENT_LIMIT) continue
       return folder
     }
     return undefined
   }
 
   /** 往前拉一批头部，返回是否真的有进展（false = 这个文件夹到底了）。 */
-  private async backfillBatch(folder: Folder, policy: "all" | "recent"): Promise<boolean> {
+  private async backfillBatch(folder: Folder): Promise<boolean> {
     const client = this.client
     if (!client) return false
     // 游标而不是 MIN(uid)：服务端 UID 有空洞，空批次会让 MIN 原地不动
@@ -473,9 +484,7 @@ export class SyncEngine {
       return true
     }
     const local = countFolder(folder.id).total
-    if (policy === "recent" && local >= RECENT_LIMIT) return false
-    const room = policy === "recent" ? RECENT_LIMIT - local : BACKFILL_BATCH
-    const size = Math.max(20, Math.min(BACKFILL_BATCH, room))
+    const size = BACKFILL_BATCH
     const to = cursor
     const from = Math.max(1, to - size + 1)
 
@@ -786,6 +795,8 @@ export class SyncEngine {
     if (!client || this.stopped || this.reconciling) return
     this.reconciling = true
     try {
+      // 文件夹清单跟着每次对账刷新：网页版删掉的文件夹会在这里连本地邮件一起删掉
+      const foldersRemoved = await this.refreshFolders()
       await this.flushFlags()
       // 只对已经同步过的文件夹对账；全新文件夹交给 syncFolder 建立游标
       const folders = listFolders(this.account.id).filter((folder) => folder.uidValidity !== null)
@@ -926,7 +937,9 @@ export class SyncEngine {
         }
         updateFolderCounts(folder.id, countFolder(folder.id))
       }
-      if (added > 0 || moved > 0 || expired.length > 0 || flagged > 0) {
+      // 只删文件夹时 added/moved/flagged 全是 0，但 UI 必须收到事件才会重拉侧栏，
+      // 否则启动瞬间取到的旧文件夹清单会一直挂在界面上。
+      if (added > 0 || moved > 0 || expired.length > 0 || flagged > 0 || foldersRemoved > 0) {
         console.log(
           "[sync] reconcile " + reason,
           this.account.email,

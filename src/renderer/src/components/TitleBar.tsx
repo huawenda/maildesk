@@ -72,12 +72,8 @@ interface TitleBarProps {
   /** 左段与侧栏同宽：左段延续侧栏底色，右段延续卡片底色，避免横向色带。 */
   sidebarWidth: number
   left: ReactNode
-  /** 列表宽度：用来把列表/阅读器之间的 1px 分隔线延伸进标题栏。 */
-  listWidth: number
   collapsed: boolean
   onToggleCollapsed: () => void
-  title: string
-  unread: number
   onOpenSearch: () => void
   density: Density
   onDensityChange: (density: Density) => void
@@ -87,12 +83,9 @@ interface TitleBarProps {
 
 export function TitleBar({
   sidebarWidth,
-  listWidth,
   left,
   collapsed,
   onToggleCollapsed,
-  title,
-  unread,
   onOpenSearch,
   density,
   onDensityChange,
@@ -115,10 +108,7 @@ export function TitleBar({
         {left}
       </div>
 
-      <div className="relative flex flex-1 items-center gap-1 bg-card pl-2">
-        {/* 让列表与阅读器之间的分隔线一路顶到窗口上沿 */}
-        <div className="absolute inset-y-0 w-px bg-border" style={{ left: listWidth }} />
-
+      <div className="flex flex-1 items-center gap-1 bg-background pl-2">
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -127,12 +117,6 @@ export function TitleBar({
         >
           {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
         </button>
-
-        <span className="text-[15px] font-semibold">{title}</span>
-        <span className="text-[12px] tabular-nums text-muted-foreground">{unread} 封未读</span>
-
-        {/* 拖拽留白：标题与工具按钮之间的一段 */}
-        <div className="h-full flex-1" />
 
         <button type="button" onClick={onOpenSearch} title="搜索 (Ctrl K)" className={ICON_BUTTON}>
           <Search className="size-4" />
@@ -144,7 +128,7 @@ export function TitleBar({
               <Rows3 className="size-4" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-36">
+          <DropdownMenuContent align="start" className="w-36">
             <DropdownMenuRadioGroup value={density} onValueChange={(value) => onDensityChange(value as Density)}>
               {densityOptions.map((option) => (
                 <DropdownMenuRadioItem key={option.id} value={option.id} className="text-[13px]">
@@ -154,6 +138,9 @@ export function TitleBar({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* 拖拽留白：折叠/搜索/密度靠左，深浅切换与窗口三键留在右端 */}
+        <div className="h-full flex-1" />
 
         <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5 [-webkit-app-region:no-drag]">
           {themeOptions.map(({ mode: option, icon: Icon, label }) => (
@@ -173,6 +160,7 @@ export function TitleBar({
             </button>
           ))}
         </div>
+
 
         <div className="mx-1 h-4 w-px bg-border" />
 

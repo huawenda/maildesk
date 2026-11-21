@@ -36,6 +36,8 @@ export function useHotkeys(handlers: HotkeyHandlers, enabled = true): void {
       if (!handler) return
       const typing = isTypingTarget(event.target)
       const modifier = event.ctrlKey || event.metaKey
+      // 输入框里的 Ctrl+A 是「全选文本」，不能被邮件列表的全选抢走
+      if (typing && combo === "ctrl+a") return
       if (typing && !modifier && combo !== "escape") return
       event.preventDefault()
       handler(event)

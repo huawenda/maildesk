@@ -65,6 +65,7 @@ docs/                PRD、UI 参考、截图
 - 只有这三种情况才用自动化截图（`MAILDESK_CAPTURE` / `MAILDESK_CAPTURE_LIGHT`）：需要像素级比对、用户肉眼无法确认、以及 debug（白屏/溢出/渲染错误）。
 - 每次改完跑 `npm run typecheck`；结构性改动再跑 `npm run build`。
 - 后台 `npm run dev` 属于用户资产：不要随手 kill。截图脚本与 dev 冲突（单实例锁），需要时先停 dev，截完立即重启并告知用户。
+- **提交与推送必须由用户明确指令触发**：不要自作主张 `git commit` / `git push`，改完代码停在“工作区脏”的状态等用户说提交。用户说“提交”只做 commit，说“推送”才 push。
 - 仓库分支 `main`。提交信息用中文 Conventional Commits（`feat:` / `fix:` / `docs:` / `chore:` / `refactor:`），一次提交只做一件事，body 写清“为什么”。
 - 不要提交 `node_modules/`、`out/`、`release/`、`.capture/`；`docs/ui-refs/` 与截图属于设计依据，要提交。
 - 不新增依赖前先说明理由；能用一个现成库解决的不要手写。

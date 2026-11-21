@@ -1,0 +1,25 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>邮件客户端 UI 参考</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#0f1115;color:#e7e9ee;font:15px/1.65 "Segoe UI","Microsoft YaHei UI",sans-serif}
+header{padding:40px 48px 8px}
+h1{font-size:26px;margin:0 0 8px}
+.sub{color:#9aa3b2;font-size:14px}
+.grid{padding:24px 48px 64px;display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:28px}
+.card{background:#171a21;border:1px solid #242938;border-radius:14px;overflow:hidden}
+.card img{display:block;width:100%;height:auto;background:#000}
+.meta{padding:14px 16px 18px}
+.name{font-weight:600;font-size:15px;margin-bottom:4px}
+.desc{color:#a9b1c0;font-size:13px}
+.tag{display:inline-block;margin-top:10px;font-size:12px;color:#7fb2ff;background:#1b2436;border:1px solid #24314d;padding:2px 8px;border-radius:999px}
+</style></head><body>
+<header><h1>邮件客户端 UI 参考</h1><div class="sub">7 个成熟产品的主界面，用于确定 MailDesk 的布局、密度与配色方向</div></header>
+<div class="grid">
+<div class="card"><img src="outlook-new.jpg" alt="Outlook (new, Windows)"><div class="meta"><div class="name">Outlook (new, Windows)</div><div class="desc">微软新版 Outlook：左侧 App Rail（邮件/日历/联系人/To Do 切换）+ 账户分组 + Focused/Other 分栏 + 右侧阅读窗格。顶部是 Ribbon 式命令条。</div><span class="tag">chrome 最重、信息层级最完整</span></div></div>
+<div class="card"><img src="thunderbird-supernova.png" alt="Thunderbird 115 Supernova"><div class="meta"><div class="name">Thunderbird 115 Supernova</div><div class="desc">极窄图标栏 + 统一文件夹（Unified Folders）+ 标签（Tags）分区 + 列表/阅读器。工具栏与搜索都收在列表列顶部。</div><span class="tag">结构最接近我们要做的三栏</span></div></div>
+<div class="card"><img src="mimestream.png" alt="Mimestream (macOS)"><div class="meta"><div class="name">Mimestream (macOS)</div><div class="desc">最干净的实现：账户切换做成顶部两个大胶囊（Personal/Work），文件夹树、列表、会话气泡式阅读器；颜色仅用于标签。</div><span class="tag">排版与留白的参考价值最高</span></div></div>
+<div class="card"><img src="emclient.webp" alt="eM Client"><div class="meta"><div class="name">eM Client</div><div class="desc">传统桌面三栏 + 右侧 AI Assistant 固定侧栏；列表行有发件人头像、分类色块、附件图标。</div><span class="tag">信息密度与行高控制得最好</span></div></div>
+<div class="card"><img src="canary.jpg" alt="Canary Mail (深色)"><div class="meta"><div class="name">Canary Mail (深色)</div><div class="desc">深色主题示范：面板用不同明度的深灰分层，选中项用品牌蓝填充，正文卡片式浮起。</div><span class="tag">暗色 token 设计的直接参考</span></div></div>
+<div class="card"><img src="missive.jpg" alt="Missive"><div class="meta"><div class="name">Missive</div><div class="desc">团队协作式：会话（Thread）为中心，右侧是对话流而非单封邮件；大量圆角气泡与标签胶囊。</div><span class="tag">会话聚合与标签体系</span></div></div>
+<div class="card"><img src="spark.jpg" alt="Spark Desktop"><div class="meta"><div class="name">Spark Desktop</div><div class="desc">智能收件箱（Smart Inbox）把邮件自动分到 People/Notifications/Newsletters 卡片组；左侧是极简文件夹。</div><span class="tag">分组卡片式列表的思路</span></div></div>
+</div></body></html>

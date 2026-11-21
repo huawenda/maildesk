@@ -62,7 +62,8 @@ docs/                PRD、UI 参考、截图
 - 层级靠明度差，不靠边框堆叠；列表与阅读器之间只保留 1px `--border`。
 - 未读/已读先靠字重（600 / 400）区分，再让已读行整体暗一档（头像 `opacity-60`、发件人 `foreground/70`、主题与日期/大小 `foreground/65`、摘要与时间 `muted-foreground/65`，未读行保持纯 `--foreground`）；**档位是用户反复调出来的**：`/60` 太糊、`/80` 反差不够，最终要求「已读再暗一档、提高反差」，所以以 `/65`–`/70` 为准，不要再改回 `/85`，也不要压到 `/50`。深色 `--muted-foreground` 保持 `#A6A6A6`（约 7.8:1），`--border` 不低于 `#2A2A2A`；不要在列表里给已读行加别的颜色。
 - 选中行整行填充 `--primary`，文字纯白，**不缩放**；动效只动 `opacity` / `transform`，120–160ms `ease-out`。
-- 阅读器头部顺序：主题 → 发件人 → 标签 chip 与附件 chip（同一行 `flex-wrap`）→ 正文卡片。附件必须在首屏可见，不许沉到长正文下方。
+- 阅读器头部顺序：主题 → 发件人 → 标签 chip 与附件 chip（同一行 `flex-wrap`）→ 正文。附件必须在首屏可见，不许沉到长正文下方。
+- **正文只有 HTML 才套白纸卡片**：`bg-white ring-1 ring-black/10 dark:ring-black/20` 是给浅色印刷品邮件用的“纸”，宽度 `mx-auto w-full max-w-[720px]`——上限 720px 是为了让纸贴着内容居中，铺满阅读器会让 600px 邮件右边留一大片白、卡片变成白色面板。纯文本没有自带底色，必须直接落在 `bg-card` 画布上（`max-w-[76ch]`、`whitespace-pre-wrap`、`break-words`），**不要**再套 `bg-muted` 圆角卡片——卡片在邮件语义里是附件/附属块，正文套卡片会出现双重内边距，浅色下是灰叠灰，用户明确否掉（2026-11-22）。纯文本 `>` 引用用左侧 2px 竖线 + 缩进，不画卡片。
 - **图标已定稿为「双色 M」**（2026-11-22）：深灰圆角瓦片（`#232323 → #141414`）+ 左白右 `#2659CC` 的几何 M，中缝即信封折线。不要换回信封/信纸等通用图形。改图标只改 `docs/icon-proposals/generate.py` 里的 `M_POINTS` / `M_STROKE`（16/24 另有 `M_POINTS_SMALL` / `M_STROKE_SMALL`，中缝抬高、笔画加粗，否则降采样后糊成一坨），重跑脚本会同时刷新 `build/icon.ico`、`build/icon-*.png`、`build/icon.png` 与 `resources/tray*.png`；托盘的 M 是单色（`tray.png` 白 / `tray-dark.png` 深灰），**不要**拿应用图标直接缩小当托盘图标；`tray.ts` 用 `nativeTheme.shouldUseDarkColors` 选图标，并监听 `nativeTheme` 的 `updated` 事件实时切换——只加载白色版会在浅色任务栏上变成看不见的白影（用户实测）。
 
 ## 工作流约定
@@ -86,6 +87,13 @@ docs/                PRD、UI 参考、截图
 - 需要看「选中邮件」的阅读器状态时，加 `MAILDESK_CAPTURE_SELECT=1`，截图前会自动点第一行；`MAILDESK_CAPTURE_ROW=n` 点第 n 行、`MAILDESK_CAPTURE_ACCOUNT=<邮箱片段>` 先切账户、`MAILDESK_CAPTURE_SCROLL=<px|1>` 滚动阅读器（1 表示滚到底）。列表密度与侧栏折叠的持久化 key 是 `localStorage["maildesk.density"]`（`compact`/`standard`/`comfortable`）与 `localStorage["maildesk.sidebarCollapsed"]`。另外列表宽度是 `localStorage["maildesk.listWidth"]`（320 ~ 窗口一半，默认 380，双击分隔线复位；上限用 `listMaxWidth(window.innerWidth)` 动态算，窗口 resize 时要夹一次）；分隔线本身就是拖拽把手（5px 命中区，`-mx-[2.5px]` 跨在边界上），所以 Reader 不能再自带 `border-l`，否则叠成 2px。
 - Radix 的触发器只认真实指针事件：截图脚本里 `.click()` 打不开下拉菜单，必须依次 dispatch `pointerdown/mousedown/pointerup/mouseup/click`。
 - **HTML 正文不要反色、不要抹平浅色底板**：邮件按浅色印刷品设计，抹掉 `bgcolor` 后深色字落在深色卡片上完全不可读（招商银行账单那次翻车）。现在的做法是整块白纸卡片 + `color-scheme: light`，保留 `bgcolor`/`background`/`<style>`。另外别给 `td/th` 加 padding、别加全局 `* { max-width: 100% !important }`，会把定宽单元格压窄导致数字折行。
+- **HTML 正文的用户可达面都在 iframe 里收口**（`HtmlBody.tsx`）：
+  - 远程图片默认放行；拦截态给 srcDoc 注入 CSP，把 `@import`、`background-image: url()`、`@font-face` 这些「不用 `<img>` 也能联网」的通道一起堵死，只放开 `img-src data:`。只替换 `<img>` 是不够的，PRD 的「拦截时零外部请求」靠 CSP 成立。
+  - 链接用 `click` 委托：`#` 锚点放行给 iframe，`http(s)`/`//`/`mailto:`/`tel:` 走 `mail.openExternal`（主进程白名单已含 mailto/tel），其余 `preventDefault`；不要恢复成「每个 `<a>` 挂 preventDefault 且只认 http(s)」，那会让 mailto 和页内跳转点了没反应。
+  - 长引用（`blockquote` / `.gmail_quote` / `#divRplyFwdMsg` / `.yahoo_quoted`）超过 260px 或 500 字就折叠成「显示引用内容（N 字）」横条；折叠/展开靠 body 的 ResizeObserver 自动重算 iframe 高度。
+  - `cid:` 内嵌图片不落库，渲染时换透明占位 + `alt="内嵌图片"`；想真正显示需要按 `contentId` 找到附件再走 `attachments:preview` 拉 data URL 并缓存。
+  - 失效图片必须在 iframe 里接 `error`：声明尺寸 ≤2px 的追踪像素直接 `display:none`，其余去掉 `src` 换浅灰占位。否则 Chrome 会画碎图图标（招行「每日信用管家」末尾那个 1 字节 jpeg 就是追踪像素），而用户对比 QQ 邮箱时会觉得“原邮件没有这个破图”。
+  - **iframe 的 `zoom` 自适配必须先归 1 再测宽**：带着旧 `zoom` 读 `scrollWidth` 会得到缩过的宽度，窗口恢复后比例恒等于 1、邮件永远回不到原始大小（用户实测）。改 `measure()` 时别把「临时归 1 → 读 naturalWidth → 还原」这三步省掉。
 - 在 MSYS bash 里跑 `npx shadcn add` 会把别名 `@/` 当成路径：文件被写进字面量目录 `./@/components/ui/`，且 `import { cn } from "cn"` 是坏的。跑完检查一次路径与 import，必要时手动搬到 `src/renderer/src/components/ui/` 并把 import 改成 `@/lib/utils`。
 - 后台 job 里直接启动 GUI 版 electron（`electron.exe .`）会在 2.5s 内以 `exit code: 2147483651`（STATUS_BREAKPOINT）退出且日志为空；前台 `timeout 6 electron.exe .` 正常。验数据层用 `MAILDESK_SELFTEST=1 MAILDESK_DATA_DIR=<tmp> electron.exe .`，它跑完自行退出并打印 `SELFTEST {...}`。
 - `safeStorage` 的同步 API 在 Electron 45 已废弃，用 `isAsyncEncryptionAvailable` / `encryptStringAsync` / `decryptStringAsync`（后者返回 `{ result, shouldReEncrypt }`，需要时重新加密落库）。

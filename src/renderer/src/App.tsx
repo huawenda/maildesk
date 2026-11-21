@@ -694,7 +694,7 @@ export default function App() {
       )}
     >
       <TitleBar
-        sidebarWidth={collapsed ? 64 : 240}
+        sidebarWidth={collapsed ? 50 : 240}
         left={
           <AccountCapsule
             accounts={accounts}

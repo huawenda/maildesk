@@ -36,7 +36,7 @@ export function AccountCapsule({ accounts, activeAccountId, collapsed, onSelect,
           className={cn(
             "flex h-7 min-w-0 items-center gap-2 rounded-md text-left transition-colors hover:bg-foreground/[0.05] data-[state=open]:bg-foreground/[0.08] [-webkit-app-region:no-drag]",
             "flex-1",
-            // 与侧栏文件夹图标对齐：展开时图标中心 25.5px，折叠时 32px
+            // 与侧栏文件夹图标对齐：展开时图标中心 25.5px，折叠（50px）时 25px
             collapsed ? "justify-center" : "pl-[5.5px] pr-1"
           )}
         >

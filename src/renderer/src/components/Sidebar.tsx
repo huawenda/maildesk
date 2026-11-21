@@ -75,7 +75,7 @@ export function Sidebar({
     <aside
       className={cn(
         "flex shrink-0 flex-col pb-2 pt-2.5 transition-[width] duration-150 ease-out",
-        collapsed ? "w-16 px-2" : "w-[240px] px-2.5"
+        collapsed ? "w-[50px] px-2" : "w-[240px] px-2.5"
       )}
     >
       <nav
@@ -85,8 +85,10 @@ export function Sidebar({
       >
         {folders.map((folder) => {
           const Icon = folderIcons[folder.icon] ?? Folder
-          // 折叠态没有缩进空间，容器行直接省略，只留可点条目
+          // 折叠态只保留系统文件夹：自建目录在 64px 的图标栏里既看不出层级，
+          // 也认不出是哪个箱子，统一藏起来（展开后从「其他文件夹」进）
           if (collapsed && !folder.selectable) return null
+          if (collapsed && folder.icon === "folder") return null
           if (!collapsed && hidden.has(folder.id)) return null
           const indent = collapsed ? 0 : folder.depth * 14
           const expanded = !collapsedGroups.includes(folder.id)

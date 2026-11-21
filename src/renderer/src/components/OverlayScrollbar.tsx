@@ -21,7 +21,29 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
     if (!element || !bar) return
 
     let hideTimer: number | null = null
+    let rafId: number | null = null
     let dragging: { startY: number; startScroll: number; track: number; range: number } | null = null
+
+    // 细条可见时每帧重算一次位置。窗口最大化/改尺寸、拖动列表宽度都可能只改布局
+    // 而不触发我们挂的那几个事件（实测读屏栏会停在旧窗口宽度的位置），一帧一读
+    // getBoundingClientRect 的成本可以忽略，换来的是浮层永远不会停在旧边缘。
+    const tick = () => {
+      rafId = null
+      update()
+      // update 可能因为内容不再溢出而把细条隐藏，此时停表，别空转
+      if (bar.style.opacity === "1") rafId = window.requestAnimationFrame(tick)
+    }
+
+    const startLoop = () => {
+      if (rafId === null) rafId = window.requestAnimationFrame(tick)
+    }
+
+    const stopLoop = () => {
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId)
+        rafId = null
+      }
+    }
 
     const show = () => {
       if (hideTimer !== null) {
@@ -29,6 +51,7 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
         hideTimer = null
       }
       bar.style.opacity = "1"
+      startLoop()
     }
 
     const scheduleHide = () => {
@@ -37,6 +60,7 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
       hideTimer = window.setTimeout(() => {
         hideTimer = null
         bar.style.opacity = "0"
+        stopLoop()
       }, HIDE_DELAY)
     }
 
@@ -47,6 +71,7 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
       if (rect.height <= 0 || rect.width <= 0 || range <= 1) {
         bar.style.opacity = "0"
         bar.style.pointerEvents = "none"
+        stopLoop()
         return
       }
       const height = Math.max(MIN_THUMB_HEIGHT, Math.round((viewport * viewport) / element.scrollHeight))
@@ -116,6 +141,7 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
 
     return () => {
       if (hideTimer !== null) window.clearTimeout(hideTimer)
+      stopLoop()
       stopDrag()
       element.removeEventListener("scroll", onScroll)
       element.removeEventListener("pointerenter", onEnter)

@@ -142,12 +142,17 @@ function formatAddress(name: string | null, address: string): string {
   return name ? `${name} <${address}>` : address
 }
 
+/**
+ * 纯文本正文按「空行」分块，块内保留原始换行与缩进（业务邮件靠全角空格缩进、
+ * 靠单换行分行；之前把单换行也折成空格，列表和签名会挤成一坨）。渲染端用 whitespace-pre-wrap 还原。
+ */
 function toParagraphs(text: string | null): string[] {
   if (!text) return []
   return text
-    .split(/\r?\n\s*\r?\n/)
-    .map((line) => line.replace(/[ \t]+/g, " ").trim())
-    .filter(Boolean)
+    .replace(/\r\n/g, "\n")
+    .split(/\n[ \t]*\n/)
+    .map((block) => block.replace(/\n+$/, "").replace(/^\n+/, ""))
+    .filter((block) => block.trim().length > 0)
 }
 
 export function summaryToMessage(summary: MessageSummary): Message {

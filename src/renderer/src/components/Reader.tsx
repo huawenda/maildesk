@@ -309,12 +309,12 @@ export function Reader({
               <HtmlBody key={message.id} html={message.bodyHtml} fontSize={fontSize} remoteImages={remoteImages} />
             </div>
           ) : (
-            <div className="mt-6 rounded-xl bg-muted px-6 py-6">
-              <div className="space-y-4 leading-[1.75] text-foreground/90" style={{ fontSize }}>
-                {message.body.map((paragraph, index) => (
-                  <p key={index}>{paragraph}</p>
-                ))}
-              </div>
+            // 纯文本没有自带底色，直接落在阅读画布上：卡片在邮件语义里是附件/附属块，
+            // 正文套卡片会造成双重内边距，浅色下还会灰叠灰（用户 2026-11-22 反馈）
+            <div className="mt-6 max-w-[76ch] space-y-4 leading-[1.75] text-foreground/90" style={{ fontSize }}>
+              {message.body.map((paragraph, index) => (
+                <PlainBodyBlock key={index} text={paragraph} />
+              ))}
             </div>
           )}
         </article>
@@ -435,4 +435,19 @@ function Recipients({ message }: { message: Message }) {
       ) : null}
     </div>
   )
+}
+
+/** 纯文本块：整块都以 `>` 开头时按引用渲染（左侧竖线 + 次要文字），其余保留原始换行与缩进。 */
+function PlainBodyBlock({ text }: { text: string }) {
+  const lines = text.split("\n")
+  const isQuote = lines.length > 0 && lines.every((line) => line.trimStart().startsWith(">"))
+  if (isQuote) {
+    const quote = lines.map((line) => line.replace(/^\s*>\s?/, "")).join("\n")
+    return (
+      <blockquote className="border-l-2 border-border pl-3 text-muted-foreground">
+        <span className="whitespace-pre-wrap break-words">{quote}</span>
+      </blockquote>
+    )
+  }
+  return <p className="whitespace-pre-wrap break-words">{text}</p>
 }

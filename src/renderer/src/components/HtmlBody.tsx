@@ -152,19 +152,23 @@ export function HtmlBody({ html, fontSize = 14, remoteImages }: HtmlBodyProps) {
       setHeight((value) => (Math.abs(value - next) > 1 ? next : value))
     }
     // 失效图片：Chrome 默认画碎图图标，原邮件（QQ 等）走图片代理 + 直接隐藏。
-    // 追踪像素（0×0 / 1×1，常见实现是返回 1 字节的“图片”）直接不占位；
-    // 有正常声明尺寸的失败图保留尺寸，换成浅灰占位，避免版式塌陷。
+    // 追踪像素（0×0 / 1×1，常见实现是返回 1 字节的“图片”）直接移除；
+    // 有正常声明尺寸的失败图保留尺寸，换成浅灰占位 div——不能只删 src，
+    // 留下一个空的 <img> 浏览器照样会画碎图图标（实测）。
     const neutralize = (img: HTMLImageElement) => {
       const w = Number(img.getAttribute("width") ?? 0)
       const h = Number(img.getAttribute("height") ?? 0)
       if (w <= 2 && h <= 2) {
-        img.style.display = "none"
+        img.remove()
         return
       }
-      img.removeAttribute("src")
-      img.setAttribute("alt", "图片加载失败")
-      img.style.background = "#f2f2f2"
-      img.style.borderRadius = "6px"
+      const box = doc.createElement("div")
+      box.textContent = "图片加载失败"
+      box.style.cssText =
+        `display:flex;align-items:center;justify-content:center;` +
+        `width:${w}px;height:${h}px;max-width:100%;box-sizing:border-box;` +
+        `background:#f2f2f2;border-radius:6px;color:#8a8a8a;font-size:12px;`
+      img.replaceWith(box)
     }
     doc.querySelectorAll("img").forEach((img) => {
       if (img.complete) {

@@ -304,8 +304,10 @@ export function Reader({
           ) : null}
 
           {message.bodyHtml ? (
-            // HTML 邮件按浅色印刷品渲染：白纸卡片保留邮件原配色，不做深色反色
-            <div className="mt-6 overflow-hidden rounded-xl bg-white ring-1 ring-black/20">
+            // HTML 邮件按浅色印刷品渲染：白纸卡片保留邮件原配色，不做深色反色。
+            // 宽度贴着内容（上限 720px）并居中——铺满阅读器的话，600px 定宽邮件
+            // 右侧会留一大片白，卡片就不像「一张纸」而像一块白色面板。
+            <div className="mx-auto mt-6 w-full max-w-[720px] overflow-hidden rounded-xl bg-white ring-1 ring-black/10 dark:ring-black/20">
               <HtmlBody key={message.id} html={message.bodyHtml} fontSize={fontSize} remoteImages={remoteImages} />
             </div>
           ) : (

@@ -44,12 +44,17 @@ const filters: { id: ListFilter; label: string }[] = [
 const ROW_HEIGHT: Record<Density, number> = {
   // 紧凑视图是 Foxmail 式表格式单行，行高贴近 Foxmail 的 26px
   compact: 26,
-  standard: 72,
+  standard: 60,
   comfortable: 88
 }
 
-/** 紧凑视图的日期分组条高度 */
+/** 日期分组条高度（紧凑视图全宽表格） */
 const GROUP_HEIGHT = 24
+/** 标准/宽松视图里组头条下方留 6px（与组内第一封 / 下一个组头）；
+ *  上方不再额外加上边距——上一项自己的 6px 下间距就是组与组之间的呼吸 */
+const GROUP_BOTTOM_GAP = 6
+/** 标准/宽松视图里邮件行之间的间距，必须和组头条到第一封邮件的 6px 一致 */
+const ROW_GAP = 6
 
 /* 紧凑视图的列宽：状态 / 附件 / 星标固定，发件人 / 日期 / 大小可拖动列分隔线调整（持久化到 localStorage） */
 const COL_STATUS = "w-[18px]"
@@ -69,6 +74,25 @@ const COL_MIN: CompactCols = { sender: 56, date: 72, size: 48 }
 /** 状态 + 附件 + 星标 + 左右内边距的固定占位，剩下的才分给可调列 */
 const COL_FIXED = 18 + 18 + 16 + 16
 const SUBJECT_MIN = 96
+
+const DATE_FONT = '12.5px "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif'
+let dateCtx: CanvasRenderingContext2D | null | undefined
+let weekdayDateMin: number | null = null
+
+/** 日期列放得下「11-19 (周四) 13:28」时才加周几，否则退回短格式 */
+function fitsWeekdayDate(available: number): boolean {
+  if (dateCtx === undefined) dateCtx = document.createElement("canvas").getContext("2d")
+  if (!dateCtx) return available >= 128
+  if (weekdayDateMin === null) {
+    dateCtx.font = DATE_FONT
+    weekdayDateMin =
+      Math.max(
+        dateCtx.measureText("11-19 (周四) 13:28").width,
+        dateCtx.measureText("2025-04-30 (周三)").width
+      ) + 2
+  }
+  return available >= weekdayDateMin
+}
 
 function clampCol(key: keyof CompactCols, value: unknown): number {
   const number = typeof value === "number" && Number.isFinite(value) ? value : DEFAULT_COLS[key]
@@ -106,7 +130,7 @@ function startOfDay(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 }
 
-/** 紧凑视图的日期分组（Foxmail 口径）：今天 / 昨天 / 本周 / 上周 / 本月 / 上个月 / 更早 */
+/** 紧凑视图的日期分组：今天 / 昨天 / 本周 / 上周 / 两周前 / 三周前 / 上个月 / 更早 */
 function dayBucket(iso: string, now = new Date()): { key: string; label: string } {
   const date = new Date(iso)
   const today = startOfDay(now)
@@ -117,9 +141,8 @@ function dayBucket(iso: string, now = new Date()): { key: string; label: string 
   const monday = today - ((now.getDay() + 6) % 7) * DAY
   if (day >= monday) return { key: "week", label: "本周" }
   if (day >= monday - 7 * DAY) return { key: "last-week", label: "上周" }
-  if (date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()) {
-    return { key: "month", label: "本月" }
-  }
+  if (day >= monday - 14 * DAY) return { key: "two-weeks", label: "两周前" }
+  if (day >= monday - 21 * DAY) return { key: "three-weeks", label: "三周前" }
   const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
   if (date.getFullYear() === lastMonth.getFullYear() && date.getMonth() === lastMonth.getMonth()) {
     return { key: "last-month", label: "上个月" }
@@ -224,6 +247,8 @@ export function MessageList({
   const [cols, setCols] = useState<CompactCols>(readCompactCols)
   const colsRef = useRef(cols)
   colsRef.current = cols
+  // 日期列拖宽到放得下时，日期格式自动带上「(周X)」
+  const dateWithWeekday = useMemo(() => fitsWeekdayDate(cols.date - 6), [cols.date])
   const headerRef = useRef<HTMLDivElement>(null)
   // 列头在滚动容器之外，必须自己让出滚动条宽度，否则星标列会比数据行右移十几像素
   const [gutter, setGutter] = useState(0)
@@ -314,18 +339,55 @@ export function MessageList({
   }
 
   const rowHeight = ROW_HEIGHT[density]
+  const groupRowHeight = compact ? GROUP_HEIGHT : GROUP_HEIGHT + GROUP_BOTTOM_GAP
+  // 行高是内容高度，槽位再额外加行间距；紧凑视图是表格，不加
+  const rowSlot = compact ? rowHeight : rowHeight + ROW_GAP
 
-  // 紧凑视图按日期分组（组头条 + 邮件行），标准/宽松仍是一封一行
+  // 三种密度都按日期分组：组头条与邮件行共用同一套虚拟列表，行高各自不同
   const collapsedSet = useMemo(() => new Set(collapsedGroups), [collapsedGroups])
-  const rows = useMemo<ListRow[]>(() => {
-    if (!compact) return messages.map((message) => ({ kind: "message", key: message.id, message }))
-    return groupByDay(messages, collapsedSet)
-  }, [compact, messages, collapsedSet])
+  const rows = useMemo<ListRow[]>(() => groupByDay(messages, collapsedSet), [messages, collapsedSet])
+
+  // 每个组头条在滚动内容里的起点，用于吸顶时判断「当前是哪一组」
+  const groupAnchors = useMemo(() => {
+    const anchors: { key: string; label: string; count: number; start: number }[] = []
+    let top = 0
+    for (const row of rows) {
+      if (row.kind === "group") anchors.push({ key: row.key, label: row.label, count: row.count, start: top })
+      top += row.kind === "group" ? groupRowHeight : rowSlot
+    }
+    return anchors
+  }, [rows, groupRowHeight, rowSlot])
+
+  const [stickyGroup, setStickyGroup] = useState<(typeof groupAnchors)[number] | null>(null)
+  const stickyKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+    const update = () => {
+      const top = element.scrollTop
+      let active: (typeof groupAnchors)[number] | null = null
+      for (const anchor of groupAnchors) {
+        if (anchor.start <= top + 2) active = anchor
+        else break
+      }
+      // 组头条本身还在视口里时不重复画一条；滚过去之后才吸顶
+      const next = active && top > active.start + 2 ? active : null
+      const nextKey = next?.key ?? null
+      if (nextKey !== stickyKeyRef.current) {
+        stickyKeyRef.current = nextKey
+        setStickyGroup(next)
+      }
+    }
+    update()
+    element.addEventListener("scroll", update, { passive: true })
+    return () => element.removeEventListener("scroll", update)
+  }, [groupAnchors])
 
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => (rows[index]?.kind === "group" ? GROUP_HEIGHT : rowHeight),
+    estimateSize: (index) => (rows[index]?.kind === "group" ? groupRowHeight : rowSlot),
     overscan: 10,
     getItemKey: (index) => rows[index]?.key ?? index
   })
@@ -438,20 +500,39 @@ export function MessageList({
         ) : messages.length === 0 ? (
           <EmptyList filter={filter} />
         ) : (
-          <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+          <>
+            {/* 吸顶组头条：高度 0 的 sticky 容器 + 绝对定位的实心条，不参与滚动高度 */}
+            <div className="sticky top-0 z-10 h-0" aria-hidden={stickyGroup ? undefined : true}>
+              {stickyGroup ? (
+                <div className={cn("absolute inset-x-0 top-0", !compact && "px-2")}>
+                  <div className="h-6">
+                    <GroupHeader
+                      label={stickyGroup.label}
+                      count={stickyGroup.count}
+                      compact={compact}
+                      floating
+                      collapsed={collapsedSet.has(stickyGroup.key)}
+                      onToggle={() => toggleGroup(stickyGroup.key)}
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
             {virtualizer.getVirtualItems().map((row) => {
               const item = rows[row.index]
               if (!item) return null
-              const height = item.kind === "group" ? GROUP_HEIGHT : rowHeight
+              const height = item.kind === "group" ? groupRowHeight : rowSlot
               return item.kind === "group" ? (
                   <div
                     key={item.key}
-                    className="absolute inset-x-0 top-0"
+                    className={cn("absolute inset-x-0 top-0", !compact && "pb-1.5")}
                     style={{ height, transform: `translateY(${row.start}px)` }}
                   >
                     <GroupHeader
                       label={item.label}
                       count={item.count}
+                      compact={compact}
                       collapsed={collapsedSet.has(item.key)}
                       onToggle={() => toggleGroup(item.key)}
                     />
@@ -463,7 +544,7 @@ export function MessageList({
                   >
                     <ContextMenuTrigger asChild>
                       <div
-                        className={cn("absolute inset-x-0 top-0", compact ? "" : "pb-0.5")}
+                        className={cn("absolute inset-x-0 top-0", compact ? "" : "pb-1.5")}
                         style={{ height, transform: `translateY(${row.start}px)` }}
                       >
                         <MessageRow
@@ -475,6 +556,7 @@ export function MessageList({
                           }
                           density={density}
                           cols={cols}
+                          dateWithWeekday={dateWithWeekday}
                           onSelect={onSelect}
                           onToggleStar={onToggleStar}
                         />
@@ -494,7 +576,8 @@ export function MessageList({
                   </ContextMenu>
                 )
             })}
-          </div>
+            </div>
+          </>
         )}
       </div>
       <OverlayScrollbar target={scrollRef} />
@@ -506,11 +589,16 @@ export function MessageList({
 function GroupHeader({
   label,
   count,
+  compact,
+  floating = false,
   collapsed,
   onToggle
 }: {
   label: string
   count: number
+  compact: boolean
+  /** 吸顶浮层：实心底色 + 轻阴影，避免下方邮件行透上来 */
+  floating?: boolean
   collapsed: boolean
   onToggle: () => void
 }) {
@@ -520,7 +608,12 @@ function GroupHeader({
       onClick={onToggle}
       aria-expanded={!collapsed}
       title={collapsed ? "展开本组" : "收起本组"}
-      className="flex h-full w-full items-center gap-1.5 border-b border-border/40 bg-muted/70 px-2 text-left text-[11.5px] font-medium text-foreground/80 transition-colors hover:bg-muted/60"
+      className={cn(
+        "flex h-full w-full items-center gap-1.5 px-2 text-left text-[11.5px] font-medium text-foreground/80 transition-colors",
+        floating ? "bg-muted shadow-sm" : "bg-muted/70 hover:bg-muted/60",
+        // 紧凑视图是全宽表格，组头条跟着表格横线走；标准/宽松是圆角卡片，组头条也收圆角
+        compact ? "border-b border-border/40" : "rounded-lg"
+      )}
     >
       {collapsed ? (
         <ChevronRight className="size-3 shrink-0 opacity-70" />
@@ -572,12 +665,14 @@ interface RowProps {
   selected: boolean
   density: Density
   cols: CompactCols
+  /** 日期列够宽：日期后面加「(周X)」 */
+  dateWithWeekday: boolean
   onSelect: (id: string, additive: boolean) => void
   onToggleStar?: (id: string) => void
 }
 
 /** 行组件 memo 化：删除一行时其余行的 message 对象身份不变，可以整片跳过重渲染 */
-const MessageRow = memo(function MessageRow({ message, selected, density, cols, onSelect, onToggleStar }: RowProps) {
+const MessageRow = memo(function MessageRow({ message, selected, density, cols, dateWithWeekday, onSelect, onToggleStar }: RowProps) {
   const compact = density === "compact"
   const comfortable = density === "comfortable"
   // 已读行整体降一档明度（头像、发件人、主题、摘要、时间一起变淡），未读行保持原亮度
@@ -638,7 +733,7 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
           className={cn("shrink-0 overflow-hidden whitespace-nowrap pr-1.5 text-right text-[12.5px] tabular-nums", subjectText)}
           style={{ width: cols.date }}
         >
-          {formatCompactTime(message.date)}
+          {formatCompactTime(message.date, dateWithWeekday)}
         </span>
         <span
           className={cn("shrink-0 overflow-hidden whitespace-nowrap pr-2 text-right text-[12.5px] tabular-nums", subjectText)}
@@ -675,6 +770,21 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
       </div>
     )
   }
+
+  // 标准视图只展示「发件人 + 主题」，附件/星标挤在主题行右侧；
+  // 宽松视图才是完整三行（含摘要），附件/星标回到摘要行
+  const indicators = (
+    <span className="ml-auto flex shrink-0 items-center gap-1.5">
+      {message.hasAttachments ? <Paperclip className={cn("size-3.5", mutedText)} /> : null}
+      {message.starred ? (
+        <Star
+          className={cn("size-3.5", selected ? "text-primary-foreground" : "text-star")}
+          fill="currentColor"
+          strokeWidth={0}
+        />
+      ) : null}
+    </span>
+  )
 
   return (
     <div
@@ -724,36 +834,30 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
             {sender}
           </span>
           <span className={cn("ml-auto shrink-0 tabular-nums", compact ? "text-[11.5px]" : "text-[12px]", mutedText)}>
-            {formatListTime(message.date)}
+            {formatListTime(message.date, { withTime: true })}
           </span>
-        </div>
-
-        <div
-          className={cn(
-            "truncate",
-            compact ? "text-[13px] leading-[18px]" : "text-[14px] leading-5",
-            message.unread ? "font-semibold" : "font-normal",
-            selected ? "text-primary-foreground" : read ? "text-foreground/65" : "text-foreground"
-          )}
-        >
-          {message.subject || "（无主题）"}
         </div>
 
         <div className="flex items-center gap-2">
-          <span className={cn("truncate", compact ? "text-[12px]" : "text-[13px]", mutedText)}>{message.snippet}</span>
-          <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            {message.hasAttachments ? (
-              <Paperclip className={cn("size-3.5", mutedText)} />
-            ) : null}
-            {message.starred ? (
-              <Star
-                className={cn("size-3.5", selected ? "text-primary-foreground" : "text-star")}
-                fill="currentColor"
-                strokeWidth={0}
-              />
-            ) : null}
+          <span
+            className={cn(
+              "truncate",
+              compact ? "text-[13px] leading-[18px]" : "text-[14px] leading-5",
+              message.unread ? "font-semibold" : "font-normal",
+              selected ? "text-primary-foreground" : read ? "text-foreground/65" : "text-foreground"
+            )}
+          >
+            {message.subject || "（无主题）"}
           </span>
+          {comfortable ? null : indicators}
         </div>
+
+        {comfortable ? (
+          <div className="flex items-center gap-2">
+            <span className={cn("truncate", compact ? "text-[12px]" : "text-[13px]", mutedText)}>{message.snippet}</span>
+            {indicators}
+          </div>
+        ) : null}
       </div>
     </div>
   )

@@ -1,22 +1,29 @@
 const pad = (value: number) => String(value).padStart(2, "0")
 
-/** 列表时间：当天 HH:mm，本年 M月d日，跨年 yyyy/M/d（PRD FR-03.1） */
-export function formatListTime(iso: string, now = new Date()): string {
+/**
+ * 列表时间：当天 HH:mm，本年 M月d日，跨年 yyyy/M/d（PRD FR-03.1）。
+ * `withTime` 让标准/宽松视图在日期后补上 HH:mm；搜索面板不传，保持短格式。
+ */
+export function formatListTime(iso: string, opts: { withTime?: boolean; now?: Date } = {}): string {
+  const now = opts.now ?? new Date()
   const date = new Date(iso)
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  const withTime = opts.withTime ? " " + clock : ""
   const sameDay =
     date.getFullYear() === now.getFullYear() &&
     date.getMonth() === now.getMonth() &&
     date.getDate() === now.getDate()
-  if (sameDay) return `${pad(date.getHours())}:${pad(date.getMinutes())}`
-  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}日`
-  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
+  if (sameDay) return clock
+  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}日${withTime}`
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}${withTime}`
 }
 
 /**
  * 紧凑视图的日期列（Foxmail 口径）：当天「凌晨0:34」，同一年「11-21 23:20」，跨年「2025-04-30」
- * 标准/宽松仍用 formatListTime 的短格式
+ * 标准/宽松仍用 formatListTime 的短格式。
+ * `withWeekday` 为 true 时（日期列被拖宽、放得下）插入「(周X)」：`11-19 (周四) 13:28`。
  */
-export function formatCompactTime(iso: string, now = new Date()): string {
+export function formatCompactTime(iso: string, withWeekday = false, now = new Date()): string {
   const date = new Date(iso)
   const sameDay =
     date.getFullYear() === now.getFullYear() &&
@@ -28,16 +35,20 @@ export function formatCompactTime(iso: string, now = new Date()): string {
     const hour = hours > 12 ? hours - 12 : hours
     return label + hour + ":" + pad(date.getMinutes())
   }
+  const weekday = "日一二三四五六"[date.getDay()]
+  const week = withWeekday ? " (周" + weekday + ")" : ""
   if (date.getFullYear() === now.getFullYear()) {
-    return pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + " " + pad(date.getHours()) + ":" + pad(date.getMinutes())
+    return pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + week + " " +
+      pad(date.getHours()) + ":" + pad(date.getMinutes())
   }
-  return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate())
+  return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + week
 }
 
-/** 阅读器时间：完整到分钟 */
+/** 阅读器时间：完整到分钟，星期用「周X」 */
 export function formatFullTime(iso: string): string {
   const date = new Date(iso)
-  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  const weekday = "日一二三四五六"[date.getDay()]
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 周${weekday} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 export function formatSize(bytes: number): string {

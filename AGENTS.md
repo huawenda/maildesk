@@ -49,7 +49,7 @@ docs/                PRD、UI 参考、截图
 ## 代码约定
 
 - 渲染进程**永远不碰 Node / IMAP**，所有数据走 `window.mail`（preload 暴露的 `MailApi`）。新增能力先加 `src/shared/types.ts` 的类型，再加 IPC，最后接 UI。
-- 颜色只能引用语义 token（`bg-card`、`text-muted-foreground`、`border-border`…），不要在组件里写死 hex；token 只在 `globals.css` 的 `:root` / `.dark` 里定义。
+- 颜色只能引用语义 token（`bg-card`、`text-muted-foreground`、`border-border`…），不要在组件里写死 hex；token 只在 `globals.css` 的 `:root` / `.dark` 里定义。**叠层一律用 `foreground/[0.0x]`（hover、列头、分组条），不要用 `white/[0.0x]`**：白色叠层在浅色主题下等于没画，用户会反馈"浅色没法用/看着累"（2026-11-22 实测）。浅色是「纸灰」不是白：画布 `#F0F0F0`、侧栏/标题栏 `#E6E6E6`、边框 `#CDCDCD`、正文 `#242424`，不要改回纯白 + `#E2E2E2`；调浅色 token 时幅度要够大（`#FFF → #FAFAFA` 这种 4% 的差别用户看不出，会被判定「没改」）。
 - 列表只存 header + snippet，正文懒加载；UI 开发期一律用 `fixtures/messages.json`，不要为了“看着像真的”偷偷接网络。
 - 类名合并用 `cn()`；组件文件一个导出组件 + 局部常量，不用默认导出。
 - 文案中文、标识符英文；时间与未读数用 `tabular-nums`。
@@ -63,6 +63,7 @@ docs/                PRD、UI 参考、截图
 - 未读/已读先靠字重（600 / 400）区分，再让已读行整体暗一档（头像 `opacity-60`、发件人 `foreground/70`、主题与日期/大小 `foreground/65`、摘要与时间 `muted-foreground/65`，未读行保持纯 `--foreground`）；**档位是用户反复调出来的**：`/60` 太糊、`/80` 反差不够，最终要求「已读再暗一档、提高反差」，所以以 `/65`–`/70` 为准，不要再改回 `/85`，也不要压到 `/50`。深色 `--muted-foreground` 保持 `#A6A6A6`（约 7.8:1），`--border` 不低于 `#2A2A2A`；不要在列表里给已读行加别的颜色。
 - 选中行整行填充 `--primary`，文字纯白，**不缩放**；动效只动 `opacity` / `transform`，120–160ms `ease-out`。
 - 阅读器头部顺序：主题 → 发件人 → 标签 chip 与附件 chip（同一行 `flex-wrap`）→ 正文卡片。附件必须在首屏可见，不许沉到长正文下方。
+- **图标已定稿为「双色 M」**（2026-11-22）：深灰圆角瓦片（`#232323 → #141414`）+ 左白右 `#2659CC` 的几何 M，中缝即信封折线。不要换回信封/信纸等通用图形。改图标只改 `docs/icon-proposals/generate.py` 里的 `M_POINTS` / `M_STROKE`（16/24 另有 `M_POINTS_SMALL` / `M_STROKE_SMALL`，中缝抬高、笔画加粗，否则降采样后糊成一坨），重跑脚本会同时刷新 `build/icon.ico`、`build/icon-*.png`、`build/icon.png` 与 `resources/tray*.png`；托盘的 M 是单色（`tray.png` 白 / `tray-dark.png` 深灰），**不要**拿应用图标直接缩小当托盘图标；`tray.ts` 用 `nativeTheme.shouldUseDarkColors` 选图标，并监听 `nativeTheme` 的 `updated` 事件实时切换——只加载白色版会在浅色任务栏上变成看不见的白影（用户实测）。
 
 ## 工作流约定
 
@@ -71,6 +72,7 @@ docs/                PRD、UI 参考、截图
 - 每次改完跑 `npm run typecheck`；结构性改动再跑 `npm run build`。
 - 后台 `npm run dev` 属于用户资产：不要随手 kill。截图脚本与 dev 冲突（单实例锁），需要时先停 dev，截完立即重启并告知用户。
 - **提交与推送必须由用户明确指令触发**：不要自作主张 `git commit` / `git push`，改完代码停在“工作区脏”的状态等用户说提交。用户说“提交”只做 commit，说“推送”才 push。
+- **出包（`npm run package`）同样是明确指令才做**：改了主进程、图标、`resources/` 或配置都不算授权，不要顺手重打安装包；改完就停在源码/资产状态，等用户说“出包”再打。
 - 仓库分支 `main`。提交信息用中文 Conventional Commits（`feat:` / `fix:` / `docs:` / `chore:` / `refactor:`），一次提交只做一件事，body 写清“为什么”。
 - 不要提交 `node_modules/`、`out/`、`release/`、`.capture/`；`docs/ui-refs/` 与截图属于设计依据，要提交。
 - 不新增依赖前先说明理由；能用一个现成库解决的不要手写。
@@ -109,7 +111,7 @@ docs/                PRD、UI 参考、截图
 - 列表右上角「N 封」同样不许拿已加载条数充数（曾出现侧栏 469、未读页签 197 的打架）：全部用 `folderTotal`，未读用 `unreadCounts[folderId]`，「有附件」「星标」没有全量统计就传 `countLabel={null}` 不显示。
 - 核对服务器真实未读数用 `MAILDESK_IMAP_OP='unseen|'`（selftest 的 `runServerOp`，只统计 `\\Seen`，输出 `SERVEROP {op,exists,seen,unseen}`）。实测 472 封里 `seen 3 / unseen 469`，与本地库一致；随后在界面上点开一封未读邮件，服务器 `unseen` 立刻 469→468，说明已读推送链路是通的。
 - 分隔线拖拽**不要用 `setPointerCapture`**：把手只有 5px 宽，指针一离开元素后续 `pointermove` 就收不到（实测拖一下只走一步然后卡住），必须改成 `resizing` 时在 `window` 上挂 `pointermove/pointerup/pointercancel`，宽度上限用 `window.innerWidth` 实时算。
-- **删邮件不能让列表跳回顶部**：`MessageList` 里回顶部的 effect 只能依赖 `folderId` 与 `filter`，依赖 `messages[0]?.id` 时删掉首行也会归零（用户实测「每删一次就刷新到最顶部」）；另外删除后会 `setRefreshTick` 重新取数，骨架屏只在 `loading && messages.length === 0` 时渲染，否则骨架把滚动容器内容清空、`scrollTop` 被夹到 0，同样会跳顶。
+- **删邮件不能让列表跳回顶部、也不能闪**：`MessageList` 里回顶部的 effect 只能依赖 `folderId` 与 `filter`，依赖 `messages[0]?.id` 时删掉首行也会归零（用户实测「每删一次就刷新到最顶部」）。删除/移动成功后**不要 `setRefreshTick`**：本地 `filter` 已经是终态，整箱重取只会白闪（只有 `result.failed > 0` 时猜不出哪几封还在，才回库兜底）。主进程 `afterLocalChange` 的 `messages` 事件 `added` 恒为 0，渲染层只据此刷计数、不重拉列表；新邮件事件才是 `added > 0`。骨架屏只在 `loading && messages.length === 0` 时渲染（否则清空容器高度、`scrollTop` 被夹到 0）；**紧凑列头的条件里不能带 `loading`**，否则每次刷新列头卸载、内容上移 28px，就是用户报的「强制刷新一下、闪烁」。
 - 列表不分页：`src/main/db/messages.ts` 的 `listMessages(folderId)` 一次返回整箱（`ORDER BY sent_at DESC, rowid DESC`），IPC 是 `messages:list`，渲染层 `mail.messages.list(folderId)`。「N 封」用 `folder.totalCount`；因为整箱都在内存里，日期分组的 `(N 封)` 之和必须等于它，不要再用 `visibleCount` 之类的窗口切片去分组——那会让组头合计只有 50，用户会当成总数对不上（m05334 的真实故障）。
 - 账户表单只保留「自定义 IMAP」一种形态（用户明确要求去掉 QQ/163/126/Gmail/Outlook 预设，只连公司自建服务器）；不要再加回服务商预设，也不要在代码里硬编码任何公司的 host。
 - **代码里不能出现 SMTP 依赖**：账户只配 IMAP，添加账户/测试连接/同步全程不碰 25/465/587。公司自建服务器常常只有 993 通，任何“顺手探测一下发件服务器”的改动都会让账户加不上（PRD FR-01 第 5 条）。

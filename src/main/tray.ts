@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Notification, Tray, nativeImage } from "electron"
+import { app, BrowserWindow, Menu, Notification, Tray, nativeImage, nativeTheme, type NativeImage } from "electron"
 import { join } from "node:path"
 import { all } from "./db"
 import { countUnread, latestInFolder } from "./db/messages"
@@ -7,6 +7,7 @@ import { onSyncEvent, syncNow } from "./sync/manager"
 
 let tray: Tray | null = null
 let unsubscribe: (() => void) | null = null
+let themeListener: (() => void) | null = null
 let tooltipTimer: NodeJS.Timeout | null = null
 
 /** 打包后 resources 走 extraResources，开发期直接读仓库里的 resources/。 */
@@ -14,6 +15,17 @@ function resourcePath(name: string): string {
   return app.isPackaged
     ? join(process.resourcesPath, "resources", name)
     : join(app.getAppPath(), "resources", name)
+}
+
+/**
+ * 托盘图标跟着任务栏底色走：深色任务栏用白 M，浅色任务栏用深 M。
+ * 只加载 tray.png 会在浅色任务栏上变成一朵看不见的白影（用户实测）。
+ */
+function trayImage(): NativeImage {
+  const name = nativeTheme.shouldUseDarkColors ? "tray.png" : "tray-dark.png"
+  const image = nativeImage.createFromPath(resourcePath(name))
+  if (image.isEmpty()) logger.error("[tray] icon missing", resourcePath(name))
+  return image
 }
 
 function unreadLabel(): string {
@@ -50,10 +62,15 @@ function notifyNewMail(folderId: string, force = false): void {
 }
 
 export function createTray(): Tray {
-  const image = nativeImage.createFromPath(resourcePath("tray.png"))
-  if (image.isEmpty()) logger.error("[tray] icon missing", resourcePath("tray.png"))
-  tray = new Tray(image)
+  tray = new Tray(trayImage())
   tray.setToolTip(unreadLabel())
+
+  // 系统深浅色切换时（Windows 设置里改「应用模式」）同步换图标
+  const onThemeUpdated = () => {
+    if (tray && !tray.isDestroyed()) tray.setImage(trayImage())
+  }
+  nativeTheme.on("updated", onThemeUpdated)
+  themeListener = () => nativeTheme.off("updated", onThemeUpdated)
 
   const showWindow = () => {
     const win = BrowserWindow.getAllWindows()[0]
@@ -110,6 +127,8 @@ export function testNotify(): void {
 export function destroyTray(): void {
   unsubscribe?.()
   unsubscribe = null
+  themeListener?.()
+  themeListener = null
   if (tooltipTimer) {
     clearInterval(tooltipTimer)
     tooltipTimer = null

@@ -1,6 +1,9 @@
-import { app, BrowserWindow, Menu, ipcMain, shell, session } from "electron"
+import { app, BrowserWindow, Menu, session, shell } from "electron"
 import { join } from "node:path"
 import { writeFile } from "node:fs/promises"
+import { closeDb, openDb } from "./db"
+import { registerIpc } from "./ipc"
+import { runSelfTest } from "./selftest"
 
 const isDev = !app.isPackaged
 const CAPTURE_PATH = process.env.MAILDESK_CAPTURE
@@ -68,6 +71,12 @@ function createWindow(): BrowserWindow {
               .catch(() => undefined)
             await new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()))
             await new Promise((resolve) => setTimeout(resolve, 900))
+            if (process.env.MAILDESK_CAPTURE_SELECT) {
+              await win.webContents
+                .executeJavaScript("document.querySelector('[role=\"option\"]')?.click()")
+                .catch(() => undefined)
+              await new Promise((resolve) => setTimeout(resolve, 400))
+            }
             const image = await win.webContents.capturePage()
             await writeFile(target, image.toPNG())
             console.log("captured", target)
@@ -111,12 +120,14 @@ app.whenReady().then(() => {
     })
   }
 
-  ipcMain.handle("app:info", () => ({
-    version: app.getVersion(),
-    electron: process.versions.electron,
-    platform: process.platform
-  }))
-  ipcMain.handle("app:ping", () => "pong")
+  // 数据库在窗口之前就绪：渲染进程首帧就会请求 accounts/settings。
+  openDb(process.env.MAILDESK_DATA_DIR ?? app.getPath("userData"))
+  registerIpc()
+
+  if (process.env.MAILDESK_SELFTEST) {
+    runSelfTest()
+    return
+  }
 
   createWindow()
 
@@ -127,4 +138,8 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit()
+})
+
+app.on("will-quit", () => {
+  closeDb()
 })

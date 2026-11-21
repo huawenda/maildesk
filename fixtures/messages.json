@@ -1,16 +1,30 @@
 [
   {
     "id": "m-01",
+    "folderId": "inbox",
     "fromName": "张一鸣",
     "fromEmail": "yiming@example.com",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [
+      "finance@example.com",
+      "growth@example.com"
+    ],
     "subject": "Q4 增长复盘：三个渠道口径需要对齐",
     "snippet": "附件里是上周的漏斗数据，我想先确认一下自然流量到底算不算进获客成本……",
-    "time": "16:20",
+    "receivedAgoMinutes": 40,
     "unread": true,
     "starred": true,
-    "hasAttachment": true,
     "labels": [
       "工作"
+    ],
+    "attachments": [
+      {
+        "name": "Q4-funnel.xlsx",
+        "size": 253952,
+        "type": "sheet"
+      }
     ],
     "body": [
       "Hi，",
@@ -21,16 +35,29 @@
   },
   {
     "id": "m-02",
+    "folderId": "inbox",
     "fromName": "Anna Weber",
     "fromEmail": "anna.weber@northwind.io",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [
+      "design@northwind.io"
+    ],
     "subject": "Design review for the new inbox",
     "snippet": "I pushed a first pass of the three-pane layout — spacing still feels tight on 1440px…",
-    "time": "15:02",
+    "receivedAgoMinutes": 120,
     "unread": true,
     "starred": false,
-    "hasAttachment": true,
     "labels": [
-      "Design"
+      "设计"
+    ],
+    "attachments": [
+      {
+        "name": "inbox-v3.fig",
+        "size": 18874368,
+        "type": "other"
+      }
     ],
     "body": [
       "Hey,",
@@ -40,109 +67,281 @@
   },
   {
     "id": "m-03",
-    "fromName": "GitHub",
-    "fromEmail": "noreply@github.com",
-    "subject": "[maildesk/maildesk] PR #12: 三栏布局骨架",
-    "snippet": "layout: add resizable three-pane shell with persisted widths (#12)",
-    "time": "14:47",
+    "folderId": "inbox",
+    "fromName": "阿里云",
+    "fromEmail": "billing@aliyun.com",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [],
+    "subject": "10 月账单已出：合计 ¥ 1,284.60",
+    "snippet": "您的云服务器 ECS 与对象存储 OSS 用量在本月有所上涨，明细见账单页面。",
+    "receivedAgoMinutes": 200,
     "unread": false,
     "starred": false,
-    "hasAttachment": false,
-    "labels": [],
+    "labels": [
+      "账单"
+    ],
+    "attachments": [],
     "body": [
-      "daniel pushed 3 commits to feat/shell.",
-      "layout: add resizable three-pane shell with persisted widths (#12)"
+      "尊敬的客户：",
+      "您 10 月的消费合计 ¥ 1,284.60，较上月上涨 12%。主要增长来自 ECS 与 OSS 的存储费用。",
+      "如对账单有疑问，可在 7 日内提交申诉。"
     ]
   },
   {
     "id": "m-04",
-    "fromName": "Stripe",
-    "fromEmail": "invoices@stripe.com",
-    "subject": "Your invoice for November is ready",
-    "snippet": "Invoice #INV-2041 · ¥1,280.00 — payment will be charged to the card ending in 4242.",
-    "time": "11:30",
-    "unread": false,
-    "starred": false,
-    "hasAttachment": true,
-    "labels": [
-      "账单"
+    "folderId": "inbox",
+    "fromName": "Figma",
+    "fromEmail": "notifications@figma.com",
+    "to": [
+      "me@example.com"
     ],
+    "cc": [],
+    "subject": "本周你的团队有 14 条新评论",
+    "snippet": "Anna、李航 等人在「Inbox v3」中提到了你，点击查看未读评论。",
+    "receivedAgoMinutes": 320,
+    "unread": true,
+    "starred": false,
+    "labels": [
+      "订阅"
+    ],
+    "attachments": [],
     "body": [
-      "Your invoice for November is now available.",
-      "Invoice #INV-2041 — ¥1,280.00. Payment will be charged automatically to the card ending in 4242 on December 1."
+      "本周你的团队在 3 个文件中留下了 14 条评论。",
+      "其中 4 条提到了你，点击左侧链接可直接跳转。"
     ]
   },
   {
     "id": "m-05",
-    "fromName": "少数派",
-    "fromEmail": "newsletter@sspai.com",
-    "subject": "本周值得读的 5 篇",
-    "snippet": "从收件箱到知识库：一个邮箱客户端的自我修养 / 为什么我们重新设计了侧边栏……",
-    "time": "09:12",
+    "folderId": "inbox",
+    "fromName": "王小雨",
+    "fromEmail": "xiaoyu.wang@example.com",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [
+      "team@example.com"
+    ],
+    "subject": "周会改到周四上午 10:30",
+    "snippet": "因为这周有客户来访，周三的会议室被占用了，先挪到周四……",
+    "receivedAgoMinutes": 1440,
     "unread": false,
     "starred": false,
-    "hasAttachment": false,
     "labels": [
-      "订阅"
+      "工作"
     ],
+    "attachments": [],
     "body": [
-      "本周精选：",
-      "1. 从收件箱到知识库：一个邮箱客户端的自我修养",
-      "2. 为什么我们重新设计了侧边栏",
-      "3. 深色界面的三层明度"
+      "大家好，",
+      "因为这周有客户来访，周三的会议室被占用了，周会先挪到周四上午 10:30，还是 3 楼小会议室。",
+      "议题不变：Q4 目标拆解 + 人力盘点。有补充议题的今天下班前发我。"
     ]
   },
   {
     "id": "m-06",
-    "fromName": "王雪",
-    "fromEmail": "xue.wang@example.com",
-    "subject": "关于 IMAP 增量同步的两个坑",
-    "snippet": "UIDVALIDITY 变化千万别只做增量，163 那边切到备用节点就会变，直接把本地库清掉重拉最稳……",
-    "time": "昨天",
+    "folderId": "inbox",
+    "fromName": "Stripe",
+    "fromEmail": "receipts@stripe.com",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [],
+    "subject": "Your receipt from Northwind (#2891-4420)",
+    "snippet": "Thanks for your payment of $49.00. Your next invoice is due on December 1.",
+    "receivedAgoMinutes": 2880,
     "unread": false,
-    "starred": true,
-    "hasAttachment": false,
+    "starred": false,
     "labels": [
-      "工作"
+      "账单"
+    ],
+    "attachments": [
+      {
+        "name": "receipt-2891-4420.pdf",
+        "size": 82432,
+        "type": "pdf"
+      },
+      {
+        "name": "invoice-detail.csv",
+        "size": 4096,
+        "type": "sheet"
+      }
     ],
     "body": [
-      "两个坑，记一下：",
-      "1. UIDVALIDITY 变化千万别只做增量。163 切到备用节点就会变，直接把本地库清掉重拉最稳。",
-      "2. 中文主题的 base64 编码偶尔会把 GBK 当 UTF-8 声明，必须用 iconv-lite 兜底，否则全是乱码。"
+      "Thanks for your payment of $49.00.",
+      "Your next invoice is due on December 1, 2026. You can manage your subscription at any time from the billing portal."
     ]
   },
   {
     "id": "m-07",
-    "fromName": "Vercel",
-    "fromEmail": "notifications@vercel.com",
-    "subject": "Deployment failed: maildesk-web",
-    "snippet": "Build failed in 48s — Module not found: Can't resolve '@fixtures/messages.json'",
-    "time": "昨天",
-    "unread": false,
-    "starred": false,
-    "hasAttachment": false,
-    "labels": [],
+    "folderId": "inbox",
+    "fromName": "李航",
+    "fromEmail": "hang.li@example.com",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [
+      "legal@example.com"
+    ],
+    "subject": "合同终稿，麻烦今天过一遍",
+    "snippet": "法务那边只改了两处：付款节点和违约责任，其余跟上一版一致。",
+    "receivedAgoMinutes": 4320,
+    "unread": true,
+    "starred": true,
+    "labels": [
+      "工作"
+    ],
+    "attachments": [
+      {
+        "name": "合作协议-v7-终稿.pdf",
+        "size": 486912,
+        "type": "pdf"
+      },
+      {
+        "name": "修改说明.docx",
+        "size": 24576,
+        "type": "doc"
+      },
+      {
+        "name": "付款计划.xlsx",
+        "size": 15360,
+        "type": "sheet"
+      },
+      {
+        "name": "签署页.png",
+        "size": 348160,
+        "type": "image"
+      }
+    ],
     "body": [
-      "Your deployment failed.",
-      "Build failed in 48s — Module not found: Can't resolve '@fixtures/messages.json'."
+      "Hi，",
+      "法务那边只改了两处：付款节点从 30 天调整为 45 天，违约责任补充了逾期利息条款。其余跟上一版一致。",
+      "如果没问题，今天下午我安排电子签。有任何一条要谈，直接回我这封。"
     ]
   },
   {
     "id": "m-08",
+    "folderId": "inbox",
     "fromName": "Notion",
-    "fromEmail": "notify@notion.so",
-    "subject": "你在「产品方向」里被 @ 了",
-    "snippet": "李维：Quiet Dark 这版选中态太重了，蓝色整行填充会让人分不清哪些是未读……",
-    "time": "11月18日",
+    "fromEmail": "digest@notion.so",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [],
+    "subject": "你的每周摘要：7 个页面有更新",
+    "snippet": "「Q4 路线图」「招聘计划」等页面本周有新的编辑与评论。",
+    "receivedAgoMinutes": 5760,
     "unread": false,
     "starred": false,
-    "hasAttachment": false,
+    "labels": [
+      "订阅"
+    ],
+    "attachments": [],
+    "body": [
+      "你的工作区本周有 7 个页面更新。",
+      "最活跃的是「Q4 路线图」，共有 12 次编辑与 5 条评论。"
+    ]
+  },
+  {
+    "id": "m-09",
+    "folderId": "inbox",
+    "fromName": "陈默",
+    "fromEmail": "mo.chen@example.com",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [],
+    "subject": "抱歉回复晚了 —— 关于迁移方案的几个顾虑",
+    "snippet": "先说结论：我不反对迁移，但现在这个时间点风险偏大，尤其是数据一致性……",
+    "receivedAgoMinutes": 10080,
+    "unread": false,
+    "starred": false,
     "labels": [
       "工作"
     ],
+    "attachments": [],
     "body": [
-      "李维 在「产品方向」中提到了你：",
-      "Quiet Dark 这版选中态太重了，蓝色整行填充会让人分不清哪些是未读。要不要试试只给左侧加一条 2px 的蓝线？"
+      "先说结论：我不反对迁移，但现在这个时间点风险偏大，尤其是数据一致性这块。",
+      "第一，我们目前没有双写能力，切过去的那一晚如果出现回滚，历史数据要靠备份恢复，RTO 大概在 4 小时以上。第二，新库的读写分离还没压测过，峰值 QPS 估算在 1.2 万，建议先在预发环境跑一周。",
+      "第三，也是我最担心的：权限模型跟现在不完全等价，有几个边缘角色迁移后会多出「查看全部工单」的能力，这个得先补规则。",
+      "如果你觉得时间窗不能延后，我的建议是分两步：先迁读流量，观察一周再迁写。这样即使出问题，回退也只是切回旧库读，影响面小很多。",
+      "你看什么时候方便，我们拉个 30 分钟对一下。"
+    ]
+  },
+  {
+    "id": "m-10",
+    "folderId": "inbox",
+    "fromName": "赵倩 · 招聘",
+    "fromEmail": "hr@example.com",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [
+      "hiring-panel@example.com"
+    ],
+    "subject": "面试安排：周四 15:00 · 高级前端",
+    "snippet": "候选人简历见附件，面试官请提前 10 分钟上线，会议室已预订 3F-东。",
+    "receivedAgoMinutes": 20160,
+    "unread": true,
+    "starred": false,
+    "labels": [
+      "工作"
+    ],
+    "attachments": [
+      {
+        "name": "候选人简历.pdf",
+        "size": 215040,
+        "type": "pdf"
+      }
+    ],
+    "body": [
+      "各位面试官好，",
+      "周四 15:00 安排一位高级前端候选人，形式为线上 + 现场结合，会议室预订在 3F-东。",
+      "请提前 10 分钟上线，面试结束后 1 小时内把评分表填好。"
+    ]
+  },
+  {
+    "id": "m-11",
+    "folderId": "inbox",
+    "fromName": "unknown.sender",
+    "fromEmail": "no-reply@newsletter.example.net",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [],
+    "subject": "",
+    "snippet": "（无主题）这一期的内容主要是三篇关于分布式事务的综述，以及一个开源项目推荐。",
+    "receivedAgoMinutes": 17280000,
+    "unread": false,
+    "starred": false,
+    "labels": [
+      "订阅"
+    ],
+    "attachments": [],
+    "body": [
+      "这一期的内容主要是三篇关于分布式事务的综述，以及一个开源项目推荐。",
+      "如果你不想再收到这类邮件，可以随时退订。"
+    ]
+  },
+  {
+    "id": "m-12",
+    "folderId": "archive",
+    "fromName": "GitHub",
+    "fromEmail": "noreply@github.com",
+    "to": [
+      "me@example.com"
+    ],
+    "cc": [],
+    "subject": "[maildesk] Your SSH key was added to your account",
+    "snippet": "A new SSH key (ED25519) was added to your account on Nov 3, 2026.",
+    "receivedAgoMinutes": 1555200,
+    "unread": false,
+    "starred": false,
+    "labels": [],
+    "attachments": [],
+    "body": [
+      "A new SSH key (ED25519) was added to your account on Nov 3, 2026.",
+      "If this was not you, revoke the key immediately."
     ]
   }
 ]

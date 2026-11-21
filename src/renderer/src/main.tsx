@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client"
 import App from "./App"
 import "./styles/globals.css"
 
+// 应用是单窗口单文档，不需要浏览器式的滚动恢复（否则重载后列表会停在半行）
+if ("scrollRestoration" in history) history.scrollRestoration = "manual"
+
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <App />

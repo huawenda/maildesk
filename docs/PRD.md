@@ -246,6 +246,8 @@
 | --- | --- | --- |
 | 外观 | 主题（浅色/深色/跟随系统） | 跟随系统 |
 | 外观 | 列表密度（紧凑/标准/宽松） | 标准 |
+
+> 列表密度除设置页外，在邮件列表头部提供一个快捷切换入口（M1 已实现），设置页接入后两处共享同一持久化值 `maildesk.density`。
 | 外观 | 正文字号（13/14/15/16） | 14 |
 | 外观 | 强调色 | 蓝 |
 | 账户 | 账户列表、增删改 | — |
@@ -442,8 +444,8 @@
 | IMAP | **imapflow** | Promise API、IDLE、QRESYNC、Gmail/网易兼容 |
 | MIME 解析 | **mailparser**（simpleParser） | 成熟稳定 |
 | 编码兜底 | iconv-lite | GBK/GB2312/GB18030 |
-| 本地库 | **better-sqlite3** + FTS5 | 同步 API，主进程使用；需 electron-rebuild |
-| 配置存储 | electron-store | 窗口位置、偏好设置 |
+| 本地库 | **node:sqlite**（Electron 内置 Node 24）+ FTS5 | 同步 API、零原生依赖，不需要 electron-rebuild / asarUnpack；FTS5 已实测可用（SQLite 3.54） |
+| 配置存储 | SQLite `setting` 表 | 窗口位置、偏好设置；不引 electron-store，减少一层抽象 |
 | 日志 | electron-log | 落盘，便于排查同步问题 |
 | 打包 | electron-builder（NSIS） | Windows 安装包 |
 | HTML 清洗 | dompurify | 渲染前清洗 |
@@ -456,7 +458,7 @@
 3. **Electron 的 `file://` 限制**：`base: './'`、HashRouter、避免绝对路径资源。
 4. **Radix Portal 与多窗口**：Electron 单窗口下正常；若引入独立阅读器窗口需重新挂载 Portal 容器。
 5. **字体**：不用 `next/font`，直接使用系统字体栈或 `@fontsource` 本地包（离线可用）。
-6. **原生模块**：better-sqlite3 必须匹配 Electron ABI，使用 `electron-rebuild`；将其放入 `dependencies` 而非 `devDependencies`，并在 electron-builder 中 `asarUnpack`。
+6. **数据库不引原生模块**：Electron 45 自带 Node 24，`node:sqlite` 提供同步 API 且内置 FTS5，直接 `import { DatabaseSync } from "node:sqlite"` 即可，省掉 `electron-rebuild`、`asarUnpack` 与 Windows 编译链。代价是绑死 Electron 自带的 SQLite 版本；若将来需要更新的 SQLite 特性，再换回 better-sqlite3（届时按 ABI 重新构建）。
 
 ### 7.3 进程与目录结构
 
@@ -560,6 +562,22 @@
       filename TEXT, mime TEXT, size INTEGER, content_id TEXT, local_path TEXT
     );
 
+    -- 凭据：密码用 safeStorage（Windows DPAPI）加密后存 BLOB，明文永不落库
+    CREATE TABLE credential (
+      account_id TEXT PRIMARY KEY REFERENCES account(id) ON DELETE CASCADE,
+      scheme TEXT NOT NULL,                     -- dpapi | plain（加密不可用时的降级，便于识别需重登账户）
+      secret BLOB NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    -- 设置：key/value，替代 electron-store
+    CREATE TABLE setting (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL                       -- JSON
+    );
+
+迁移策略：`PRAGMA user_version` 当作迁移下标，`src/main/db/schema.ts` 里的 `MIGRATIONS` 数组按序执行未应用的条目；每次改 schema 只追加，不改历史项。
+
 存储约定：原始 `.eml` 存 `%APPDATA%/MailDesk/mail/<account>/<folder>/<uid>.eml`，附件按需懒加载抽取；**不把附件二进制写进 SQLite**。数据库启用 WAL 模式。
 
 ### 7.5 IPC 契约
@@ -649,7 +667,7 @@
 
 | 风险 | 影响 | 对策 |
 | --- | --- | --- |
-| Windows 下 better-sqlite3 编译失败 | 阻塞 M2 | 使用预编译二进制 + electron-rebuild；备选 `node:sqlite`（Node 22+ 内置） |
+| 原生模块编译失败 | 阻塞 M2 | 已规避：改用 Electron 内置 `node:sqlite`，无原生编译 |
 | 国内邮箱（163/QQ）IMAP 限制 | 收不到信 | 内置 IMAP ID、授权码引导、常见错误码映射；QQ 需在网页端开启 IMAP |
 | 中文/GBK 邮件乱码 | 阅读体验崩坏 | iconv-lite 按 charset 声明 + 启发式兜底（GB18030 万能解码） |
 | HTML 邮件破坏布局 | 视觉不可控 | webview 隔离 + 注入归一化 CSS + 默认拦截外链资源 |

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, session, shell } from "electron"
+import { app, BrowserWindow, Menu, nativeTheme, session, shell } from "electron"
 import { join } from "node:path"
 import { writeFile } from "node:fs/promises"
 import { CH } from "@shared/channels"
@@ -31,7 +31,8 @@ function createWindow(): BrowserWindow {
     minWidth: 1000,
     minHeight: 640,
     show: false,
-    backgroundColor: "#1B1B1B",
+    // 首帧底色跟系统主题走：浅色用户不该在启动瞬间被闪一块深灰
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#1B1B1B" : "#E6E6E6",
     // 完全自绘标题栏：不要系统标题栏，也不要系统绘制的窗口按钮。
     // 保留 thickFrame（默认 true）才能继续用原生的缩放边框、Aero Snap 与阴影。
     frame: false,

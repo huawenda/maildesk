@@ -34,26 +34,28 @@
 }
 
 :root {
-  --background: #f4f4f4;
-  --foreground: #1a1a1a;
-  --card: #ffffff;
-  --card-foreground: #1a1a1a;
-  --popover: #ffffff;
-  --popover-foreground: #1a1a1a;
+  /* 浅色是「纸灰」而不是白：画布 #F0F0F0、侧栏 #E6E6E6，整窗亮度比纯白低一档；
+     邮件正文仍是白纸卡片，靠画布与白纸的明度差把它托起来，而不是靠更亮的白 */
+  --background: #e6e6e6;
+  --foreground: #242424;
+  --card: #f0f0f0;
+  --card-foreground: #242424;
+  --popover: #fafafa;
+  --popover-foreground: #242424;
   --primary: #2659cc;
   --primary-foreground: #ffffff;
-  --secondary: #f0f0f0;
-  --secondary-foreground: #1a1a1a;
-  --muted: #efefef;
-  --muted-foreground: #5c5c5c;
-  --accent: #e6e6e6;
-  --accent-foreground: #1a1a1a;
-  --destructive: #d93a3a;
+  --secondary: #dddddd;
+  --secondary-foreground: #242424;
+  --muted: #e3e3e3;
+  --muted-foreground: #5f5f5f;
+  --accent: #d4d4d4;
+  --accent-foreground: #242424;
+  --destructive: #c03030;
   --destructive-foreground: #ffffff;
-  --border: #e2e2e2;
-  --input: #e2e2e2;
+  --border: #cdcdcd;
+  --input: #cdcdcd;
   --ring: #2659cc;
-  --star: #c98a1e;
+  --star: #a96f12;
   --radius: 10px;
 }
 

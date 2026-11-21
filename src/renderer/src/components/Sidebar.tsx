@@ -99,7 +99,7 @@ export function Sidebar({
                 aria-expanded={expanded}
                 onClick={() => toggleGroup(folder.id)}
                 className={cn(
-                  "flex h-8 shrink-0 items-center gap-2.5 rounded-md text-[13.5px] text-foreground/92 transition-colors hover:bg-white/[0.05]",
+                  "flex h-8 shrink-0 items-center gap-2.5 rounded-md text-[13.5px] text-foreground/92 transition-colors hover:bg-foreground/[0.06]",
                   collapsed ? "justify-center px-0" : "px-2"
                 )}
                 style={indent ? { paddingLeft: 8 + indent } : undefined}
@@ -126,7 +126,7 @@ export function Sidebar({
               className={cn(
                 "flex h-8 shrink-0 items-center gap-2.5 rounded-md text-[13.5px] transition-colors",
                 collapsed ? "justify-center px-0" : "px-2",
-                active ? "bg-accent font-medium text-foreground" : "text-foreground/92 hover:bg-white/[0.05]"
+                active ? "bg-accent font-medium text-foreground" : "text-foreground/92 hover:bg-foreground/[0.06]"
               )}
               style={indent ? { paddingLeft: 8 + indent } : undefined}
             >
@@ -155,7 +155,7 @@ export function Sidebar({
                   onClick={() => onSelectLabel(label.name)}
                   className={cn(
                     "flex h-8 items-center gap-2.5 rounded-md px-2 text-[13.5px] transition-colors",
-                    active ? "bg-accent font-medium text-foreground" : "text-foreground/92 hover:bg-white/[0.05]"
+                    active ? "bg-accent font-medium text-foreground" : "text-foreground/92 hover:bg-foreground/[0.06]"
                   )}
                 >
                   <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: label.color }} />
@@ -172,7 +172,7 @@ export function Sidebar({
           onClick={onSync}
           title="手动同步 (Ctrl R)"
           className={cn(
-            "flex h-7 items-center gap-1.5 rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-white/[0.04]",
+            "flex h-7 items-center gap-1.5 rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.05]",
             collapsed ? "justify-center px-0" : "px-2"
           )}
         >
@@ -185,7 +185,7 @@ export function Sidebar({
           onClick={onOpenSettings}
           title="设置 (Ctrl ,)"
           className={cn(
-            "flex h-7 items-center gap-1.5 rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground",
+            "flex h-7 items-center gap-1.5 rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
             collapsed ? "justify-center px-0" : "px-2"
           )}
         >

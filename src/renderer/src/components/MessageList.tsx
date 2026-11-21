@@ -369,7 +369,7 @@ export function MessageList({
       {compact && messages.length > 0 ? (
         <div
           ref={headerRef}
-          className="flex h-7 shrink-0 items-stretch border-y border-border/60 bg-white/[0.03] pl-2 text-[11.5px] text-muted-foreground"
+          className="flex h-7 shrink-0 items-stretch border-y border-border/60 bg-foreground/[0.05] pl-2 text-[11.5px] text-muted-foreground"
           style={{ paddingRight: 12 + gutter }}
         >
           <span className={cn("flex shrink-0 items-center justify-center border-r border-border/40", COL_STATUS)}>
@@ -520,7 +520,7 @@ function GroupHeader({
       onClick={onToggle}
       aria-expanded={!collapsed}
       title={collapsed ? "展开本组" : "收起本组"}
-      className="flex h-full w-full items-center gap-1.5 border-b border-border/40 bg-muted/50 px-2 text-left text-[11.5px] font-medium text-foreground/80 transition-colors hover:bg-muted/60"
+      className="flex h-full w-full items-center gap-1.5 border-b border-border/40 bg-muted/70 px-2 text-left text-[11.5px] font-medium text-foreground/80 transition-colors hover:bg-muted/60"
     >
       {collapsed ? (
         <ChevronRight className="size-3 shrink-0 opacity-70" />
@@ -601,7 +601,7 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
         onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey)}
         className={cn(
           "group flex h-full w-full cursor-default select-none items-center border-b border-border/40 pl-2 pr-3 text-left",
-          selected ? "bg-primary" : "hover:bg-white/[0.05]"
+          selected ? "bg-primary" : "hover:bg-foreground/[0.06]"
         )}
       >
         {/* 读取状态与附件各占一列（Foxmail 口径），未读点与回形针不再挤在一个槽里 */}
@@ -684,7 +684,7 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
       onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey)}
       className={cn(
         "group flex h-full w-full cursor-default select-none items-center gap-3 rounded-lg pl-2 pr-3 text-left",
-        selected ? "bg-primary" : "hover:bg-white/[0.05]"
+        selected ? "bg-primary" : "hover:bg-foreground/[0.06]"
       )}
     >
       <span

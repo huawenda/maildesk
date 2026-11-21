@@ -190,7 +190,7 @@ export function Reader({
             title={message.starred ? "取消星标 (S)" : "星标 (S)"}
             onClick={onToggleStar}
             className={cn(
-              "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-white/[0.04]",
+              "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-foreground/[0.05]",
               message.starred ? "text-star" : "text-muted-foreground hover:text-foreground"
             )}
           >
@@ -199,7 +199,7 @@ export function Reader({
           <button
             title="标记未读 (U)"
             onClick={onToggleUnread}
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground"
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
           >
             {message.unread ? <Mail className="size-4" /> : <MailOpen className="size-4" />}
           </button>
@@ -207,7 +207,7 @@ export function Reader({
             title="保存全部附件"
             onClick={saveAllAttachments}
             disabled={message.attachments.length === 0 || saveAllState === "saving"}
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
           >
             {saveAllState === "saving" ? (
               <Loader2 className="size-4 animate-spin" />
@@ -221,7 +221,7 @@ export function Reader({
             <DropdownMenuTrigger asChild>
               <button
                 title="移动到文件夹"
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground"
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
               >
                 <FolderInput className="size-4" />
               </button>
@@ -244,7 +244,7 @@ export function Reader({
           <button
             title={permanentDelete ? "永久删除 (Delete)" : "移到垃圾箱 (Delete)"}
             onClick={onDelete}
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-destructive"
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-destructive"
           >
             <Trash2 className="size-4" />
           </button>

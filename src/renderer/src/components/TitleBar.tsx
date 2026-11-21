@@ -152,7 +152,7 @@ export function TitleBar({
               className={cn(
                 "flex size-6 items-center justify-center rounded transition-colors",
                 mode === option
-                  ? "bg-background text-foreground shadow-sm ring-1 ring-white/[0.06]"
+                  ? "bg-card text-foreground shadow-sm ring-1 ring-foreground/[0.06]"
                   : "text-muted-foreground/80 hover:text-foreground"
               )}
             >

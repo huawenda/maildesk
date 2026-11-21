@@ -54,7 +54,14 @@ function mapImapError(error: unknown): { code: ErrCode; message: string } {
     }
   }
   if (/certificate|self.signed|UNABLE_TO_VERIFY|CERT_/i.test(text)) {
-    return { code: "tls", message: "TLS 证书校验失败：" + text }
+    return {
+      code: "tls",
+      message:
+        "TLS 证书校验失败：服务器证书不是受信任的 CA 签发的。" +
+        "如果是公司自建服务器，先试试把加密方式改成 STARTTLS 或「无」；" +
+        "仍不行则需要把公司内部根证书导入 Windows 证书存储（Outlook / Foxmail 正常说明系统信任链里通常已有它）。原始错误：" +
+        text
+    }
   }
   if (/ENOTFOUND|EAI_AGAIN/i.test(text)) {
     return { code: "network", message: "无法解析主机名：" + text }

@@ -6,20 +6,14 @@ import {
   FilePenLine,
   Folder,
   Inbox,
-  Monitor,
-  Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
   RefreshCw,
   Send,
   Settings,
   ShieldAlert,
-  Sun,
   Trash2
 } from "lucide-react"
 import type { NavFolder } from "@/lib/live"
 import { labels } from "@/lib/mock"
-import type { ThemeMode } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
 const folderIcons = {
@@ -32,17 +26,9 @@ const folderIcons = {
   folder: Folder
 } as const
 
-const themeOptions: { mode: ThemeMode; icon: typeof Moon; label: string }[] = [
-  { mode: "light", icon: Sun, label: "浅色" },
-  { mode: "dark", icon: Moon, label: "深色" },
-  { mode: "system", icon: Monitor, label: "跟随系统" }
-]
-
 interface SidebarProps {
   collapsed: boolean
-  onToggleCollapsed: () => void
-  mode: ThemeMode
-  onModeChange: (mode: ThemeMode) => void
+  onOpenSettings: () => void
   version?: string
   folders: NavFolder[]
   folderId: string
@@ -58,9 +44,7 @@ interface SidebarProps {
 
 export function Sidebar({
   collapsed,
-  onToggleCollapsed,
-  mode,
-  onModeChange,
+  onOpenSettings,
   version,
   folders,
   folderId,
@@ -189,47 +173,18 @@ export function Sidebar({
           {collapsed ? null : <span className="truncate">{syncLabel}</span>}
         </button>
 
-        <div className={cn("flex items-center gap-1", collapsed ? "flex-col" : "px-1")}>
-          <button
-            title="设置 (Ctrl ,)"
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground"
-          >
-            <Settings className="size-4" />
-          </button>
-          <button
-            onClick={onToggleCollapsed}
-            title={collapsed ? "展开侧栏" : "收起侧栏"}
-            className={cn(
-              "flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground",
-              !collapsed && "ml-auto"
-            )}
-          >
-            {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-          </button>
-        </div>
-
-        <div
+        {/* 设置入口只在侧栏底部，标题栏不再重复 */}
+        <button
+          onClick={onOpenSettings}
+          title="设置 (Ctrl ,)"
           className={cn(
-            "flex items-center gap-0.5 rounded-md bg-muted p-0.5",
-            collapsed ? "mx-auto flex-col" : "mx-1"
+            "flex h-7 items-center gap-1.5 rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground",
+            collapsed ? "justify-center px-0" : "px-2"
           )}
         >
-          {themeOptions.map(({ mode: option, icon: Icon, label }) => (
-            <button
-              key={option}
-              title={label}
-              onClick={() => onModeChange(option)}
-              className={cn(
-                "flex size-6 items-center justify-center rounded transition-colors",
-                mode === option
-                  ? "bg-background text-foreground shadow-sm ring-1 ring-white/[0.06]"
-                  : "text-muted-foreground/80 hover:text-foreground"
-              )}
-            >
-              <Icon className="size-3.5" />
-            </button>
-          ))}
-        </div>
+          <Settings className="size-4 shrink-0" />
+          {collapsed ? null : <span>设置</span>}
+        </button>
 
         {version && !collapsed ? (
           <div className="px-2 pb-0.5 text-[10.5px] text-muted-foreground/70">MailDesk v{version}</div>

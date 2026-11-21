@@ -23,13 +23,17 @@ import {
   searchMessages,
   setAttachmentPath,
   setFlagged,
-  setRead
+  setRead,
+  unreadCountsByFolder
 } from "../db/messages"
 import { getSettings, setSettings } from "../db/settings"
 import { probeImap } from "../net/probe"
 import {
   downloadAttachment,
   loadMessageBody,
+  markReadRemote,
+  moveMessages,
+  deleteMessages,
   startAccountSync,
   stopAccountSync,
   syncNow,
@@ -80,6 +84,14 @@ async function uniquePath(dir: string, name: string): Promise<string> {
 
 const readPayloadSchema = z.object({ ids: z.array(idSchema).min(1).max(500), read: z.boolean() })
 const flagPayloadSchema = z.object({ ids: z.array(idSchema).min(1).max(500), flagged: z.boolean() })
+const movePayloadSchema = z.object({
+  ids: z.array(idSchema).min(1).max(500),
+  targetFolderId: idSchema
+})
+const deletePayloadSchema = z.object({
+  ids: z.array(idSchema).min(1).max(500),
+  permanent: z.boolean().optional()
+})
 const updatePayloadSchema = z.object({ id: idSchema, patch: accountPatchSchema })
 
 export function registerIpc(): void {
@@ -159,15 +171,29 @@ export function registerIpc(): void {
     return loaded ? getMessage(id) : detail
   })
 
+  // 本地先落地（界面立刻变），再推服务器；断线时进队列，下次对账前补发
   ipcMain.handle(CH.messagesSetRead, (_event, raw: unknown) => {
     const payload = parse(readPayloadSchema, raw)
     setRead(payload.ids, payload.read)
+    markReadRemote(payload.ids, payload.read)
+  })
+
+  ipcMain.handle(CH.messagesMove, async (_event, raw: unknown) => {
+    const payload = parse(movePayloadSchema, raw)
+    return moveMessages(payload.ids, payload.targetFolderId)
+  })
+
+  ipcMain.handle(CH.messagesDelete, async (_event, raw: unknown) => {
+    const payload = parse(deletePayloadSchema, raw)
+    return deleteMessages(payload.ids, payload.permanent ?? false)
   })
 
   ipcMain.handle(CH.messagesSetFlagged, (_event, raw: unknown) => {
     const payload = parse(flagPayloadSchema, raw)
     setFlagged(payload.ids, payload.flagged)
   })
+
+  ipcMain.handle(CH.messagesUnreadCounts, () => unreadCountsByFolder())
 
   // 附件不落库，点保存时才回 IMAP 取那一段（PRD FR-04.5）
   ipcMain.handle(CH.attachmentsSave, async (event, raw: unknown) => {

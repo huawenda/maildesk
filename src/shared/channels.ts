@@ -22,6 +22,9 @@ export const CH = {
   messagesGet: "messages:get",
   messagesSetRead: "messages:set-read",
   messagesSetFlagged: "messages:set-flagged",
+  messagesUnreadCounts: "messages:unread-counts",
+  messagesMove: "messages:move",
+  messagesDelete: "messages:delete",
 
   attachmentsSave: "attachments:save",
   attachmentsSaveAll: "attachments:save-all",

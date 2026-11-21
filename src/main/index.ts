@@ -122,6 +122,38 @@ function createWindow(): BrowserWindow {
               // 正文是懒加载的，首次点开要等 IMAP 取信
               await new Promise((resolve) => setTimeout(resolve, 2500))
             }
+            // 删除按钮：title 以「移到垃圾箱」或「永久删除」开头
+            if (process.env.MAILDESK_CAPTURE_DELETE) {
+              const clicked = await win.webContents
+                .executeJavaScript(
+                  "(() => { const el = [...document.querySelectorAll('button')].find((b) => /^(移到垃圾箱|永久删除)/.test(b.getAttribute('title') || '')); if (!el) return 'no-delete'; const opts = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }; el.dispatchEvent(new PointerEvent('pointerdown', opts)); el.dispatchEvent(new MouseEvent('mousedown', opts)); el.dispatchEvent(new PointerEvent('pointerup', opts)); el.dispatchEvent(new MouseEvent('mouseup', opts)); el.dispatchEvent(new MouseEvent('click', opts)); return el.getAttribute('title') })()"
+                )
+                .catch(() => undefined)
+              console.log("capture-delete", JSON.stringify(clicked))
+              await new Promise((resolve) => setTimeout(resolve, 2500))
+            }
+            // 「移动到」菜单：值 = 1 只打开菜单；否则先打开再点选文字包含该值的菜单项（真实拖拽一遍移动路径）
+            const move = process.env.MAILDESK_CAPTURE_MOVE
+            if (move) {
+              const opened = await win.webContents
+                .executeJavaScript(
+                  "(() => { const el = document.querySelector('button[title=\"移动到文件夹\"]'); if (!el) return 'no-move'; const opts = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }; el.dispatchEvent(new PointerEvent('pointerdown', opts)); el.dispatchEvent(new MouseEvent('mousedown', opts)); el.dispatchEvent(new PointerEvent('pointerup', opts)); el.dispatchEvent(new MouseEvent('mouseup', opts)); return true })()"
+                )
+                .catch(() => undefined)
+              console.log("capture-move-open", JSON.stringify(opened))
+              await new Promise((resolve) => setTimeout(resolve, 500))
+              if (move !== "1") {
+                const picked = await win.webContents
+                  .executeJavaScript(
+                    "(() => { const items = [...document.querySelectorAll('[role=menuitem]')]; const el = items.find((b) => b.textContent.includes(" +
+                      JSON.stringify(move) +
+                      ")); if (!el) return 'no-item:' + items.length; const opts = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }; el.dispatchEvent(new PointerEvent('pointerdown', opts)); el.dispatchEvent(new MouseEvent('mousedown', opts)); el.dispatchEvent(new PointerEvent('pointerup', opts)); el.dispatchEvent(new MouseEvent('mouseup', opts)); el.dispatchEvent(new MouseEvent('click', opts)); return true })()"
+                  )
+                  .catch(() => undefined)
+                console.log("capture-move-pick", JSON.stringify(picked))
+                await new Promise((resolve) => setTimeout(resolve, 2500))
+              }
+            }
             if (process.env.MAILDESK_CAPTURE_SETTINGS) {
               const opened = await win.webContents
                 .executeJavaScript(
@@ -215,6 +247,23 @@ app.whenReady().then(() => {
 
   if (process.env.MAILDESK_SELFTEST) {
     runSelfTest()
+    return
+  }
+
+  // 诊断：在服务器侧模拟另一端删除/移动邮件，验证回流（`.capture` 里跑不开 safeStorage）
+  if (process.env.MAILDESK_IMAP_OP) {
+    const [op, subject, target] = (process.env.MAILDESK_IMAP_OP as string).split("|")
+    void import("./selftest").then(({ runServerOp }) =>
+      runServerOp(op ?? "delete", subject ?? "", target).then(() => app.exit(0))
+    )
+    return
+  }
+
+  // 诊断：比对某个账户收件箱的服务器 UID 与本地库（`.capture` 里跑不开 safeStorage）
+  if (process.env.MAILDESK_UIDCHECK_EMAIL) {
+    void import("./selftest").then(({ runUidCheck }) =>
+      runUidCheck(process.env.MAILDESK_UIDCHECK_EMAIL as string).then(() => app.exit(0))
+    )
     return
   }
 

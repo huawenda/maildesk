@@ -1,19 +1,25 @@
 import { useEffect, useState } from "react"
 import {
-  Archive,
   ChevronDown,
   Download,
   FileArchive,
   FileImage,
   FileSpreadsheet,
   FileText,
+  FolderInput,
   Mail,
   MailOpen,
-  MoreHorizontal,
   Star,
   Trash2
 } from "lucide-react"
 import { Check, Loader2, X } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu"
 import { HtmlBody } from "@/components/HtmlBody"
 import { ipcErrorMessage, mail } from "@/lib/ipc"
 import { avatarColor, formatFullTime, formatSize, initials } from "@/lib/format"
@@ -39,11 +45,27 @@ interface ReaderProps {
   remoteImages: boolean
   onToggleStar: () => void
   onToggleUnread: () => void
+  /** 「移动到」菜单里的目标文件夹（已排除容器与当前文件夹） */
+  moveTargets: { id: string; label: string }[]
+  onMove: (folderId: string) => void
+  onDelete: () => void
+  /** 在垃圾箱里是永久删除，其余是「移到垃圾箱」 */
+  permanentDelete: boolean
 }
 
 type SaveState = "saving" | "saved" | "error"
 
-export function Reader({ message, fontSize, remoteImages, onToggleStar, onToggleUnread }: ReaderProps) {
+export function Reader({
+  message,
+  fontSize,
+  remoteImages,
+  onToggleStar,
+  onToggleUnread,
+  moveTargets,
+  onMove,
+  onDelete,
+  permanentDelete
+}: ReaderProps) {
   const [showAllAttachments, setShowAllAttachments] = useState(false)
   // 附件不落库，按附件 id 记录本次会话内的保存状态（已保存的会显示对勾）
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({})
@@ -127,7 +149,7 @@ export function Reader({ message, fontSize, remoteImages, onToggleStar, onToggle
 
   if (!message) {
     return (
-      <section className="flex flex-1 items-center justify-center border-l border-border bg-card text-muted-foreground">
+      <section className="flex flex-1 items-center justify-center bg-card text-muted-foreground">
         <div className="flex flex-col items-center gap-2">
           <Mail className="size-10 opacity-40" />
           <span className="text-[13px]">选择一封邮件开始阅读</span>
@@ -140,7 +162,7 @@ export function Reader({ message, fontSize, remoteImages, onToggleStar, onToggle
   const hiddenCount = message.attachments.length - attachments.length
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col border-l border-border bg-card">
+    <section className="flex min-w-0 flex-1 flex-col bg-card">
       <div className="flex h-[52px] shrink-0 items-center gap-0.5 px-5">
         <div className="ml-auto flex items-center gap-0.5">
           <button
@@ -174,20 +196,36 @@ export function Reader({ message, fontSize, remoteImages, onToggleStar, onToggle
               <Download className="size-4" />
             )}
           </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                title="移动到文件夹"
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground"
+              >
+                <FolderInput className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+                移动到
+              </DropdownMenuLabel>
+              {moveTargets.length === 0 ? (
+                <DropdownMenuItem disabled>没有其他文件夹</DropdownMenuItem>
+              ) : (
+                moveTargets.map((folder) => (
+                  <DropdownMenuItem key={folder.id} onSelect={() => onMove(folder.id)}>
+                    {folder.label}
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <button
-            title="归档"
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground"
-          >
-            <Archive className="size-4" />
-          </button>
-          <button
-            title="删除"
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground"
+            title={permanentDelete ? "永久删除 (Delete)" : "移到垃圾箱 (Delete)"}
+            onClick={onDelete}
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-destructive"
           >
             <Trash2 className="size-4" />
-          </button>
-          <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-white/[0.04] hover:text-foreground">
-            <MoreHorizontal className="size-4" />
           </button>
         </div>
       </div>

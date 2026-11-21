@@ -110,5 +110,10 @@ export const MIGRATIONS: string[] = [
   // 空批次会让 MIN 原地不动，循环卡死。
   `
   ALTER TABLE folder ADD COLUMN backfill_uid INTEGER;
+  `,
+  // v4：\Archive 不再映射成系统「归档」（用户要求 QQ 的「存档」留在自建目录树里），
+  // 把历史库里已写入的 archive 角色清掉，refresh 时才会按普通目录处理。
+  `
+  UPDATE folder SET role = NULL WHERE role = 'archive';
   `
 ]

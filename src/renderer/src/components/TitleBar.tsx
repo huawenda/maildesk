@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { Rows3, Search, Settings2 } from "lucide-react"
+import { Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Search, Sun } from "lucide-react"
 import type { Density } from "@/App"
+import type { ThemeMode } from "@/lib/theme"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +16,12 @@ const densityOptions: { id: Density; label: string }[] = [
   { id: "compact", label: "紧凑" },
   { id: "standard", label: "标准" },
   { id: "comfortable", label: "宽松" }
+]
+
+const themeOptions: { mode: ThemeMode; icon: typeof Moon; label: string }[] = [
+  { mode: "light", icon: Sun, label: "浅色" },
+  { mode: "dark", icon: Moon, label: "深色" },
+  { mode: "system", icon: Monitor, label: "跟随系统" }
 ]
 
 const CONTROL =
@@ -67,24 +74,30 @@ interface TitleBarProps {
   left: ReactNode
   /** 列表宽度：用来把列表/阅读器之间的 1px 分隔线延伸进标题栏。 */
   listWidth: number
+  collapsed: boolean
+  onToggleCollapsed: () => void
   title: string
   unread: number
   onOpenSearch: () => void
-  onOpenSettings: () => void
   density: Density
   onDensityChange: (density: Density) => void
+  mode: ThemeMode
+  onModeChange: (mode: ThemeMode) => void
 }
 
 export function TitleBar({
   sidebarWidth,
   listWidth,
   left,
+  collapsed,
+  onToggleCollapsed,
   title,
   unread,
   onOpenSearch,
-  onOpenSettings,
   density,
-  onDensityChange
+  onDensityChange,
+  mode,
+  onModeChange
 }: TitleBarProps) {
   const [maximized, setMaximized] = useState(false)
 
@@ -93,15 +106,28 @@ export function TitleBar({
   return (
     <div className="flex h-9 shrink-0 [-webkit-app-region:drag]">
       <div
-        className="flex shrink-0 items-center px-2.5 transition-[width] duration-150 ease-out"
+        className={cn(
+          "flex shrink-0 items-center transition-[width] duration-150 ease-out",
+          collapsed ? "px-2" : "px-2.5"
+        )}
         style={{ width: sidebarWidth }}
       >
         {left}
       </div>
 
-      <div className="relative flex flex-1 items-center gap-1 bg-card pl-4">
+      <div className="relative flex flex-1 items-center gap-1 bg-card pl-2">
         {/* 让列表与阅读器之间的分隔线一路顶到窗口上沿 */}
         <div className="absolute inset-y-0 w-px bg-border" style={{ left: listWidth }} />
+
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          title={collapsed ? "展开侧栏" : "收起侧栏"}
+          className={ICON_BUTTON}
+        >
+          {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+        </button>
+
         <span className="text-[15px] font-semibold">{title}</span>
         <span className="text-[12px] tabular-nums text-muted-foreground">{unread} 封未读</span>
 
@@ -110,10 +136,6 @@ export function TitleBar({
 
         <button type="button" onClick={onOpenSearch} title="搜索 (Ctrl K)" className={ICON_BUTTON}>
           <Search className="size-4" />
-        </button>
-
-        <button type="button" onClick={onOpenSettings} title="设置 (Ctrl ,)" className={ICON_BUTTON}>
-          <Settings2 className="size-4" />
         </button>
 
         <DropdownMenu>
@@ -132,6 +154,25 @@ export function TitleBar({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5 [-webkit-app-region:no-drag]">
+          {themeOptions.map(({ mode: option, icon: Icon, label }) => (
+            <button
+              key={option}
+              type="button"
+              title={label}
+              onClick={() => onModeChange(option)}
+              className={cn(
+                "flex size-6 items-center justify-center rounded transition-colors",
+                mode === option
+                  ? "bg-background text-foreground shadow-sm ring-1 ring-white/[0.06]"
+                  : "text-muted-foreground/80 hover:text-foreground"
+              )}
+            >
+              <Icon className="size-3.5" />
+            </button>
+          ))}
+        </div>
 
         <div className="mx-1 h-4 w-px bg-border" />
 

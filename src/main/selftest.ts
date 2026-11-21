@@ -4,10 +4,172 @@ import { listFolders } from "./db/folders"
 import { getMessage, pageMessages, searchMessages } from "./db/messages"
 import { getSettings, setSettings } from "./db/settings"
 import { openPassword } from "./security/credentials"
-import { get } from "./db"
+import { all, get } from "./db"
 import { probeImap } from "./net/probe"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+
+/**
+ * 开发期诊断：`MAILDESK_UIDCHECK_EMAIL=xxx` 时比对服务器 UID 列表与本地库，
+ * 找出「服务器有、本地没同步下来」的邮件。必须在主进程跑，才能解开 safeStorage 里的密码。
+ */
+export async function runUidCheck(email: string): Promise<void> {
+  try {
+    const account = listAccounts().find((item) => item.email === email)
+    if (!account) {
+      console.log("UIDCHECK " + JSON.stringify({ error: "account not found" }))
+      return
+    }
+    const password = await openPassword(account.id)
+    const folder = listFolders(account.id).find((item) => item.role === "inbox")
+    if (!folder) {
+      console.log("UIDCHECK " + JSON.stringify({ error: "inbox folder not found" }))
+      return
+    }
+    const localUids = new Set(
+      all<{ uid: number }>("SELECT uid FROM message WHERE folder_id = ?", folder.id).map((row) => row.uid)
+    )
+    const { ImapFlow } = await import("imapflow")
+    const client = new ImapFlow({
+      host: account.imapHost,
+      port: account.imapPort,
+      secure: account.security === "tls",
+      auth: { user: account.username || account.email || "", pass: password ?? "" },
+      logger: false,
+      clientInfo: { name: "MailDesk", version: app.getVersion(), vendor: "local" }
+    })
+    await client.connect()
+    const lock = await client.getMailboxLock(folder.path)
+    try {
+      const mailbox = client.mailbox as unknown as { exists: number; uidNext: bigint }
+      const serverUids: number[] = []
+      for await (const message of client.fetch("1:*", { uid: true }, { uid: true })) {
+        if (typeof message.uid === "number") serverUids.push(message.uid)
+      }
+      const serverSet = new Set(serverUids)
+      const missing = serverUids.filter((uid) => !localUids.has(uid))
+      const extra = [...localUids].filter((uid) => !serverSet.has(uid))
+      const detail: Record<string, unknown> = {}
+      if (missing.length > 0) {
+        const one = await client.fetchOne(String(missing[0]), { envelope: true, internalDate: true, size: true }, { uid: true })
+        const header = one === false ? null : one
+        if (header) {
+          detail.missingMail = {
+            uid: missing[0],
+            subject: header.envelope?.subject,
+            from: header.envelope?.from?.[0]?.address,
+            date: header.internalDate,
+            size: header.size
+          }
+        }
+        const sameId = all<{ id: string; folder_id: string; uid: number }>(
+          "SELECT id, folder_id, uid FROM message WHERE message_id = ?",
+          header?.envelope?.messageId ?? ""
+        )
+        detail.sameMessageId = sameId
+      }
+      console.log(
+        "UIDCHECK " +
+          JSON.stringify({
+            exists: Number(mailbox.exists),
+            uidNext: Number(mailbox.uidNext),
+            serverUids: serverUids.length,
+            local: localUids.size,
+            missingCount: missing.length,
+            missing: missing.slice(0, 20),
+            extra: extra.slice(0, 20),
+            detail
+          })
+      )
+    } finally {
+      lock.release()
+      await client.logout()
+    }
+  } catch (error) {
+    console.log("UIDCHECK " + JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+  }
+}
+
+
+/**
+ * 开发期诊断：`MAILDESK_IMAP_OP="delete|主题" / "move|主题|目标文件夹" / "flag|主题"`
+ * 在服务器上模拟另一端（网页版、手机）对收件箱邮件做删除/移动，用来验证「服务器端变化 → 本地」的回流。
+ */
+export async function runServerOp(op: string, subject: string, target?: string): Promise<void> {
+  try {
+    const email = process.env.MAILDESK_OP_EMAIL ?? listAccounts()[0]?.email
+    const account = listAccounts().find((item) => item.email === email)
+    if (!account) {
+      console.log("SERVEROP " + JSON.stringify({ error: "account not found" }))
+      return
+    }
+    const password = await openPassword(account.id)
+    const folder = listFolders(account.id).find((item) => item.role === "inbox")
+    if (!folder) {
+      console.log("SERVEROP " + JSON.stringify({ error: "inbox folder not found" }))
+      return
+    }
+    const { ImapFlow } = await import("imapflow")
+    const client = new ImapFlow({
+      host: account.imapHost,
+      port: account.imapPort,
+      secure: account.security === "tls",
+      auth: { user: account.username || account.email || "", pass: password ?? "" },
+      logger: false,
+      clientInfo: { name: "MailDesk", version: app.getVersion(), vendor: "local" }
+    })
+    await client.connect()
+    const safe = (value: unknown): string =>
+      JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? Number(item) : item))
+    if (op === "folders") {
+      const list = await client.list()
+      const rows: unknown[] = []
+      for (const item of list) {
+        if (item.specialUse === "\\Noselect") continue
+        try {
+          const box = await client.mailboxOpen(item.path)
+          rows.push({ path: item.path, exists: Number(box.exists ?? 0), uidValidity: Number(box.uidValidity) })
+        } catch (error) {
+          rows.push({ path: item.path, error: error instanceof Error ? error.message : String(error) })
+        }
+      }
+      console.log("SERVEROP " + safe({ op, rows }))
+      await client.logout()
+      return
+    }
+    const lock = await client.getMailboxLock(folder.path)
+    try {
+      const uids: number[] = []
+      for await (const message of client.fetch("1:*", { envelope: true, uid: true }, { uid: true })) {
+        if (typeof message.uid !== "number") continue
+        if ((message.envelope?.subject ?? "").includes(subject)) uids.push(message.uid)
+      }
+      let result: unknown = null
+      if (uids.length > 0) {
+        const set = uids.join(",")
+        if (op === "delete") result = await client.messageDelete(set, { uid: true })
+        else if (op === "move") result = await client.messageMove(set, target ?? "INBOX", { uid: true })
+        else if (op === "flag") result = await client.messageFlagsAdd(set, ["\\Seen"], { uid: true })
+      }
+      console.log(
+        "SERVEROP " +
+          safe({
+            op,
+            subject,
+            uids,
+            target: target ?? null,
+            copy: result === true ? null : result,
+            exists: client.mailbox === false ? 0 : Number(client.mailbox.exists)
+          })
+      )
+    } finally {
+      lock.release()
+      await client.logout()
+    }
+  } catch (error) {
+    console.log("SERVEROP " + JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+  }
+}
 
 /**
  * 开发期自检：`MAILDESK_SELFTEST=1` 时在主进程跑一遍数据层，打印 JSON 后退出。

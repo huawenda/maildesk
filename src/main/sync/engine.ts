@@ -14,13 +14,18 @@ import {
 import {
   clearFolderMessages,
   countFolder,
+  deleteMessages as deleteMessageRows,
+  folderUidIndex,
   getAttachment,
   getMessageLocator,
+  messageLocators,
+  moveMessageRow,
   oldestUid,
   saveIncoming,
-  setMessageBody
+  setMessageBody,
+  setReadById
 } from "../db/messages"
-import type { IncomingMessage } from "../db/messages"
+import type { IncomingMessage, LocalUidRow } from "../db/messages"
 import { getSettings } from "../db/settings"
 import { openPassword } from "../security/credentials"
 import { collectAttachmentParts, parseBody, toIncoming } from "./parse"
@@ -40,6 +45,17 @@ const BACKOFF_MAX = 60_000
  * EXISTS；所以除了保持 IDLE，还要定时轻量地对 INBOX 做一次增量同步（SELECT 一次，几十毫秒）。
  */
 const POLL_INTERVAL = 60_000
+// MAILDESK_SYNC_DEBUG=1 时打印每个文件夹的同步/对账明细，排查「邮件没进来/没删掉」
+const DEBUG = Boolean(process.env.MAILDESK_SYNC_DEBUG)
+/**
+ * 双向对账间隔：本地 ↔ 服务端的差异（删信、移动、已读态）只能靠对比 UID 集合发现，
+ * QQ 不推 VANISHED 也没有 CONDSTORE，所以定时做一次全账户比对。
+ */
+const RECONCILE_INTERVAL = 3 * 60_000
+/** 单个文件夹参与对账的封数上限：再大就只做增量，避免每次拖回几十万个 UID。 */
+const RECONCILE_MAX_MESSAGES = 20_000
+/** 对账补头部时一次取的 UID 数。 */
+const RECONCILE_FETCH = 200
 
 const roleOf = (specialUse?: string): FolderRole => {
   switch (specialUse) {
@@ -53,9 +69,8 @@ const roleOf = (specialUse?: string): FolderRole => {
       return "trash"
     case "\\Junk":
       return "junk"
-    case "\\Archive":
-    case "\\All":
-      return "archive"
+    // \Archive / \All 不提升为系统「归档」：用户要求服务器上的「存档」留在自建目录树里，
+    // 由 navFolders 归到「其他文件夹」分组下，按服务器名字显示。
     default:
       return null
   }
@@ -99,7 +114,11 @@ export class SyncEngine {
   private failures = 0
   private retryTimer: NodeJS.Timeout | null = null
   private pollTimer: NodeJS.Timeout | null = null
+  private reconcileTimer: NodeJS.Timeout | null = null
+  private reconciling = false
   private backfilling = false
+  /** 本地已读/未读待推送到服务器，key 为 "folderId:uid"。 */
+  private readonly pendingFlags = new Map<string, boolean>()
 
   constructor(
     private readonly account: Account,
@@ -127,6 +146,8 @@ export class SyncEngine {
     this.retryTimer = null
     if (this.pollTimer) clearInterval(this.pollTimer)
     this.pollTimer = null
+    if (this.reconcileTimer) clearInterval(this.reconcileTimer)
+    this.reconcileTimer = null
     const client = this.client
     this.client = null
     if (client) void client.logout().catch(() => undefined)
@@ -138,10 +159,12 @@ export class SyncEngine {
       this.failures = 0
       await this.ensureConnected()
       await this.syncAll()
+      await this.reconcileAccount("manual")
       await this.openInboxForIdle()
       this.lastSyncAt = Date.now()
       this.setState("idling")
       this.startPolling()
+      this.startReconcileTimer()
       this.startBackfill()
     })
   }
@@ -223,12 +246,26 @@ export class SyncEngine {
     if (this.stopped) return
     await this.ensureConnected()
     await this.refreshFolders()
+    // 先对账再增量：网页版/手机端「移动」过的邮件能在对账里按 Message-ID 认领回本地行，
+    // 正文缓存与已读态都不丢；顺序反过来的话 syncAll 会把它当新邮件插一行，旧行再被删掉。
+    // 新文件夹（uidValidity 还是 null）对账会跳过，交给随后的 syncAll 建立游标。
+    await this.reconcileAccount("bootstrap")
     await this.syncAll()
     await this.openInboxForIdle()
     this.lastSyncAt = Date.now()
     this.setState("idling")
     this.startPolling()
+    this.startReconcileTimer()
     this.startBackfill()
+  }
+
+  private startReconcileTimer(): void {
+    if (this.reconcileTimer) return
+    this.reconcileTimer = setInterval(() => {
+      if (this.stopped || !this.client) return
+      // 对账会逐个文件夹取 UID+FLAGS，排在同步队列里，别和正文拉取抢锁
+      void this.schedule(() => this.reconcileAccount("timer")).catch(() => undefined)
+    }, RECONCILE_INTERVAL)
   }
 
   private startPolling(): void {
@@ -551,9 +588,362 @@ export class SyncEngine {
         lastSyncedUid: maxUid
       })
       updateFolderCounts(folder.id, countFolder(folder.id))
+      if (DEBUG) console.log("[sync] folder", folder.path, { from, highest, fetched, added, maxUid, uidValidity })
       if (added > 0) this.hooks.emit({ type: "messages", folderId: folder.id, added })
     } finally {
       lock.release()
+    }
+  }
+
+  /** 本地标记已读/未读后推送到服务器；断线时留在队列，等下一次对账前补发。 */
+  markRead(ids: string[], read: boolean): Promise<void> {
+    return this.schedule(async () => {
+      for (const locator of messageLocators(ids)) {
+        this.pendingFlags.set(locator.folderId + ":" + String(locator.uid), read)
+      }
+      await this.ensureConnected()
+      await this.flushFlags()
+    })
+  }
+
+  /** 本地发起的移动：MOVE 一次到位；服务器回了 COPYUID 就原地改行，正文缓存与已读态都不丢。 */
+  moveMessages(ids: string[], targetFolderId: string): Promise<{ moved: number; failed: number }> {
+    return this.schedule(async () => {
+      await this.ensureConnected()
+      const target = getFolder(targetFolderId)
+      if (!target) throw new Error("not-found: folder")
+      const locators = messageLocators(ids)
+      const result = await this.moveByFolder(locators, target)
+      this.afterLocalChange(locators.map((item) => item.folderId).concat(target.id))
+      return result
+    })
+  }
+
+  /** 本地发起的删除：默认进垃圾箱（可恢复），永久删除才 EXPUNGE。 */
+  deleteMessages(ids: string[], permanent: boolean): Promise<{ deleted: number; failed: number }> {
+    return this.schedule(async () => {
+      await this.ensureConnected()
+      const locators = messageLocators(ids)
+      const trash = listFolders(this.account.id).find((folder) => folder.role === "trash")
+      let result: { deleted: number; failed: number }
+      if (!permanent && trash) {
+        // 已在垃圾箱里的邮件直接永久删除，否则「删除」按不出效果
+        const already = locators.filter((item) => item.folderId === trash.id)
+        const rest = locators.filter((item) => item.folderId !== trash.id)
+        const moved = await this.moveByFolder(rest, trash)
+        const purged = await this.purgeByFolder(already)
+        result = { deleted: moved.moved + purged.deleted, failed: moved.failed + purged.failed }
+      } else {
+        result = await this.purgeByFolder(locators)
+      }
+      this.afterLocalChange(locators.map((item) => item.folderId).concat(trash ? [trash.id] : []))
+      return result
+    })
+  }
+
+  private async moveByFolder(
+    locators: { id: string; folderId: string; uid: number }[],
+    target: Folder
+  ): Promise<{ moved: number; failed: number }> {
+    const client = this.client
+    if (!client) throw new Error("network: 未连接")
+    const groups = new Map<string, { folder: Folder; items: typeof locators }>()
+    for (const item of locators) {
+      if (item.folderId === target.id) continue
+      const folder = getFolder(item.folderId)
+      if (!folder) continue
+      let group = groups.get(folder.id)
+      if (!group) {
+        group = { folder, items: [] }
+        groups.set(folder.id, group)
+      }
+      group.items.push(item)
+    }
+    let moved = 0
+    let failed = 0
+    for (const group of groups.values()) {
+      const lock = await client.getMailboxLock(group.folder.path)
+      try {
+        const uids = group.items.map((item) => item.uid).join(",")
+        const response = await client.messageMove(uids, target.path, { uid: true })
+        const uidMap = response ? response.uidMap : undefined
+        for (const item of group.items) {
+          const nextUid = uidMap ? uidMap.get(item.uid) : undefined
+          if (typeof nextUid === "number") {
+            moveMessageRow(item.id, target.id, nextUid)
+          } else {
+            // 服务器没给 COPYUID：先删本地，目标文件夹下次对账会重新拉回来
+            deleteMessageRows([item.id])
+          }
+          moved += 1
+        }
+      } catch (error) {
+        failed += group.items.length
+        console.error("[sync] move failed", group.folder.path, "->", target.path, String(error))
+      } finally {
+        lock.release()
+      }
+    }
+    return { moved, failed }
+  }
+
+  private async purgeByFolder(
+    locators: { id: string; folderId: string; uid: number }[]
+  ): Promise<{ deleted: number; failed: number }> {
+    const client = this.client
+    if (!client) throw new Error("network: 未连接")
+    const groups = new Map<string, { folder: Folder; items: typeof locators }>()
+    for (const item of locators) {
+      const folder = getFolder(item.folderId)
+      if (!folder) continue
+      let group = groups.get(folder.id)
+      if (!group) {
+        group = { folder, items: [] }
+        groups.set(folder.id, group)
+      }
+      group.items.push(item)
+    }
+    let deleted = 0
+    let failed = 0
+    for (const group of groups.values()) {
+      const lock = await client.getMailboxLock(group.folder.path)
+      try {
+        const uids = group.items.map((item) => item.uid).join(",")
+        await client.messageDelete(uids, { uid: true })
+        deleteMessageRows(group.items.map((item) => item.id))
+        deleted += group.items.length
+      } catch (error) {
+        failed += group.items.length
+        console.error("[sync] delete failed", group.folder.path, String(error))
+      } finally {
+        lock.release()
+      }
+    }
+    return { deleted, failed }
+  }
+
+  /** 本地改完之后刷新计数并通知界面重拉列表（added 为 0，不触发通知气泡）。 */
+  private afterLocalChange(folderIds: string[]): void {
+    for (const folderId of new Set(folderIds)) {
+      const folder = getFolder(folderId)
+      if (!folder) continue
+      updateFolderCounts(folder.id, countFolder(folder.id))
+    }
+    this.hooks.emit({ type: "messages", folderId: "", added: 0 })
+  }
+
+  /** 把待推送的已读态发给服务器。必须在拿锁之前调用，内部自己加锁。 */
+  private async flushFlags(): Promise<void> {
+    if (this.pendingFlags.size === 0) return
+    const client = this.client
+    if (!client) return
+    const groups = new Map<string, { folder: Folder; read: number[]; unread: number[] }>()
+    for (const [key, read] of this.pendingFlags) {
+      const separator = key.lastIndexOf(":")
+      const folderId = key.slice(0, separator)
+      const uid = Number(key.slice(separator + 1))
+      const folder = getFolder(folderId)
+      if (!folder || !Number.isFinite(uid)) {
+        this.pendingFlags.delete(key)
+        continue
+      }
+      let group = groups.get(folderId)
+      if (!group) {
+        group = { folder, read: [], unread: [] }
+        groups.set(folderId, group)
+      }
+      if (read) group.read.push(uid)
+      else group.unread.push(uid)
+    }
+    for (const [folderId, group] of groups) {
+      if (this.stopped || !this.client) return
+      const lock = await client.getMailboxLock(group.folder.path)
+      try {
+        if (group.read.length > 0) {
+          await client.messageFlagsAdd(group.read.join(","), ["\\Seen"], { uid: true })
+          for (const uid of group.read) this.pendingFlags.delete(folderId + ":" + String(uid))
+        }
+        if (group.unread.length > 0) {
+          await client.messageFlagsRemove(group.unread.join(","), ["\\Seen"], { uid: true })
+          for (const uid of group.unread) this.pendingFlags.delete(folderId + ":" + String(uid))
+        }
+      } catch (error) {
+        console.error("[sync] push flags failed", group.folder.path, String(error))
+      } finally {
+        lock.release()
+      }
+    }
+  }
+
+  /**
+   * 双向对账（PRD FR-09）：逐文件夹取「服务端 UID + \\Seen」，与本地 UID 索引做差集。
+   *  - 服务端有、本地无 → 新邮件 / 从别的文件夹移进来（按 Message-ID 认领本地旧行）
+   *  - 本地有、服务端无 → 被删除 / 被移走（先看能否被上面认领，否则删本地行）
+   *  - 两边都有但已读态不同 → 以服务器为准
+   */
+  private async reconcileAccount(reason: string): Promise<void> {
+    const client = this.client
+    if (!client || this.stopped || this.reconciling) return
+    this.reconciling = true
+    try {
+      await this.flushFlags()
+      // 只对已经同步过的文件夹对账；全新文件夹交给 syncFolder 建立游标
+      const folders = listFolders(this.account.id).filter((folder) => folder.uidValidity !== null)
+      if (folders.length === 0) return
+      const serverIndex = new Map<string, Map<number, boolean>>()
+      const serverMeta = new Map<string, { uidValidity: number; uidNext: number; maxUid: number }>()
+      for (const folder of folders) {
+        if (this.stopped) return
+        const lock = await client.getMailboxLock(folder.path)
+        try {
+          const mailbox = client.mailbox
+          if (!mailbox) continue
+          const uidValidity = Number(mailbox.uidValidity)
+          const uidNext = Number(mailbox.uidNext)
+          // UIDVALIDITY 变了交给 syncFolder 整箱重拉，这里不碰
+          if (folder.uidValidity !== uidValidity) continue
+          const exists = Number(mailbox.exists ?? 0)
+          if (exists > RECONCILE_MAX_MESSAGES) {
+            console.warn("[sync] reconcile skipped, folder too large", folder.path, exists)
+            continue
+          }
+          const seen = new Map<number, boolean>()
+          let maxUid = 0
+          if (exists > 0) {
+            for await (const message of client.fetch("1:*", { uid: true, flags: true }, { uid: true })) {
+              if (typeof message.uid !== "number") continue
+              seen.set(message.uid, message.flags ? message.flags.has("\\Seen") : false)
+              if (message.uid > maxUid) maxUid = message.uid
+            }
+          }
+          serverIndex.set(folder.id, seen)
+          serverMeta.set(folder.id, { uidValidity, uidNext, maxUid })
+        } finally {
+          lock.release()
+        }
+      }
+      if (DEBUG) {
+        for (const folder of folders) {
+          const server = serverIndex.get(folder.id)
+          console.log(
+            "[sync] scan",
+            folder.path,
+            "server",
+            server ? server.size : -1,
+            "local",
+            folderUidIndex(folder.id).size
+          )
+        }
+      }
+      const vanished: LocalUidRow[] = []
+      const arrivals: { folder: Folder; uids: number[] }[] = []
+      for (const folder of folders) {
+        const server = serverIndex.get(folder.id)
+        if (!server) continue
+        const local = folderUidIndex(folder.id)
+        for (const row of local.values()) {
+          if (!server.has(row.uid)) vanished.push(row)
+        }
+        const fresh: number[] = []
+        for (const uid of server.keys()) {
+          if (!local.has(uid)) fresh.push(uid)
+        }
+        if (fresh.length > 0) arrivals.push({ folder, uids: fresh.sort((a, b) => a - b) })
+      }
+      const vanishedByMessageId = new Map<string, LocalUidRow>()
+      for (const row of vanished) {
+        if (row.messageId) vanishedByMessageId.set(row.messageId, row)
+      }
+      const claimed = new Set<string>()
+      let added = 0
+      let moved = 0
+      for (const arrival of arrivals) {
+        if (this.stopped) return
+        const lock = await client.getMailboxLock(arrival.folder.path)
+        try {
+          for (let offset = 0; offset < arrival.uids.length; offset += RECONCILE_FETCH) {
+            const chunk = arrival.uids.slice(offset, offset + RECONCILE_FETCH)
+            let batch: IncomingMessage[] = []
+            const flush = () => {
+              if (batch.length === 0) return
+              added += saveIncoming(arrival.folder.id, batch)
+              batch = []
+            }
+            for await (const message of client.fetch(chunk.join(","), HEADER_QUERY, { uid: true })) {
+              if (this.stopped) break
+              const incoming = toIncoming(message)
+              const previous = incoming.messageId ? vanishedByMessageId.get(incoming.messageId) : undefined
+              if (previous && !claimed.has(previous.id)) {
+                // 同一封邮件换了文件夹：认领本地旧行，正文/附件/已读态全部保留
+                try {
+                  moveMessageRow(previous.id, arrival.folder.id, incoming.uid, {
+                    isRead: incoming.isRead,
+                    isFlagged: incoming.isFlagged
+                  })
+                  claimed.add(previous.id)
+                  moved += 1
+                } catch (error) {
+                  console.error("[sync] claim moved message failed", String(error))
+                  batch.push(incoming)
+                }
+              } else {
+                batch.push(incoming)
+              }
+              if (batch.length >= BATCH_SIZE) flush()
+            }
+            flush()
+          }
+        } finally {
+          lock.release()
+        }
+        if (added > 0) this.hooks.emit({ type: "messages", folderId: arrival.folder.id, added })
+      }
+      const expired = vanished.filter((row) => !claimed.has(row.id)).map((row) => row.id)
+      if (expired.length > 0) deleteMessageRows(expired)
+      let flagged = 0
+      for (const folder of folders) {
+        const server = serverIndex.get(folder.id)
+        if (!server) continue
+        const local = folderUidIndex(folder.id)
+        for (const [uid, seen] of server) {
+          const row = local.get(uid)
+          if (!row) continue
+          // 用户刚点的已读还没推上去，别被服务器旧状态覆盖
+          if (this.pendingFlags.has(folder.id + ":" + String(uid))) continue
+          const isRead = seen ? 1 : 0
+          if (row.isRead !== isRead) {
+            setReadById(row.id, seen)
+            flagged += 1
+          }
+        }
+        const meta = serverMeta.get(folder.id)
+        if (meta) {
+          updateFolderCursor(folder.id, {
+            uidValidity: meta.uidValidity,
+            uidNext: meta.uidNext,
+            lastSyncedUid: Math.max(folder.lastSyncedUid, meta.maxUid)
+          })
+        }
+        updateFolderCounts(folder.id, countFolder(folder.id))
+      }
+      if (added > 0 || moved > 0 || expired.length > 0 || flagged > 0) {
+        console.log(
+          "[sync] reconcile " + reason,
+          this.account.email,
+          "added", added, "moved", moved, "removed", expired.length, "flags", flagged
+        )
+        this.hooks.emit({
+          type: "reconcile",
+          added,
+          removed: expired.length,
+          moved,
+          flags: flagged
+        })
+      }
+    } catch (error) {
+      console.error("[sync] reconcile failed", this.account.email, reason, String(error))
+    } finally {
+      this.reconciling = false
     }
   }
 

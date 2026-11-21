@@ -5,24 +5,6 @@ import type { Account, Security } from "@shared/types"
 import { ipcErrorMessage, mail } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
 
-interface ProviderPreset {
-  id: string
-  label: string
-  host: string
-  port: number
-  security: Security
-  hint?: string
-}
-
-const PRESETS: ProviderPreset[] = [
-  { id: "qq", label: "QQ 邮箱", host: "imap.qq.com", port: 993, security: "tls", hint: "QQ 邮箱需在设置里开启 IMAP 并使用授权码，不是登录密码。" },
-  { id: "163", label: "网易 163", host: "imap.163.com", port: 993, security: "tls", hint: "163 需使用客户端授权码；内核会自动发送 IMAP ID 以通过风控。" },
-  { id: "126", label: "网易 126", host: "imap.126.com", port: 993, security: "tls", hint: "126 需使用客户端授权码。" },
-  { id: "gmail", label: "Gmail", host: "imap.gmail.com", port: 993, security: "tls", hint: "Gmail 需开启两步验证后生成「应用专用密码」。" },
-  { id: "outlook", label: "Outlook", host: "outlook.office365.com", port: 993, security: "tls", hint: "Microsoft 账户需先在账户安全里开启 IMAP。" },
-  { id: "custom", label: "自定义", host: "", port: 993, security: "tls" }
-]
-
 const SECURITY_OPTIONS: { value: Security; label: string }[] = [
   { value: "tls", label: "TLS（993）" },
   { value: "starttls", label: "STARTTLS（143）" },
@@ -51,11 +33,10 @@ function Label({ children }: { children: React.ReactNode }) {
 
 export function AccountDialog({ open, onOpenChange, accounts, onChanged }: AccountDialogProps) {
   const [view, setView] = useState<"list" | "form">("list")
-  const [presetId, setPresetId] = useState("qq")
   const [email, setEmail] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [password, setPassword] = useState("")
-  const [host, setHost] = useState("imap.qq.com")
+  const [host, setHost] = useState("")
   const [port, setPort] = useState("993")
   const [security, setSecurity] = useState<Security>("tls")
   const [username, setUsername] = useState("")
@@ -63,23 +44,12 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const preset = PRESETS.find((item) => item.id === presetId) ?? PRESETS[0]
-
   useEffect(() => {
     if (!open) return
     setView(accounts.length === 0 ? "form" : "list")
     setError(null)
     setTest({ kind: "idle" })
   }, [open, accounts.length])
-
-  const applyPreset = (id: string) => {
-    const next = PRESETS.find((item) => item.id === id) ?? PRESETS[0]
-    setPresetId(id)
-    setHost(next.host)
-    setPort(String(next.port))
-    setSecurity(next.security)
-    setTest({ kind: "idle" })
-  }
 
   const buildInput = () => ({
     email: email.trim(),
@@ -196,20 +166,6 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                <div>
-                  <Label>服务商</Label>
-                  <select value={presetId} onChange={(event) => applyPreset(event.target.value)} className={fieldClass}>
-                    {PRESETS.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                  {preset.hint ? (
-                    <div className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">{preset.hint}</div>
-                  ) : null}
-                </div>
-
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>邮箱地址</Label>
@@ -261,6 +217,10 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                       className={cn(fieldClass, "tabular-nums")}
                     />
                   </div>
+                </div>
+
+                <div className="-mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+                  填公司邮件服务器的 IMAP 地址，端口通常是 993（TLS）或 143（STARTTLS）。只用 IMAP 收信，不需要填发件服务器。
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

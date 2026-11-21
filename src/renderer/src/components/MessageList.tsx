@@ -32,6 +32,11 @@ interface MessageListProps {
   filter: ListFilter
   onFilterChange: (filter: ListFilter) => void
   loading: boolean
+  /** 列表宽度（px），由标题栏下方的分隔线拖拽控制，范围 320–520 */
+  width: number
+  /** 本地库还有下一页（滚动到底时请求更多） */
+  hasMore?: boolean
+  onLoadMore?: () => void
 }
 
 export function MessageList({
@@ -42,15 +47,20 @@ export function MessageList({
   density,
   filter,
   onFilterChange,
-  loading
+  loading,
+  width,
+  hasMore = false,
+  onLoadMore
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
+  // 追加下一页时首条 id 不变，不能整块重来（否则滚动位置会被拉回顶部）
+  const firstId = messages[0]?.id
   useEffect(() => {
     setVisibleCount(PAGE_SIZE)
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [messages])
+  }, [firstId, filter])
 
   const pageMessages = messages.slice(0, visibleCount)
   const rowHeight = ROW_HEIGHT[density]
@@ -80,13 +90,16 @@ export function MessageList({
     const element = scrollRef.current
     if (!element) return
     const remaining = element.scrollHeight - element.scrollTop - element.clientHeight
-    if (remaining < rowHeight * 4 && visibleCount < messages.length) {
+    if (remaining >= rowHeight * 4) return
+    if (visibleCount < messages.length) {
       setVisibleCount((count) => Math.min(count + PAGE_SIZE, messages.length))
+    } else if (hasMore) {
+      onLoadMore?.()
     }
   }
 
   return (
-    <section className="flex w-[380px] shrink-0 flex-col bg-card">
+    <section className="flex shrink-0 flex-col bg-card" style={{ width }}>
       <div className="flex h-8 shrink-0 items-center gap-0.5 px-3">
         {filters.map((item) => (
           <button

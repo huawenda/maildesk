@@ -17,7 +17,10 @@ const api: MailApi = {
     page: (q) => ipcRenderer.invoke(CH.messagesPage, q),
     get: (id) => ipcRenderer.invoke(CH.messagesGet, id),
     setRead: (ids, read) => ipcRenderer.invoke(CH.messagesSetRead, { ids, read }),
-    setFlagged: (ids, flagged) => ipcRenderer.invoke(CH.messagesSetFlagged, { ids, flagged })
+    setFlagged: (ids, flagged) => ipcRenderer.invoke(CH.messagesSetFlagged, { ids, flagged }),
+  move: (ids, targetFolderId) => ipcRenderer.invoke(CH.messagesMove, { ids, targetFolderId }),
+  remove: (ids, permanent) => ipcRenderer.invoke(CH.messagesDelete, { ids, permanent }),
+    unreadCounts: () => ipcRenderer.invoke(CH.messagesUnreadCounts)
   },
   attachments: {
     save: (messageId, attachmentId) =>

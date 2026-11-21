@@ -21,6 +21,7 @@ export interface IncomingMessage {
 }
 
 interface MessageRow {
+  rowid?: number
   id: string
   folder_id: string
   uid: number
@@ -92,25 +93,30 @@ const toAttachment = (row: AttachmentRow): Attachment => ({
 })
 
 /**
- * 游标为上一页最后一条的 sent_at。列表只读 header + snippet，正文由 get() 懒加载（PRD 7.6）。
+ * 游标是上一页最后一条的 `sentAt:rowid`（不透明字符串，渲染层原样回传）。
+ * 只用 sent_at 会因为同一秒多封邮件在页边界上漏掉一封，所以必须带 rowid 兜底。
+ * 列表只读 header + snippet，正文由 get() 懒加载（PRD 7.6）。
  */
-export function pageMessages(folderId: string, cursor: number | undefined, limit: number): MessagePage {
-  const rows = cursor
+export function pageMessages(folderId: string, cursor: string | undefined, limit: number): MessagePage {
+  const parsed = cursor && /^\d+:\d+$/.test(cursor) ? cursor.split(":").map(Number) : null
+  const rows = parsed
     ? all<MessageRow>(
-        "SELECT * FROM message WHERE folder_id = ? AND sent_at < ? ORDER BY sent_at DESC, rowid DESC LIMIT ?",
+        "SELECT rowid, * FROM message WHERE folder_id = ? AND (sent_at < ? OR (sent_at = ? AND rowid < ?)) ORDER BY sent_at DESC, rowid DESC LIMIT ?",
         folderId,
-        cursor,
+        parsed[0],
+        parsed[0],
+        parsed[1],
         limit
       )
     : all<MessageRow>(
-        "SELECT * FROM message WHERE folder_id = ? ORDER BY sent_at DESC, rowid DESC LIMIT ?",
+        "SELECT rowid, * FROM message WHERE folder_id = ? ORDER BY sent_at DESC, rowid DESC LIMIT ?",
         folderId,
         limit
       )
   const items = rows.map(toSummary)
-  const last = items.at(-1)
-  return rows.length === limit && last?.sentAt
-    ? { items, nextCursor: last.sentAt }
+  const last = rows.at(-1)
+  return rows.length === limit && last
+    ? { items, nextCursor: `${last.sent_at ?? 0}:${last.rowid ?? 0}` }
     : { items }
 }
 
@@ -200,6 +206,76 @@ export function saveIncoming(folderId: string, items: IncomingMessage[]): number
   return items.filter((item) => !existing.has(item.uid)).length
 }
 
+/** 对账用：把文件夹里所有已落库邮件的 UID 索引出来，key 是 UID。 */
+export interface LocalUidRow {
+  id: string
+  uid: number
+  messageId: string | null
+  isRead: number
+  isFlagged: number
+}
+
+export function folderUidIndex(folderId: string): Map<number, LocalUidRow> {
+  const rows = all<{ id: string; uid: number; message_id: string | null; is_read: number; is_flagged: number }>(
+    "SELECT id, uid, message_id, is_read, is_flagged FROM message WHERE folder_id = ?",
+    folderId
+  )
+  const index = new Map<number, LocalUidRow>()
+  for (const row of rows) {
+    index.set(row.uid, {
+      id: row.id,
+      uid: row.uid,
+      messageId: row.message_id,
+      isRead: row.is_read,
+      isFlagged: row.is_flagged
+    })
+  }
+  return index
+}
+
+/** 本地发起的移动/删除要知道每条邮件在哪个文件夹、UID 多少。 */
+export function messageLocators(
+  ids: string[]
+): { id: string; folderId: string; uid: number; messageId: string | null }[] {
+  if (ids.length === 0) return []
+  const placeholders = ids.map(() => "?").join(",")
+  return all<{ id: string; folderId: string; uid: number; messageId: string | null }>(
+    "SELECT id, folder_id AS folderId, uid, message_id AS messageId FROM message WHERE id IN (" + placeholders + ")",
+    ...ids
+  )
+}
+
+/**
+ * 服务器上同一封邮件换了文件夹（移动）：保留本地行 id，只改 folder_id/uid，
+ * 正文缓存、已读、星标、附件元数据都不会丢。
+ */
+export function moveMessageRow(
+  id: string,
+  folderId: string,
+  uid: number,
+  flags?: { isRead?: boolean; isFlagged?: boolean }
+): void {
+  run(
+    "UPDATE message SET folder_id = ?, uid = ?, is_read = COALESCE(?, is_read), is_flagged = COALESCE(?, is_flagged) WHERE id = ?",
+    folderId,
+    uid,
+    flags?.isRead === undefined ? null : boolean(flags.isRead),
+    flags?.isFlagged === undefined ? null : boolean(flags.isFlagged),
+    id
+  )
+}
+
+/** 服务器已删除 / 本地彻底删除：连带 attachment（外键 ON DELETE CASCADE）与 FTS 索引一起清掉。 */
+export function deleteMessages(ids: string[]): void {
+  if (ids.length === 0) return
+  const placeholders = ids.map(() => "?").join(",")
+  run("DELETE FROM message WHERE id IN (" + placeholders + ")", ...ids)
+}
+
+export function setReadById(id: string, read: boolean): void {
+  run("UPDATE message SET is_read = ? WHERE id = ?", boolean(read), id)
+}
+
 /** UIDVALIDITY 变化时整箱清空重拉（PRD FR-05.4）。 */
 export function clearFolderMessages(folderId: string): void {
   run("DELETE FROM message WHERE folder_id = ?", folderId)
@@ -222,6 +298,19 @@ export function latestInFolder(
       folderId
     ) ?? null
   )
+}
+
+/**
+ * 侧栏角标：按文件夹统计未读。以本地库为准，和列表里的未读态同源，
+ * 避免「服务器 STATUS 的 unseen」在本地已读后仍然偏大（选中/未选中数字不一致）。
+ */
+export function unreadCountsByFolder(): Record<string, number> {
+  const rows = all<{ folderId: string; unread: number }>(
+    "SELECT folder_id AS folderId, COUNT(*) AS unread FROM message WHERE is_read = 0 GROUP BY folder_id"
+  )
+  const result: Record<string, number> = {}
+  for (const row of rows) result[row.folderId] = Number(row.unread)
+  return result
 }
 
 export function countFolder(folderId: string): { total: number; unread: number } {

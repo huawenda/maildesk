@@ -114,7 +114,8 @@ export type AttachmentPreviewResult =
 export interface MessagePage {
   items: MessageSummary[]
   /** 传回 `page` 作为 cursor 取下一页；undefined 表示到底。 */
-  nextCursor?: number
+  /** 不透明游标 `<sentAt>:<rowid>`，原样回传给 page() 取下一页 */
+  nextCursor?: string
 }
 
 export interface SearchOptions {
@@ -174,6 +175,8 @@ export type SyncEvent =
       finished?: boolean
     }
   | { type: "messages"; folderId: string; added: number }
+  /** 双向对账的结果：本地库被服务器状态修正了多少条（界面据此重拉列表）。 */
+  | { type: "reconcile"; added: number; removed: number; moved: number; flags: number }
 
 export interface MailApi {
   accounts: {
@@ -187,10 +190,16 @@ export interface MailApi {
     list(accountId?: string): Promise<Folder[]>
   }
   messages: {
-    page(q: { folderId: string; cursor?: number; limit?: number }): Promise<MessagePage>
+    page(q: { folderId: string; cursor?: string; limit?: number }): Promise<MessagePage>
     get(id: string): Promise<MessageDetail>
     setRead(ids: string[], read: boolean): Promise<void>
     setFlagged(ids: string[], flagged: boolean): Promise<void>
+    /** 移动到指定文件夹：服务端 MOVE，本地行原地改 folder/uid，正文缓存不丢。 */
+    move(ids: string[], targetFolderId: string): Promise<{ moved: number; failed: number }>
+    /** 删除：默认进垃圾箱（可恢复），permanent 为 true 时永久删除。 */
+    remove(ids: string[], permanent?: boolean): Promise<{ deleted: number; failed: number }>
+    /** 各文件夹未读数（以本地库为准），key 是 folderId。 */
+    unreadCounts(): Promise<Record<string, number>>
   }
   attachments: {
     /** 弹保存对话框，把远程附件取下来写到用户选的路径。 */

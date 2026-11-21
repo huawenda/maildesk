@@ -35,7 +35,9 @@ export function AccountCapsule({ accounts, activeAccountId, collapsed, onSelect,
           title={account ? account.email : "添加账户"}
           className={cn(
             "flex h-7 min-w-0 items-center gap-2 rounded-md text-left transition-colors hover:bg-white/[0.04] data-[state=open]:bg-white/[0.06] [-webkit-app-region:no-drag]",
-            collapsed ? "w-7 justify-center" : "flex-1 px-1"
+            "flex-1",
+            // 与侧栏文件夹图标对齐：展开时图标中心 25.5px，折叠时 32px
+            collapsed ? "justify-center" : "pl-[5.5px] pr-1"
           )}
         >
           {account ? (

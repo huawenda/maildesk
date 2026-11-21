@@ -103,6 +103,80 @@ function accountIdOfMessage(messageId: string): string | null {
   return folder ? folder.accountId : null
 }
 
+
+/** 把一批邮件按所属账户分组：多账户时各走各的引擎，不能混在一个连接里。 */
+function groupByAccount(messageIds: string[]): Map<string, string[]> {
+  const groups = new Map<string, string[]>()
+  for (const id of messageIds) {
+    let accountId: string | null = null
+    try {
+      accountId = accountIdOfMessage(id)
+    } catch {
+      accountId = null
+    }
+    if (!accountId) continue
+    const list = groups.get(accountId)
+    if (list) list.push(id)
+    else groups.set(accountId, [id])
+  }
+  return groups
+}
+
+/** 已读态推送：失败不抛错，留在引擎队列里等下次对账前补发。 */
+export function markReadRemote(ids: string[], read: boolean): void {
+  for (const [accountId, group] of groupByAccount(ids)) {
+    const engine = engines.get(accountId)
+    if (!engine) continue
+    void engine.markRead(group, read).catch((error) => {
+      console.error("[sync] push read state failed", accountId, String(error))
+    })
+  }
+}
+
+/** 本地发起的移动：目标文件夹决定账户，跨账户的邮件直接算失败。 */
+export async function moveMessages(
+  ids: string[],
+  targetFolderId: string
+): Promise<{ moved: number; failed: number }> {
+  const target = getFolder(targetFolderId)
+  if (!target) throw new Error("not-found: folder")
+  const engine = engines.get(target.accountId)
+  if (!engine) throw new Error("network: 未连接")
+  const idsInAccount = ids.filter((id) => {
+    try {
+      return accountIdOfMessage(id) === target.accountId
+    } catch {
+      return false
+    }
+  })
+  const result = await engine.moveMessages(idsInAccount, targetFolderId)
+  return { moved: result.moved, failed: result.failed + (ids.length - idsInAccount.length) }
+}
+
+/** 本地发起的删除：默认进垃圾箱，离线/没有垃圾箱时由引擎按永久删除处理。 */
+export async function deleteMessages(
+  ids: string[],
+  permanent: boolean
+): Promise<{ deleted: number; failed: number }> {
+  let deleted = 0
+  let failed = 0
+  for (const [accountId, group] of groupByAccount(ids)) {
+    const engine = engines.get(accountId)
+    if (!engine) {
+      failed += group.length
+      continue
+    }
+    try {
+      const result = await engine.deleteMessages(group, permanent)
+      deleted += result.deleted
+      failed += result.failed
+    } catch (error) {
+      console.error("[sync] delete failed", accountId, String(error))
+      failed += group.length
+    }
+  }
+  return { deleted, failed }
+}
 /** 正文懒加载入口：找不到引擎就当作没有正文，UI 显示占位。 */
 export async function loadMessageBody(messageId: string): Promise<boolean> {
   try {

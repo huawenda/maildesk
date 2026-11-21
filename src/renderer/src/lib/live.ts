@@ -31,7 +31,8 @@ export function navIconOf(role: FolderRole): FolderIcon {
 /** 真实文件夹 → 侧栏导航项；系统文件夹靠前，其余按服务器顺序。 */
 const ROLE_LABEL: Record<Exclude<FolderRole, null>, string> = {
   inbox: "收件箱",
-  drafts: "草稿",
+  // 系统草稿箱与服务器上的普通「草稿」目录是两回事（uid_validity 不同），名字必须能区分
+  drafts: "草稿箱",
   sent: "已发送",
   archive: "归档",
   junk: "垃圾邮件",
@@ -67,6 +68,7 @@ export function navFolders(folders: Folder[]): NavFolder[] {
     }))
 
   const idByPath = new Map(folders.map((folder) => [folder.path, folder.id]))
+  // 不做同名合并：服务器上的普通目录和带 special-use 的系统箱子可能是两个不同邮箱
   const custom = folders
     .filter((folder) => folder.role === null)
     .sort((a, b) => a.path.localeCompare(b.path, "zh-Hans-CN"))
@@ -85,7 +87,25 @@ export function navFolders(folders: Folder[]): NavFolder[] {
       }
     })
 
-  return [...system, ...custom]
+  // 顶层自建文件夹统一收进「其他文件夹」分组：服务器给了 \Noselect 容器就用它，
+  // 没给就造一个虚拟分组（id 固定、selectable=false，永远不会被选中）。
+  const container = custom.find((item) => !item.selectable && item.depth === 0 && item.parentId === null)
+  const topLevel = custom.filter((item) => item.depth === 0 && item.selectable)
+  if (topLevel.length === 0) return [...system, ...custom]
+
+  const group: NavFolder = container ?? {
+    id: "custom-group",
+    label: "其他文件夹",
+    icon: "folder",
+    depth: 0,
+    selectable: false,
+    parentId: null
+  }
+  const topIds = new Set(topLevel.map((item) => item.id))
+  const grouped = custom.map((item) => (topIds.has(item.id) ? { ...item, depth: 1, parentId: group.id } : item))
+  const children = grouped.filter((item) => item.parentId === group.id)
+  const rest = grouped.filter((item) => item.id !== group.id && item.parentId !== group.id)
+  return [...system, group, ...children, ...rest]
 }
 
 const KIND_BY_EXT: Record<string, AttachmentKind> = {

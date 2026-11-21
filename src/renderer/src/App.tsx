@@ -266,7 +266,9 @@ export default function App() {
         if (event.status.lastSyncAt) setLastSyncAt(event.status.lastSyncAt)
       } else if (event.type === "messages") {
         setFolderTick((tick) => tick + 1)
-        setRefreshTick((tick) => tick + 1)
+        // 主进程的本地变更回执（移动/删除/已读）added 恒为 0，界面已经改好了，
+        // 再整箱重取就是白白闪一下；只有真来了新邮件（added > 0）才重拉列表
+        if (event.added > 0) setRefreshTick((tick) => tick + 1)
       } else if (event.type === "reconcile") {
         // 服务器侧的删除/移动/已读已被本地对齐，重拉列表与计数
         if (event.added + event.removed + event.moved + event.flags > 0) {
@@ -480,8 +482,10 @@ export default function App() {
           setItems((current) => current.filter((message) => !idSet.has(message.id)))
           setSelectedId((current) => (current && idSet.has(current) ? null : current))
           setSelectedIds([])
+          // 成功时不重取整箱：本地 filter 就是终态，重取只会让列表白闪一次。
+          // 部分失败才回库兜底——IPC 只回计数，本地猜不出是哪几封。
+          if (result.failed > 0) setRefreshTick((tick) => tick + 1)
           setFolderTick((tick) => tick + 1)
-          setRefreshTick((tick) => tick + 1)
           setUnreadTick((tick) => tick + 1)
         })
         .catch((error) => showNotice("移动失败 · " + describeError(error)))
@@ -514,8 +518,9 @@ export default function App() {
           setItems((current) => current.filter((message) => !idSet.has(message.id)))
           setSelectedId((current) => (current && idSet.has(current) ? null : current))
           setSelectedIds([])
+          // 同 moveMessage：全成功就不再重取，只有部分失败才回库对齐
+          if (result.failed > 0) setRefreshTick((tick) => tick + 1)
           setFolderTick((tick) => tick + 1)
-          setRefreshTick((tick) => tick + 1)
           setUnreadTick((tick) => tick + 1)
         })
         .catch((error) => showNotice("删除失败 · " + describeError(error)))
@@ -536,8 +541,9 @@ export default function App() {
         setItems((current) => current.filter((message) => !idSet.has(message.id)))
         setSelectedId((current) => (current && idSet.has(current) ? null : current))
         setSelectedIds([])
+        // 批量删同样不整箱重取；部分失败时再回库
+        if (result.failed > 0) setRefreshTick((tick) => tick + 1)
         setFolderTick((tick) => tick + 1)
-        setRefreshTick((tick) => tick + 1)
         setUnreadTick((tick) => tick + 1)
       })
       .catch((error) => showNotice("删除失败 · " + describeError(error)))

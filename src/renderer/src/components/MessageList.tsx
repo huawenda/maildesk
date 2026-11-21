@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   AlignJustify,
@@ -364,8 +364,9 @@ export function MessageList({
         )}
       </div>
 
-      {/* 紧凑视图是 Foxmail 式表格：列头固定（不随列表滚动），标准/宽松仍是三行卡片，不加列头 */}
-      {compact && !loading && messages.length > 0 ? (
+      {/* 紧凑视图是 Foxmail 式表格：列头固定（不随列表滚动），标准/宽松仍是三行卡片，不加列头。
+          列头只看「有没有数据」，不能看 loading —— 刷新时卸载列头会让内容整体上移 28px，表现成闪烁 */}
+      {compact && messages.length > 0 ? (
         <div
           ref={headerRef}
           className="flex h-7 shrink-0 items-stretch border-y border-border/60 bg-white/[0.03] pl-2 text-[11.5px] text-muted-foreground"
@@ -575,7 +576,8 @@ interface RowProps {
   onToggleStar?: (id: string) => void
 }
 
-function MessageRow({ message, selected, density, cols, onSelect, onToggleStar }: RowProps) {
+/** 行组件 memo 化：删除一行时其余行的 message 对象身份不变，可以整片跳过重渲染 */
+const MessageRow = memo(function MessageRow({ message, selected, density, cols, onSelect, onToggleStar }: RowProps) {
   const compact = density === "compact"
   const comfortable = density === "comfortable"
   // 已读行整体降一档明度（头像、发件人、主题、摘要、时间一起变淡），未读行保持原亮度
@@ -755,7 +757,7 @@ function MessageRow({ message, selected, density, cols, onSelect, onToggleStar }
       </div>
     </div>
   )
-}
+})
 
 function SkeletonRows({ rowHeight, compact }: { rowHeight: number; compact: boolean }) {
   if (compact) {

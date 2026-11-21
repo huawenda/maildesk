@@ -139,15 +139,39 @@ export async function runServerOp(op: string, subject: string, target?: string):
     }
     const lock = await client.getMailboxLock(folder.path)
     try {
+      const before = Number(client.mailbox === false ? 0 : client.mailbox.exists)
+      if (op === "unseen") {
+        // 只统计服务端的 \Seen，用来核对本地未读数是否被错误覆盖
+        let seen = 0
+        let unseen = 0
+        for await (const message of client.fetch("1:*", { uid: true, flags: true }, { uid: true })) {
+          if (!message.flags) {
+            unseen += 1
+            continue
+          }
+          if (message.flags.has("\\Seen")) seen += 1
+          else unseen += 1
+        }
+        console.log("SERVEROP " + safe({ op, exists: before, seen, unseen }))
+        return
+      }
       const uids: number[] = []
-      for await (const message of client.fetch("1:*", { envelope: true, uid: true }, { uid: true })) {
-        if (typeof message.uid !== "number") continue
-        if ((message.envelope?.subject ?? "").includes(subject)) uids.push(message.uid)
+      if (op === "deleteuid") {
+        // 直接按 UID 操作（QQ 的"幽灵 UID"没有 envelope，按主题永远匹配不到）
+        for (const part of subject.split(",")) {
+          const uid = Number(part.trim())
+          if (Number.isInteger(uid) && uid > 0) uids.push(uid)
+        }
+      } else {
+        for await (const message of client.fetch("1:*", { envelope: true, uid: true }, { uid: true })) {
+          if (typeof message.uid !== "number") continue
+          if ((message.envelope?.subject ?? "").includes(subject)) uids.push(message.uid)
+        }
       }
       let result: unknown = null
       if (uids.length > 0) {
         const set = uids.join(",")
-        if (op === "delete") result = await client.messageDelete(set, { uid: true })
+        if (op === "delete" || op === "deleteuid") result = await client.messageDelete(set, { uid: true })
         else if (op === "move") result = await client.messageMove(set, target ?? "INBOX", { uid: true })
         else if (op === "flag") result = await client.messageFlagsAdd(set, ["\\Seen"], { uid: true })
       }
@@ -157,6 +181,7 @@ export async function runServerOp(op: string, subject: string, target?: string):
             op,
             subject,
             uids,
+            existsBefore: before,
             target: target ?? null,
             copy: result === true ? null : result,
             exists: client.mailbox === false ? 0 : Number(client.mailbox.exists)

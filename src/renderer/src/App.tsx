@@ -357,6 +357,18 @@ export default function App() {
     ? (liveFolders.find((folder) => folder.id === folderId)?.totalCount ?? folderMessages.length)
     : folderMessages.length
 
+  // 「N 封」必须给全量数字：未读用库里的未读总数，其余过滤条件没有全量统计就不显示
+  const folderUnread = live
+    ? (unreadCounts[folderId] ?? 0)
+    : folderMessages.filter((message) => message.unread).length
+  const listCount: number | null = activeLabel
+    ? null
+    : filter === "all"
+      ? Math.max(folderTotal, folderMessages.length)
+      : filter === "unread"
+        ? folderUnread
+        : null
+
   const visible = useMemo(() => {
     switch (filter) {
       case "unread":
@@ -685,11 +697,12 @@ export default function App() {
         />
         <MessageList
           messages={visible}
-          totalCount={filter === "all" && !activeLabel ? Math.max(folderTotal, folderMessages.length) : visible.length}
+          countLabel={listCount}
           hasMore={hasMorePages}
           onLoadMore={loadMoreMessages}
           selectedId={selectedId}
           onSelect={select}
+          onToggleStar={toggleStar}
           density={density}
           filter={filter}
           onFilterChange={setFilter}

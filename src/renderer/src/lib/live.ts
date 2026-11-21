@@ -165,6 +165,7 @@ export function summaryToMessage(summary: MessageSummary): Message {
     starred: summary.isFlagged,
     hasAttachments: summary.hasAttachments,
     labels: summary.labels ?? [],
+    size: summary.size ?? 0,
     attachments: [],
     body: [],
     bodyHtml: null

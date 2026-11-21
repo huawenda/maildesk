@@ -59,7 +59,7 @@ docs/                PRD、UI 参考、截图
 - 三栏固定结构：侧栏 240（折叠 64）/ 列表 380（可拖 320 ~ 窗口宽度的一半，上限随窗口缩放）/ 正文满宽居中。无 App Rail、无 Ribbon。
 - 深色是主设计态，方向为「暖炭灰」而非冷蓝灰：底色 `#1B1A18`、画布 `#1E1D1B`、主色 `#2659CC`（取自 Canary 截图像素中位数）。禁止纯黑 `#000` 与纯白文字 `#FFF`。
 - 层级靠明度差，不靠边框堆叠；列表与阅读器之间只保留 1px `--border`。
-- 未读/已读靠字重（600 / 400）区分，颜色只留给品牌蓝、星标、标签。
+- 未读/已读先靠字重（600 / 400）区分，再让已读行整体暗一档（头像 `opacity-60`、发件人 `/70`、主题 `/60`、摘要与时间 `muted-foreground/65`）；不要在列表里给已读行加别的颜色。
 - 选中行整行填充 `--primary`，文字纯白，**不缩放**；动效只动 `opacity` / `transform`，120–160ms `ease-out`。
 - 阅读器头部顺序：主题 → 发件人 → 标签 chip 与附件 chip（同一行 `flex-wrap`）→ 正文卡片。附件必须在首屏可见，不许沉到长正文下方。
 
@@ -102,6 +102,9 @@ docs/                PRD、UI 参考、截图
 - 侧栏文件名不做去重：QQ 同时给 `Drafts`（role=drafts）和普通目录 `草稿`（role=null），两者 UIDVALIDITY 不同、是两个真邮箱，删掉任一个都会丢文件夹。系统草稿箱标签固定为「草稿箱」以区分。
 - `\Archive` / `\All` **不映射成系统「归档」**（用户要求「存档」留在自建目录树）：`roleOf` 返回 null，`schema.ts` v4 迁移把历史库里的 `role='archive'` 清空。所有顶层自建文件夹由 `navFolders` 收进「其他文件夹」分组（服务器给 `\Noselect` 容器就用它，否则用虚拟 id `custom-group`）。
 - 侧栏未读角标与标题栏「N 封未读」必须同源，且只以本地库为准（IPC `messages:unread-counts` → `unreadCountsByFolder()`，渲染层 `unreadCounts[folderId]`）。不要用服务器 `STATUS (UNSEEN)`（本地已读不同步时会偏大），也不要用已加载的那一页里未读条数去数——那正是「选中收件箱 126、未选中 255」和「切到已删除时数字闪一下」的成因。
+- **紧凑密度是 Foxmail 式表格（行高 26px，1:1 复刻）**：列表顶部固定列头「状态 / 回形针 / 发件人 / 主题 / 日期⌄ / 大小 / ★」（状态列与附件列各自独立 18px，Foxmail 口径），状态 / 附件 / 星标固定（`COL_STATUS` / `COL_ATTACH` / `COL_STAR`），发件人 / 日期 / 大小三列宽度来自组件 state `CompactCols`（默认 140 / 68 / 52，持久化 `localStorage["maildesk.compactCols"]`），列头与数据行都写 `style={{ width: cols.x }}`，改列宽只改 state 不必两处手改；行内不设 `gap`、靠单元格 padding 对齐列头（发件人/主题 `pl-2`、日期 `pr-1.5`、大小 `pr-2`）；列头每列带 `border-r border-border/40`（星标列除外），分隔线上的 `ColHandle`（6px 命中区，`title` 以「拖动调整列宽」开头）用**在 pointerdown 里同步挂 window 监听**的方式拖拽——等 `useEffect` 再挂会收不到同一 tick 内的 `pointermove`（截图钩子实测过），pointerup 存盘必须读 `colsRef` 而不是 state（move 与 up 同 tick 时 state 还是旧值，会把旧宽度写回 localStorage）；`MAILDESK_CAPTURE_COLDRAG='0:80'` 可自动化拖第 n 条分隔线（0 发件人 / 1 日期 / 2 大小）；按日期分组（今天/昨天/本周/上周/本月/上个月/更早，组头条 24px 随列表滚动），分组用 `groupByDay` 里的 `group` 引用累加，**不能拿 `rows[rows.length-1]` 判断是否同组**（上一行永远是邮件行，会导致每封邮件都被当成新组）；星标列每行都显示，未加星是描边、加星是实心，点星标 `stopPropagation` 后调 `onToggleStar`；日期走 `formatCompactTime`（当天「凌晨0:34」、同年「11-21 23:20」、跨年「2025-04-30」），标准/宽松仍用 `formatListTime`。折叠分组：`GroupHeader` 是 `<button aria-expanded>`，折叠态换 `ChevronRight`、点击只隐藏本组邮件行，切换文件夹/过滤时清空 `collapsedGroups`。截图验证用 `MAILDESK_CAPTURE_DENSITY='紧凑'`，折叠第 n 个组用 `MAILDESK_CAPTURE_COLLAPSE=<n>`（按 `button[aria-expanded]` + 文字含 `封)` 定位）。
+- 列表右上角「N 封」同样不许拿已加载条数充数（曾出现侧栏 469、未读页签 197 的打架）：全部用 `folderTotal`，未读用 `unreadCounts[folderId]`，「有附件」「星标」没有全量统计就传 `countLabel={null}` 不显示。
+- 核对服务器真实未读数用 `MAILDESK_IMAP_OP='unseen|'`（selftest 的 `runServerOp`，只统计 `\\Seen`，输出 `SERVEROP {op,exists,seen,unseen}`）。实测 472 封里 `seen 3 / unseen 469`，与本地库一致；随后在界面上点开一封未读邮件，服务器 `unseen` 立刻 469→468，说明已读推送链路是通的。
 - 分隔线拖拽**不要用 `setPointerCapture`**：把手只有 5px 宽，指针一离开元素后续 `pointermove` 就收不到（实测拖一下只走一步然后卡住），必须改成 `resizing` 时在 `window` 上挂 `pointermove/pointerup/pointercancel`，宽度上限用 `window.innerWidth` 实时算。
 - 列表分页游标是 `sentAt:rowid` 不透明字符串（`src/main/db/messages.ts` 的 `pageMessages`），不能只用 `sent_at`：同一秒多封邮件会在页边界漏掉一封。渲染层原样回传，不要自己拼数字；「N 封」用 `folder.totalCount`，不是已加载条数。
 - 账户表单只保留「自定义 IMAP」一种形态（用户明确要求去掉 QQ/163/126/Gmail/Outlook 预设，只连公司自建服务器）；不要再加回服务商预设，也不要在代码里硬编码任何公司的 host。
@@ -118,7 +121,7 @@ docs/                PRD、UI 参考、截图
 - **双向同步的入口是 `reconcileAccount`（启动一次 + 每 3 分钟）**：枚举服务器全箱 UID 与本地 `folderUidIndex` 比对。服务器移走的邮件靠 `Message-ID` 认领本地旧行（`moveMessageRow`），保留 id/正文/已读态；不要改成"删旧行 + 插新行"，会丢正文缓存。对账上限 `RECONCILE_MAX_MESSAGES = 20_000`。
 - **`bootstrap()` 必须先对账再 `syncAll`**：顺序反过来时，网页版 MOVE 走的邮件会被当成新邮件插一行、随后旧行被对账删掉（实测丢过 id）。新文件夹（`uidValidity === null`）对账会跳过，交给 `syncAll` 建游标。
 - **QQ 的 MOVE 不支持 UIDPLUS**：`messageMove` 返回的 `copy.uidMap` 是空对象，目标 uid 只能靠对账重新枚举；且草稿（非系统 `Drafts`）里放进去的邮件约 2 分钟后会被 QQ 自己清空，测移动别用「草稿」。
-- **QQ 有"幽灵 UID"**：`EXISTS`/UID 列表里有一封（2026-11 时为 2533）`fetchOne` 永远拿不到 header，所以「服务端封数 = 本地行数」永远差 1，不是 bug。增量拉取取不到某封时 `last_synced_uid` 仍会推进，靠下一轮对账补回。
+- **QQ 有"幽灵 UID"**：`EXISTS`/UID 列表里会多出一封 `fetchOne` 永远拿不到 header、也没有 `Message-ID` 的空 UID（2026-11 时为 2533），所以「服务端封数 = 本地行数」会差 1，不是本地漏同步。增量拉取取不到某封时 `last_synced_uid` 仍会推进，靠下一轮对账补回。确实要清掉时用 `MAILDESK_IMAP_OP='deleteuid|2533'`（按 UID 直接 STORE \Deleted + EXPUNGE，`runServerOp` 会打印 `existsBefore` 与操作后的 `exists` 供核对）——按主题匹配永远找不到这种 UID。
 - 本地移动/删除走 `mail.messages.move/remove`：`remove(ids, permanent)` 的第二个参数在垃圾箱里为 `true`（EXPUNGE）。Reader 工具栏的删除按钮 title 由 `permanentDelete` 决定，别写死「删除」。
 - 调试服务器侧操作：`MAILDESK_IMAP_OP='delete|主题' / 'move|主题|目标文件夹' / 'folders'` 会走 `runServerOp` 并打印 `SERVEROP {...}`；`messageMove` 结果含 BigInt，直接 JSON.stringify 会抛错（用 selftest 里的 `safe()`）。
 - 对账/回溯的日志只在 `MAILDESK_SYNC_DEBUG=1` 时输出（`[sync] scan`、`[sync] folder`）；日常 dev 不要带这个 env。

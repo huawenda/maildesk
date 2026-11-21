@@ -163,6 +163,61 @@ function createWindow(): BrowserWindow {
               console.log("capture-settings", JSON.stringify(opened))
               await new Promise((resolve) => setTimeout(resolve, 600))
             }
+            // 列表密度：先打开标题栏密度下拉，再按文字选「紧凑 / 标准 / 宽松」
+            const density = process.env.MAILDESK_CAPTURE_DENSITY
+            if (density) {
+              await win.webContents
+                .executeJavaScript(
+                  "(() => { const el = [...document.querySelectorAll('button')].find((b) => b.getAttribute('title') === '列表密度'); if (!el) return false; const opts = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }; el.dispatchEvent(new PointerEvent('pointerdown', opts)); el.dispatchEvent(new MouseEvent('mousedown', opts)); el.dispatchEvent(new PointerEvent('pointerup', opts)); el.dispatchEvent(new MouseEvent('mouseup', opts)); return true })()"
+                )
+                .catch(() => undefined)
+              await new Promise((resolve) => setTimeout(resolve, 400))
+              const picked = await win.webContents
+                .executeJavaScript(
+                  "(() => { const items = [...document.querySelectorAll('[role=menuitemradio]')]; const el = items.find((b) => (b.textContent || '').trim() === " +
+                    JSON.stringify(density) +
+                    "); if (!el) return 'no-item:' + items.length; const opts = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }; el.dispatchEvent(new PointerEvent('pointermove', opts)); el.dispatchEvent(new PointerEvent('pointerup', opts)); el.dispatchEvent(new MouseEvent('mouseup', opts)); el.dispatchEvent(new MouseEvent('click', opts)); return true })()"
+                )
+                .catch(() => undefined)
+              console.log("capture-density", JSON.stringify(picked))
+              await new Promise((resolve) => setTimeout(resolve, 700))
+            }
+            // 折叠第 n 个日期分组（紧凑视图，n 从 1 开始，默认第一个）
+            const collapse = process.env.MAILDESK_CAPTURE_COLLAPSE
+            if (collapse) {
+              const picked = await win.webContents
+                .executeJavaScript(
+                  "(() => { const heads = [...document.querySelectorAll('button[aria-expanded]')].filter((b) => (b.className || '').includes('bg-muted') && (b.textContent || '').includes('封)')); const el = heads[" +
+                    (Number(collapse) - 1) +
+                    "]; if (!el) return 'no-group:' + heads.length; el.click(); return (el.textContent || '').trim() })()"
+                )
+                .catch(() => undefined)
+              console.log("capture-collapse", JSON.stringify(picked))
+              await new Promise((resolve) => setTimeout(resolve, 500))
+            }
+            // 拖动第 n 个列分隔线（紧凑视图，n 从 0 开始：发件人 / 日期 / 大小），值形如 "0:80"
+            const colDrag = process.env.MAILDESK_CAPTURE_COLDRAG
+            if (colDrag) {
+              const [index, delta] = colDrag.split(":")
+              const result = await win.webContents
+                .executeJavaScript(
+                  "(() => { const handles = [...document.querySelectorAll('span[title^=\"拖动调整列宽\"]')]; const el = handles[" +
+                    Number(index) +
+                    "]; if (!el) return 'no-handle:' + handles.length; const rect = el.getBoundingClientRect(); const x = Math.round(rect.left + 2); const y = Math.round(rect.top + rect.height / 2); const opts = { bubbles: true, cancelable: true, button: 0, pointerId: 1, pointerType: 'mouse', clientX: x, clientY: y }; el.dispatchEvent(new PointerEvent('pointerdown', opts)); const move = Object.assign({}, opts, { clientX: x + " +
+                    Number(delta || 0) +
+                    " }); window.dispatchEvent(new PointerEvent('pointermove', move)); window.dispatchEvent(new PointerEvent('pointerup', move)); return [x, " +
+                    Number(delta || 0) +
+                    ", handles.length] })()"
+                )
+                .catch((error) => String(error))
+              await new Promise((resolve) => setTimeout(resolve, 600))
+              console.log(
+                "capture-coldrag",
+                JSON.stringify(result),
+                "saved",
+                await win.webContents.executeJavaScript("localStorage.getItem('maildesk.compactCols')").catch(() => null)
+              )
+            }
             // 点第 n 个附件 chip（图片会打开内联预览层）
             const att = process.env.MAILDESK_CAPTURE_ATT
             if (att) {

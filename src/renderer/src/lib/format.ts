@@ -12,6 +12,28 @@ export function formatListTime(iso: string, now = new Date()): string {
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
 }
 
+/**
+ * 紧凑视图的日期列（Foxmail 口径）：当天「凌晨0:34」，同一年「11-21 23:20」，跨年「2025-04-30」
+ * 标准/宽松仍用 formatListTime 的短格式
+ */
+export function formatCompactTime(iso: string, now = new Date()): string {
+  const date = new Date(iso)
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  if (sameDay) {
+    const hours = date.getHours()
+    const label = hours < 6 ? "凌晨" : hours < 12 ? "上午" : hours === 12 ? "中午" : hours < 18 ? "下午" : "晚上"
+    const hour = hours > 12 ? hours - 12 : hours
+    return label + hour + ":" + pad(date.getMinutes())
+  }
+  if (date.getFullYear() === now.getFullYear()) {
+    return pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + " " + pad(date.getHours()) + ":" + pad(date.getMinutes())
+  }
+  return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate())
+}
+
 /** 阅读器时间：完整到分钟 */
 export function formatFullTime(iso: string): string {
   const date = new Date(iso)

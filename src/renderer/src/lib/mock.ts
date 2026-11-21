@@ -31,6 +31,8 @@ export interface Message {
   body: string[]
   /** 原始 HTML 正文；演示数据没有，真实邮件才有 */
   bodyHtml: string | null
+  /** 邮件大小（bytes），紧凑视图的「大小」列用 */
+  size: number
 }
 
 export type FolderId = "inbox" | "archive" | "junk" | "trash"
@@ -60,7 +62,7 @@ export const labels: Label[] = [
   { name: "订阅", color: "#34D399" }
 ]
 
-interface FixtureMessage extends Omit<Message, "date" | "attachments" | "hasAttachments" | "bodyHtml"> {
+interface FixtureMessage extends Omit<Message, "date" | "size" | "attachments" | "hasAttachments" | "bodyHtml"> {
   receivedAgoMinutes: number
   attachments: Attachment[]
 }
@@ -72,6 +74,7 @@ function hydrate(fixtures: FixtureMessage[], now: number): Message[] {
     ...rest,
     bodyHtml: null,
     hasAttachments: rest.attachments.length > 0,
+    size: rest.attachments.reduce((total, item) => total + item.size, 0) + 4_096,
     date: new Date(now - receivedAgoMinutes * 60_000).toISOString()
   }))
 }

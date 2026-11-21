@@ -82,7 +82,10 @@ function createWindow(): BrowserWindow {
               )
               .catch(() => undefined)
             await new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()))
-            await new Promise((resolve) => setTimeout(resolve, 900))
+            // 允许等待首轮同步完成（验证批量删除时需要真实数据先落库）
+            await new Promise((resolve) =>
+              setTimeout(resolve, Number(process.env.MAILDESK_CAPTURE_WAIT ?? 900))
+            )
             const account = process.env.MAILDESK_CAPTURE_ACCOUNT
             if (account) {
               await win.webContents
@@ -101,16 +104,24 @@ function createWindow(): BrowserWindow {
               console.log("capture-account", JSON.stringify(picked))
               await new Promise((resolve) => setTimeout(resolve, 1500))
             }
+            win.webContents.on("console-message", (_event, _level, message) => {
+              console.log("renderer-log", message)
+            })
             const nav = process.env.MAILDESK_CAPTURE_NAV
             if (nav) {
               await win.webContents
-                .executeJavaScript(
-                  "(() => { const el = [...document.querySelectorAll('aside button')].find((b) => b.textContent.trim() === " +
-                    JSON.stringify(nav) +
-                    "); if (el) { el.click(); return true } return false })()"
-                )
+                .executeJavaScript("document.querySelector('button[title=\"展开侧栏\"]')?.click()")
                 .catch(() => undefined)
-              await new Promise((resolve) => setTimeout(resolve, 900))
+              await new Promise((resolve) => setTimeout(resolve, 500))
+              const picked = await win.webContents
+                .executeJavaScript(
+                  "(() => { const el = [...document.querySelectorAll('aside button')].find((b) => (b.textContent || '').includes(" +
+                    JSON.stringify(nav) +
+                    ")); if (!el) return 'no-nav:' + document.querySelectorAll('aside button').length; el.click(); return (el.textContent || '').trim() })()"
+                )
+                .catch((error) => String(error))
+              console.log("capture-nav", JSON.stringify(picked))
+              await new Promise((resolve) => setTimeout(resolve, 1200))
             }
             if (process.env.MAILDESK_CAPTURE_SELECT) {
               const row = Number(process.env.MAILDESK_CAPTURE_ROW ?? "0")
@@ -131,6 +142,40 @@ function createWindow(): BrowserWindow {
                 .catch(() => undefined)
               console.log("capture-delete", JSON.stringify(clicked))
               await new Promise((resolve) => setTimeout(resolve, 2500))
+            }
+            // 验证删除后列表是否保持滚动位置：滚一段 → 点可视区中间那行 → 点删除 → 打印 scrollTop
+            if (process.env.MAILDESK_CAPTURE_DELSCROLL) {
+              const scrollTopAt = async () =>
+                (await win.webContents
+                  .executeJavaScript(
+                    "(() => { const el = document.querySelector('[role=\"listbox\"]'); return el ? Math.round(el.scrollTop) : -1 })()"
+                  )
+                  .catch(() => -1)) as number
+              const scrolled = await win.webContents
+                .executeJavaScript(
+                  "(() => { const el = document.querySelector('[role=\"listbox\"]'); if (!el) return -1; el.scrollTop = 130; el.dispatchEvent(new Event('scroll')); return Math.round(el.scrollTop) })()"
+                )
+                .catch(() => -1)
+              await new Promise((resolve) => setTimeout(resolve, 500))
+              const picked = await win.webContents
+                .executeJavaScript(
+                  "(() => { const box = document.querySelector('[role=\"listbox\"]'); if (!box) return 'no-list'; const rect = box.getBoundingClientRect(); const rows = [...box.querySelectorAll('[role=\"option\"]')]; const el = rows.find((r) => { const b = r.getBoundingClientRect(); return b.top > rect.top + 60 && b.bottom < rect.bottom - 60 }); if (!el) return 'no-row'; el.click(); return (el.textContent || '').slice(0, 40) })()"
+                )
+                .catch((error) => String(error))
+              console.log("capture-delscroll-pick", JSON.stringify({ scrolled, picked }))
+              await new Promise((resolve) => setTimeout(resolve, 1200))
+              const before = await scrollTopAt()
+              const clicked = await win.webContents
+                .executeJavaScript(
+                  "(() => { const el = [...document.querySelectorAll('button')].find((b) => /^(移到垃圾箱|永久删除)/.test(b.getAttribute('title') || '')); if (!el) return 'no-delete'; const opts = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }; el.dispatchEvent(new PointerEvent('pointerdown', opts)); el.dispatchEvent(new MouseEvent('mousedown', opts)); el.dispatchEvent(new PointerEvent('pointerup', opts)); el.dispatchEvent(new MouseEvent('mouseup', opts)); el.dispatchEvent(new MouseEvent('click', opts)); return el.getAttribute('title') })()"
+                )
+                .catch(() => "err")
+              await new Promise((resolve) => setTimeout(resolve, 3000))
+              const after = await scrollTopAt()
+              const count = await win.webContents
+                .executeJavaScript("document.querySelectorAll('[role=\"option\"]').length")
+                .catch(() => -1)
+              console.log("capture-delscroll", JSON.stringify({ before, after, clicked, count }))
             }
             // 「移动到」菜单：值 = 1 只打开菜单；否则先打开再点选文字包含该值的菜单项（真实拖拽一遍移动路径）
             const move = process.env.MAILDESK_CAPTURE_MOVE
@@ -252,6 +297,65 @@ function createWindow(): BrowserWindow {
               const after = await win.webContents.executeJavaScript(count).catch(() => -1)
               console.log("capture-ctrla", JSON.stringify({ before, after }))
             }
+            // 验证垃圾箱里 Ctrl+A 后按 Delete：整批删除还是只删一条
+            if (process.env.MAILDESK_CAPTURE_CTRLA_DELETE) {
+              win.webContents.focus()
+              const count = "document.querySelectorAll('[aria-selected=\"true\"]').length"
+              const rows = "document.querySelectorAll('[aria-selected]').length"
+              win.webContents.sendInputEvent({ type: "keyDown", keyCode: "A", modifiers: ["control"] })
+              win.webContents.sendInputEvent({ type: "keyUp", keyCode: "A", modifiers: ["control"] })
+              await new Promise((resolve) => setTimeout(resolve, 700))
+              console.log("capture-ctrla", JSON.stringify({
+                selected: await win.webContents.executeJavaScript(count).catch(() => -1),
+                rows: await win.webContents.executeJavaScript(rows).catch(() => -1)
+              }))
+              // 用合成 keydown 直接打窗口监听器，绕开 sendInputEvent 的修饰键残留问题
+              await win.webContents.executeJavaScript(
+                "window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }))"
+              ).catch(() => undefined)
+              await new Promise((resolve) => setTimeout(resolve, 6000))
+              console.log("capture-delete-all", JSON.stringify({
+                selected: await win.webContents.executeJavaScript(count).catch(() => -1),
+                rows: await win.webContents.executeJavaScript(rows).catch(() => -1)
+              }))
+            }
+            // 验证右键菜单「永久删除」是否作用于整份选中集（用户 m05986 的故障路径）
+            if (process.env.MAILDESK_CAPTURE_CTX_DELETE) {
+              win.webContents.focus()
+              const ctx = await win.webContents
+                .executeJavaScript(`(() => {
+                  const row = document.querySelector('[aria-selected="true"]')
+                  if (!row) return 'no-row'
+                  const rect = row.getBoundingClientRect()
+                  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left + 40, clientY: rect.top + 8 }))
+                  return 'ok'
+                })()`)
+                .catch((error) => String(error))
+              await new Promise((resolve) => setTimeout(resolve, 600))
+              const picked = await win.webContents
+                .executeJavaScript(`(() => {
+                  const items = [...document.querySelectorAll('[role="menuitem"]')]
+                  const label = items.map((el) => (el.textContent || '').trim()).filter(Boolean)
+                  const target = items.find((el) => (el.textContent || '').includes('永久删除')) ||
+                    items.find((el) => (el.textContent || '').trim() === '删除')
+                  if (!target) return { label }
+                  const rect = target.getBoundingClientRect()
+                  const opts = { bubbles: true, cancelable: true, button: 0, clientX: rect.left + 12, clientY: rect.top + rect.height / 2 }
+                  target.dispatchEvent(new PointerEvent('pointerdown', opts))
+                  target.dispatchEvent(new MouseEvent('mousedown', opts))
+                  target.dispatchEvent(new PointerEvent('pointerup', opts))
+                  target.dispatchEvent(new MouseEvent('mouseup', opts))
+                  target.dispatchEvent(new MouseEvent('click', opts))
+                  return { label, picked: (target.textContent || '').trim() }
+                })()`)
+                .catch((error) => ({ error: String(error) }))
+              console.log("capture-ctx", JSON.stringify({ ctx, picked }))
+              await new Promise((resolve) => setTimeout(resolve, 7000))
+              console.log("capture-ctx-after", JSON.stringify({
+                selected: await win.webContents.executeJavaScript("document.querySelectorAll('[aria-selected=\"true\"]').length").catch(() => -1),
+                rows: await win.webContents.executeJavaScript("document.querySelectorAll('[aria-selected]').length").catch(() => -1)
+              }))
+            }
             if (process.env.MAILDESK_CAPTURE_PROBE) {
               const info = await win.webContents
                 .executeJavaScript(
@@ -280,7 +384,7 @@ function createWindow(): BrowserWindow {
     setTimeout(() => {
       console.log("capture fallback timeout")
       app.exit(1)
-    }, 15000)
+    }, Number(process.env.MAILDESK_CAPTURE_FALLBACK ?? 15000))
   }
 
   return win

@@ -152,6 +152,8 @@ function groupByDay(messages: Message[], collapsed: Set<string>): ListRow[] {
 
 interface MessageListProps {
   messages: Message[]
+  /** 当前文件夹 id：只有换文件夹/换过滤才把列表滚回顶部，删一封邮件不能跳回顶部 */
+  folderId: string
   /** 「N 封」：按当前过滤条件给全量数字，拿不到全量时传 null（只有当前页数据，不展示以免说谎） */
   countLabel: number | null
   selectedId: string | null
@@ -184,6 +186,7 @@ interface MessageListProps {
 
 export function MessageList({
   messages,
+  folderId,
   countLabel,
   selectedId,
   selectedIds,
@@ -210,12 +213,12 @@ export function MessageList({
   // 多选集合：行底色不看 selectedId（活动行），否则 Ctrl+A 只会亮一行
   const selectedSet = useMemo(() => new Set(selectedIds ?? []), [selectedIds])
 
-  // 追加下一页时首条 id 不变，不能整块重来（否则滚动位置会被拉回顶部）
-  const firstId = messages[0]?.id
+  // 只有换文件夹或换过滤条件才回到顶部；不能依赖 messages[0].id —— 删掉第一封也会变，
+  // 那样每删一封列表就跳回顶部（用户实测反馈）
   useEffect(() => {
     setCollapsedGroups([])
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [firstId, filter])
+  }, [folderId, filter])
 
   // 紧凑视图列宽：发件人 / 日期 / 大小可拖动列分隔线调整，双击恢复默认
   const [cols, setCols] = useState<CompactCols>(readCompactCols)
@@ -428,7 +431,8 @@ export function MessageList({
         aria-activedescendant={selectedId ? `msg-${selectedId}` : undefined}
         className={cn("scrollbar-overlay min-h-0 flex-1 overflow-y-auto pb-2", compact ? "px-0" : "px-2")}
       >
-        {loading ? (
+        {/* 刷新已有数据时不换成骨架屏：骨架会把滚动容器内容清空，滚动位置随之归零 */}
+        {loading && messages.length === 0 ? (
           <SkeletonRows rowHeight={rowHeight} compact={compact} />
         ) : messages.length === 0 ? (
           <EmptyList filter={filter} />

@@ -137,7 +137,52 @@ export async function runServerOp(op: string, subject: string, target?: string):
       await client.logout()
       return
     }
-    const lock = await client.getMailboxLock(folder.path)
+    if (op === "peek") {
+      // 列出任意邮箱的 UID + 主题（subject 传路径），排查「删了又在服务器上出现」
+      const lock = await client.getMailboxLock(subject || "INBOX")
+      const rows: unknown[] = []
+      try {
+        for await (const message of client.fetch("1:*", { uid: true, envelope: true }, { uid: true })) {
+          rows.push({ uid: message.uid, subject: message.envelope?.subject ?? null })
+        }
+      } finally {
+        lock.release()
+      }
+      console.log("SERVEROP " + safe({ op, path: subject, rows }))
+      await client.logout()
+      return
+    }
+    if (op === "moveall") {
+      // 批量搬家（恢复用）：subject = 源邮箱，target = 目标邮箱；分批 50 个 UID 避免单条命令过长
+      const source = subject || "Deleted Messages"
+      const dest = target ?? "INBOX"
+      const sourceLock = await client.getMailboxLock(source)
+      const allUids: number[] = []
+      try {
+        for await (const message of client.fetch("1:*", { uid: true }, { uid: true })) {
+          if (typeof message.uid === "number") allUids.push(message.uid)
+        }
+      } finally {
+        sourceLock.release()
+      }
+      let moved = 0
+      for (let index = 0; index < allUids.length; index += 50) {
+        const chunk = allUids.slice(index, index + 50)
+        const chunkLock = await client.getMailboxLock(source)
+        try {
+          await client.messageMove(chunk.join(","), dest, { uid: true })
+          moved += chunk.length
+        } finally {
+          chunkLock.release()
+        }
+      }
+      console.log("SERVEROP " + safe({ op, source, dest, total: allUids.length, moved }))
+      await client.logout()
+      return
+    }
+    // deleteuid 允许用第三个参数指定邮箱（默认收件箱），否则清垃圾箱里的测试邮件无从下手
+    const box = op === "deleteuid" && target ? target : folder.path
+    const lock = await client.getMailboxLock(box)
     try {
       const before = Number(client.mailbox === false ? 0 : client.mailbox.exists)
       if (op === "unseen") {

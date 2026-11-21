@@ -717,10 +717,31 @@ export class SyncEngine {
     for (const group of groups.values()) {
       const lock = await client.getMailboxLock(group.folder.path)
       try {
-        const uids = group.items.map((item) => item.uid).join(",")
+        const uidList = group.items.map((item) => item.uid)
+        const uids = uidList.join(",")
+        // QQ 对多 UID 的 EXPUNGE 不可靠：实测一次删 3 封只掉 1 封，剩下 2 封还在服务器上，
+        // 本地行却已经删掉，下一轮对账又拉回来 —— 用户看到的就是「全选后只删了一条」。
+        // 所以先整批删，再复查一遍 UID，剩下的逐封补删，最后按真实结果删本地行。
         await client.messageDelete(uids, { uid: true })
-        deleteMessageRows(group.items.map((item) => item.id))
-        deleted += group.items.length
+        const remaining = new Set<number>()
+        for await (const message of client.fetch(uids, { uid: true }, { uid: true })) {
+          if (typeof message.uid === "number") remaining.add(message.uid)
+        }
+        for (const uid of [...remaining]) {
+          try {
+            await client.messageDelete(String(uid), { uid: true })
+            remaining.delete(uid)
+          } catch (error) {
+            console.error("[sync] delete retry failed", group.folder.path, uid, String(error))
+          }
+        }
+        const gone = group.items.filter((item) => !remaining.has(item.uid))
+        if (gone.length > 0) deleteMessageRows(gone.map((item) => item.id))
+        deleted += gone.length
+        failed += group.items.length - gone.length
+        if (remaining.size > 0) {
+          console.error("[sync] delete left", remaining.size, "on server", group.folder.path)
+        }
       } catch (error) {
         failed += group.items.length
         console.error("[sync] delete failed", group.folder.path, String(error))

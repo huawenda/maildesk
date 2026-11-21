@@ -109,6 +109,7 @@ docs/                PRD、UI 参考、截图
 - 列表右上角「N 封」同样不许拿已加载条数充数（曾出现侧栏 469、未读页签 197 的打架）：全部用 `folderTotal`，未读用 `unreadCounts[folderId]`，「有附件」「星标」没有全量统计就传 `countLabel={null}` 不显示。
 - 核对服务器真实未读数用 `MAILDESK_IMAP_OP='unseen|'`（selftest 的 `runServerOp`，只统计 `\\Seen`，输出 `SERVEROP {op,exists,seen,unseen}`）。实测 472 封里 `seen 3 / unseen 469`，与本地库一致；随后在界面上点开一封未读邮件，服务器 `unseen` 立刻 469→468，说明已读推送链路是通的。
 - 分隔线拖拽**不要用 `setPointerCapture`**：把手只有 5px 宽，指针一离开元素后续 `pointermove` 就收不到（实测拖一下只走一步然后卡住），必须改成 `resizing` 时在 `window` 上挂 `pointermove/pointerup/pointercancel`，宽度上限用 `window.innerWidth` 实时算。
+- **删邮件不能让列表跳回顶部**：`MessageList` 里回顶部的 effect 只能依赖 `folderId` 与 `filter`，依赖 `messages[0]?.id` 时删掉首行也会归零（用户实测「每删一次就刷新到最顶部」）；另外删除后会 `setRefreshTick` 重新取数，骨架屏只在 `loading && messages.length === 0` 时渲染，否则骨架把滚动容器内容清空、`scrollTop` 被夹到 0，同样会跳顶。
 - 列表不分页：`src/main/db/messages.ts` 的 `listMessages(folderId)` 一次返回整箱（`ORDER BY sent_at DESC, rowid DESC`），IPC 是 `messages:list`，渲染层 `mail.messages.list(folderId)`。「N 封」用 `folder.totalCount`；因为整箱都在内存里，日期分组的 `(N 封)` 之和必须等于它，不要再用 `visibleCount` 之类的窗口切片去分组——那会让组头合计只有 50，用户会当成总数对不上（m05334 的真实故障）。
 - 账户表单只保留「自定义 IMAP」一种形态（用户明确要求去掉 QQ/163/126/Gmail/Outlook 预设，只连公司自建服务器）；不要再加回服务商预设，也不要在代码里硬编码任何公司的 host。
 - **代码里不能出现 SMTP 依赖**：账户只配 IMAP，添加账户/测试连接/同步全程不碰 25/465/587。公司自建服务器常常只有 993 通，任何“顺手探测一下发件服务器”的改动都会让账户加不上（PRD FR-01 第 5 条）。
@@ -128,7 +129,9 @@ docs/                PRD、UI 参考、截图
 - **QQ 的 MOVE 不支持 UIDPLUS**：`messageMove` 返回的 `copy.uidMap` 是空对象，目标 uid 只能靠对账重新枚举；且草稿（非系统 `Drafts`）里放进去的邮件约 2 分钟后会被 QQ 自己清空，测移动别用「草稿」。
 - **QQ 有"幽灵 UID"**：`EXISTS`/UID 列表里会多出一封 `fetchOne` 永远拿不到 header、也没有 `Message-ID` 的空 UID（2026-11 时为 2533），所以「服务端封数 = 本地行数」会差 1，不是本地漏同步。增量拉取取不到某封时 `last_synced_uid` 仍会推进，靠下一轮对账补回。确实要清掉时用 `MAILDESK_IMAP_OP='deleteuid|2533'`（按 UID 直接 STORE \Deleted + EXPUNGE，`runServerOp` 会打印 `existsBefore` 与操作后的 `exists` 供核对）——按主题匹配永远找不到这种 UID。
 - 本地移动/删除走 `mail.messages.move/remove`：`remove(ids, permanent)` 的第二个参数在垃圾箱里为 `true`（EXPUNGE）。Reader 工具栏的删除按钮 title 由 `permanentDelete` 决定，别写死「删除」。
-- 调试服务器侧操作：`MAILDESK_IMAP_OP='delete|主题' / 'move|主题|目标文件夹' / 'folders'` 会走 `runServerOp` 并打印 `SERVEROP {...}`；`messageMove` 结果含 BigInt，直接 JSON.stringify 会抛错（用 selftest 里的 `safe()`）。
+- **QQ 的多 UID EXPUNGE 会漏删**：`messageDelete("uid1,uid2,uid3", { uid: true })` 不报错，但实测只消失一封，其余留在服务器；本地行却已删，下一轮对账又拉回来 → 用户报「全选后只删一条」。`purgeByFolder` 现在删完会 `fetch` 复查剩余 UID、逐封补删，只对确认消失的行删本地，剩下的计入 `failed`。改删除逻辑时别把复查省掉。
+- 批量菜单操作（右键「移动到…」「复原」「删除」）要先看这行是否在 `selectedIds` 里，在就整批带走（`moveMessage/deleteMessage` 里的 `ids` 展开），否则 `Ctrl+A` 后从菜单删只掉一封。
+- 调试服务器侧操作：`MAILDESK_IMAP_OP='delete|主题' / 'move|主题|目标文件夹' / 'folders' / 'peek|文件夹路径' / 'moveall|源|目标'` 会走 `runServerOp` 并打印 `SERVEROP {...}`（`peek` 列出某箱 UID+主题，`moveall` 分批 50 把整箱搬走）；`messageMove` 结果含 BigInt，直接 JSON.stringify 会抛错（用 selftest 里的 `safe()`）。
 - 对账/回溯的日志只在 `MAILDESK_SYNC_DEBUG=1` 时输出（`[sync] scan`、`[sync] folder`）；日常 dev 不要带这个 env。
 - **图片预览浮层的关闭状态**：浮层由 `preview || previewBusy || previewError` 三个状态驱动，关闭必须走 `Reader.tsx` 的 `closePreview()` 一起清三个 state。只 `setPreview(null)` 时失败态（`previewError` 有值、`preview` 为 null）会永远留在屏幕上，用户会以为整个窗口卡死。判断「能不能预览」只用 `attachment.mime` 的 `image/` 前缀或图片扩展名（`isPreviewable`），不要用 `Attachment.type`——那是图标分类，压缩包会被送进预览接口然后报 `unsupported`。
 - **附件尺寸不能从被截断的正文里取**：`fetchBody` 的 `source.maxLength = MAX_SOURCE`（512 KB），mailparser 对截断的附件给出的 `item.size` 只是残片（实测 40 MB 的附件报 369 KB）。所以同一次 `fetchOne` 里要带 `bodyStructure: true`，用 `collectAttachmentParts()` 的 part octets 覆盖，并 base64 折算：`(size − ceil(size/78)×2) × 3/4`（按 76 字符 + CRLF 折行算；直接乘 0.75 会偏大 3%，40 MB 显示成 41.1 MB）。库里已有错误尺寸时用 schema v5 迁移清掉带附件邮件的正文缓存，点开重解析即可。

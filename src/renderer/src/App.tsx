@@ -464,23 +464,29 @@ export default function App() {
     [liveFolders]
   )
 
+  // 菜单里的「移动到 / 删除」作用在整份选中集上：右键点的那行如果在多选里，
+  // 就把整批带走（Foxmail 同款），否则只动这一行。只传单 id 会让 Ctrl+A 后
+  // 从右键菜单删一次只掉一封，用户会当成批量删除失灵。
   const moveMessage = useCallback(
     (id: string, targetFolderId: string) => {
       if (!live) return
+      const ids = selectedIds.length > 1 && selectedIds.includes(id) ? selectedIds : [id]
+      const idSet = new Set(ids)
       void mail.messages
-        .move([id], targetFolderId)
+        .move(ids, targetFolderId)
         .then((result) => {
-          if (result.failed > 0) showNotice("移动失败 · 服务器拒绝了这封邮件")
+          if (result.failed > 0) showNotice("移动失败 · 服务器拒绝了其中 " + result.failed + " 封")
           if (result.moved === 0) return
-          setItems((current) => current.filter((message) => message.id !== id))
-          setSelectedId((current) => (current === id ? null : current))
+          setItems((current) => current.filter((message) => !idSet.has(message.id)))
+          setSelectedId((current) => (current && idSet.has(current) ? null : current))
+          setSelectedIds([])
           setFolderTick((tick) => tick + 1)
           setRefreshTick((tick) => tick + 1)
           setUnreadTick((tick) => tick + 1)
         })
         .catch((error) => showNotice("移动失败 · " + describeError(error)))
     },
-    [live, showNotice]
+    [live, selectedIds, showNotice]
   )
 
   const restoreMessage = useCallback(
@@ -498,20 +504,23 @@ export default function App() {
     (id: string) => {
       if (!live) return
       // 垃圾箱里的「删除」= 永久删除（服务端 EXPUNGE），其余先移到垃圾箱
+      const ids = selectedIds.length > 1 && selectedIds.includes(id) ? selectedIds : [id]
+      const idSet = new Set(ids)
       void mail.messages
-        .remove([id], inTrash)
+        .remove(ids, inTrash)
         .then((result) => {
-          if (result.failed > 0) showNotice("删除失败 · 服务器拒绝了这封邮件")
+          if (result.failed > 0) showNotice("删除失败 · 服务器拒绝了其中 " + result.failed + " 封")
           if (result.deleted === 0) return
-          setItems((current) => current.filter((message) => message.id !== id))
-          setSelectedId((current) => (current === id ? null : current))
+          setItems((current) => current.filter((message) => !idSet.has(message.id)))
+          setSelectedId((current) => (current && idSet.has(current) ? null : current))
+          setSelectedIds([])
           setFolderTick((tick) => tick + 1)
           setRefreshTick((tick) => tick + 1)
           setUnreadTick((tick) => tick + 1)
         })
         .catch((error) => showNotice("删除失败 · " + describeError(error)))
     },
-    [live, inTrash, showNotice]
+    [live, inTrash, selectedIds, showNotice]
   )
 
   // Delete / Backspace：有选中就批量删（与单条删除同一条 IPC，仍是服务器先行）
@@ -725,6 +734,7 @@ export default function App() {
         {/* 画布区（列表 + 阅读器）：左、上各一条 1px 框线，左上角随 8px 圆角收边 */}
         <div className="flex min-w-0 flex-1 overflow-hidden rounded-tl-lg border-t border-l border-border">
           <MessageList
+            folderId={folderId}
             messages={visible}
             countLabel={listCount}
             selectedId={selectedId}

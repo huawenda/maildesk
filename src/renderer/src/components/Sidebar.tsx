@@ -35,6 +35,9 @@ interface SidebarProps {
   folderId: string
   activeLabel: string | null
   unreadOf: (id: string) => number
+  totalOf: (id: string) => number
+  /** 角标口径：未读数或总邮件数 */
+  countMode: "unread" | "total"
   onSelectFolder: (id: string) => void
   onSelectLabel: (label: string) => void
   showLabels: boolean
@@ -51,6 +54,8 @@ export function Sidebar({
   folderId,
   activeLabel,
   unreadOf,
+  totalOf,
+  countMode,
   onSelectFolder,
   onSelectLabel,
   showLabels,
@@ -75,7 +80,7 @@ export function Sidebar({
     <aside
       className={cn(
         "flex shrink-0 flex-col pb-2 pt-2.5 transition-[width] duration-150 ease-out",
-        collapsed ? "w-[50px] px-2" : "w-[240px] px-2.5"
+        collapsed ? "w-[50px] px-2" : "w-[220px] px-2.5"
       )}
     >
       <nav
@@ -118,7 +123,7 @@ export function Sidebar({
           }
 
           const active = folder.id === folderId && !activeLabel
-          const count = unreadOf(folder.id)
+          const count = countMode === "unread" ? unreadOf(folder.id) : totalOf(folder.id)
           return (
             <button
               key={folder.id}
@@ -143,7 +148,7 @@ export function Sidebar({
       </nav>
       <OverlayScrollbar target={navRef} />
 
-      {collapsed || !showLabels ? null : (
+      {collapsed || !showLabels || labels.length === 0 ? null : (
         <>
           <div className="mt-5 mb-1.5 px-2 text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
             标签

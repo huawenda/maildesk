@@ -355,10 +355,18 @@ export function setMessageBody(
 /** FTS5 查询串按字面量匹配，避免用户输入被当成语法（未闭合引号会直接报错）。 */
 const toFtsQuery = (q: string) => `"${q.replace(/"/g, '""')}"`
 
+const SCOPE_COLUMNS: Record<NonNullable<SearchOptions["scope"]>, string[]> = {
+  // 发件人 / 收件人是两个独立范围；收件人一并匹配抄送（cc_json），按自己的地址搜信才搜得全
+  from: ["m.from_name", "m.from_addr"],
+  to: ["m.to_json", "m.cc_json"],
+  subject: ["m.subject"],
+  body: ["m.body_text"]
+}
+
 export function searchMessages(q: string, opts: SearchOptions = {}): MessageSummary[] {
   const limit = opts.limit ?? 50
   const filters: string[] = []
-  const params: (string | number)[] = [toFtsQuery(q)]
+  const params: (string | number)[] = []
   if (opts.folderId) {
     filters.push("m.folder_id = ?")
     params.push(opts.folderId)
@@ -367,6 +375,24 @@ export function searchMessages(q: string, opts: SearchOptions = {}): MessageSumm
     filters.push("f.account_id = ?")
     params.push(opts.accountId)
   }
+
+  // 限定范围时用 LIKE 子串匹配：FTS5 的 unicode61 把整段中文当成一个 token，
+  // 「信用管家」搜不到「每日信用管家」，而范围搜索本来就要求字面量命中。
+  if (opts.scope) {
+    const columns = SCOPE_COLUMNS[opts.scope]
+    // LIKE 的 % _ \\ 要转义，用户搜「50%」时才不会变成通配
+    const like = "%" + q.replace(/[\\%_]/g, "\\$&") + "%"
+    filters.push("(" + columns.map((column) => `${column} LIKE ? ESCAPE '\\'`).join(" OR ") + ")")
+    for (let index = 0; index < columns.length; index += 1) params.push(like)
+    params.push(limit)
+    const sql = `SELECT m.* FROM message m
+      JOIN folder f ON f.id = m.folder_id
+      WHERE ${filters.join(" AND ")}
+      ORDER BY m.sent_at DESC LIMIT ?`
+    return all<MessageRow>(sql, ...params).map(toSummary)
+  }
+
+  params.unshift(toFtsQuery(q))
   params.push(limit)
   const sql = `SELECT m.* FROM message_fts
     JOIN message m ON m.rowid = message_fts.rowid

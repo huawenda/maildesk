@@ -20,6 +20,8 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  /* 列表内部的表格线（列头、列分隔、组头、行分隔）统一用这一个 token，不再用 border 的透明度分档 */
+  --color-table-line: var(--table-line);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-star: var(--star);
@@ -53,6 +55,7 @@
   --destructive: #c03030;
   --destructive-foreground: #ffffff;
   --border: #cdcdcd;
+  --table-line: #cfcfcf;
   --input: #cdcdcd;
   --ring: #2659cc;
   --star: #a96f12;
@@ -78,6 +81,7 @@
   --destructive: #f05252;
   --destructive-foreground: #ffffff;
   --border: #2a2a2a;
+  --table-line: #303030;
   --input: #2a2a2a;
   --ring: #2659cc;
   --star: #f0b65c;

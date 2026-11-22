@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Search, Sun } from "lucide-react"
+import { Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Sun } from "lucide-react"
 import type { Density } from "@/App"
 import type { ThemeMode } from "@/lib/theme"
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { mail } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
+import { TitleBarSearch, type SearchScope } from "@/components/TitleBarSearch"
 
 const densityOptions: { id: Density; label: string }[] = [
   { id: "compact", label: "紧凑" },
@@ -74,7 +75,11 @@ interface TitleBarProps {
   left: ReactNode
   collapsed: boolean
   onToggleCollapsed: () => void
-  onOpenSearch: () => void
+  searchQuery: string
+  onSearchQueryChange: (value: string) => void
+  searchScope: SearchScope
+  onSearchScopeChange: (scope: SearchScope) => void
+  searchFocusToken: number
   density: Density
   onDensityChange: (density: Density) => void
   mode: ThemeMode
@@ -86,7 +91,11 @@ export function TitleBar({
   left,
   collapsed,
   onToggleCollapsed,
-  onOpenSearch,
+  searchQuery,
+  onSearchQueryChange,
+  searchScope,
+  onSearchScopeChange,
+  searchFocusToken,
   density,
   onDensityChange,
   mode,
@@ -118,10 +127,6 @@ export function TitleBar({
           {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
         </button>
 
-        <button type="button" onClick={onOpenSearch} title="搜索 (Ctrl K)" className={ICON_BUTTON}>
-          <Search className="size-4" />
-        </button>
-
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" title="列表密度" className={ICON_BUTTON}>
@@ -139,8 +144,16 @@ export function TitleBar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* 拖拽留白：折叠/搜索/密度靠左，深浅切换与窗口三键留在右端 */}
-        <div className="h-full flex-1" />
+        {/* 中间常驻搜索胶囊，其余空间仍是拖动区 */}
+        <div className="relative h-full flex-1">
+          <TitleBarSearch
+            query={searchQuery}
+            onQueryChange={onSearchQueryChange}
+            scope={searchScope}
+            onScopeChange={onSearchScopeChange}
+            focusToken={searchFocusToken}
+          />
+        </div>
 
         <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5 [-webkit-app-region:no-drag]">
           {themeOptions.map(({ mode: option, icon: Icon, label }) => (

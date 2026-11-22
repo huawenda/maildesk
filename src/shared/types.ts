@@ -115,6 +115,8 @@ export interface SearchOptions {
   folderId?: string
   accountId?: string
   limit?: number
+  /** 搜索范围：from = 发件人，to = 收件人/抄送，subject = 标题，body = 正文；不传则全字段 FTS */
+  scope?: "from" | "to" | "subject" | "body"
 }
 
 export interface Settings {
@@ -127,6 +129,16 @@ export interface Settings {
   pageSize: number
   /** 是否默认放行邮件里的远程图片 */
   remoteImages: boolean
+  /** 标准密度是否显示第三行摘要（宽松始终三行） */
+  standardThreeLines: boolean
+  /** 非紧凑密度是否显示日期分组组头 */
+  groupHeadersNonCompact: boolean
+  /** 组头条是否滚动吸顶 */
+  stickyGroupHeaders: boolean
+  /** 非紧凑密度（标准 / 宽松）的列表日期后是否补 HH:mm */
+  showTimeNonCompact: boolean
+  /** 侧栏文件夹角标显示未读数还是邮件总数 */
+  folderCount: "unread" | "total"
 }
 
 export type TestResult =

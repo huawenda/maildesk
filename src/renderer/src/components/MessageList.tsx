@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   AlignJustify,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   FolderInput,
   Inbox,
@@ -57,20 +58,27 @@ const GROUP_BOTTOM_GAP = 6
 const ROW_GAP = 6
 
 /* 紧凑视图的列宽：状态 / 附件 / 星标固定，发件人 / 日期 / 大小可拖动列分隔线调整（持久化到 localStorage） */
-const COL_STATUS = "w-[18px]"
+/** 状态列 26px = 行首留白 8px + 18px 槽位；圆点居中后落在列表左缘到回形针列之间的正中 */
+const COL_STATUS = "w-[26px]"
 const COL_ATTACH = "w-[18px]"
-const COL_STAR = "w-4"
+/** 星标列自带左右留白（w-7 = 12px 图标 + 两侧 8px），所以它之后不再补右内边距，图标才是真居中 */
+const COL_STAR = "w-7"
+
+/** 没有折叠分组时的空数组：保持引用稳定，避免每次渲染都新建 Set */
+const EMPTY_GROUPS: string[] = []
 
 export interface CompactCols {
   sender: number
   date: number
   size: number
+  /** 搜索结果里的「文件夹」列（只在搜索 + 紧凑时出现） */
+  folder: number
 }
 
 const COLS_KEY = "maildesk.compactCols"
-const DEFAULT_COLS: CompactCols = { sender: 140, date: 72, size: 52 }
+const DEFAULT_COLS: CompactCols = { sender: 140, date: 72, size: 52, folder: 92 }
 // 日期最长是「11-21 23:20」，低于 72px 会折行；大小列同理（「568 KB」）
-const COL_MIN: CompactCols = { sender: 56, date: 72, size: 48 }
+const COL_MIN: CompactCols = { sender: 56, date: 72, size: 48, folder: 64 }
 /** 状态 + 附件 + 星标 + 左右内边距的固定占位，剩下的才分给可调列 */
 const COL_FIXED = 18 + 18 + 16 + 16
 const SUBJECT_MIN = 96
@@ -107,7 +115,8 @@ function readCompactCols(): CompactCols {
     return {
       sender: clampCol("sender", parsed.sender),
       date: clampCol("date", parsed.date),
-      size: clampCol("size", parsed.size)
+      size: clampCol("size", parsed.size),
+      folder: clampCol("folder", parsed.folder)
     }
   } catch {
     return DEFAULT_COLS
@@ -154,10 +163,12 @@ type ListRow =
   | { kind: "group"; key: string; label: string; count: number }
   | { kind: "message"; key: string; message: Message }
 
-function groupByDay(messages: Message[], collapsed: Set<string>): ListRow[] {
+function groupByDay(messages: Message[], collapsed: Set<string>, direction: "asc" | "desc" = "desc"): ListRow[] {
   const rows: ListRow[] = []
   let group: { kind: "group"; key: string; label: string; count: number } | null = null
-  for (const message of messages) {
+  // 列表本身按时间倒序送到，升序时整段反过来即可，组内顺序也跟着变
+  const ordered = direction === "asc" ? [...messages].reverse() : messages
+  for (const message of ordered) {
     const bucket = dayBucket(message.date)
     const key = "group-" + bucket.key
     // 上一行永远是邮件行，不能拿 rows[rows.length - 1] 判断是否同一组
@@ -169,6 +180,35 @@ function groupByDay(messages: Message[], collapsed: Set<string>): ListRow[] {
     // 折叠的分组只留组头条，邮件行不参与虚拟列表
     if (collapsed.has(key)) continue
     rows.push({ kind: "message", key: message.id, message })
+  }
+  return rows
+}
+
+/** 大小分组（Foxmail 口径）：从大到小排，邮件也按体积降序 */
+const SIZE_BUCKETS: { key: string; label: string; min: number; max: number }[] = [
+  { key: "size-huge", label: "超大（≥5M）", min: 5 * 1024 * 1024, max: Infinity },
+  { key: "size-xl", label: "很大（1M - 5M）", min: 1024 * 1024, max: 5 * 1024 * 1024 },
+  { key: "size-lg", label: "大（500K - 1M）", min: 500 * 1024, max: 1024 * 1024 },
+  { key: "size-md", label: "中（100K - 500K）", min: 100 * 1024, max: 500 * 1024 },
+  { key: "size-sm", label: "小（25K - 100K）", min: 25 * 1024, max: 100 * 1024 },
+  { key: "size-xs", label: "较小（5K - 25K）", min: 5 * 1024, max: 25 * 1024 },
+  { key: "size-tiny", label: "很小（<5K）", min: 0, max: 5 * 1024 }
+]
+
+function groupBySize(messages: Message[], collapsed: Set<string>, direction: "asc" | "desc" = "desc"): ListRow[] {
+  const rows: ListRow[] = []
+  const sign = direction === "asc" ? -1 : 1
+  const sorted = [...messages].sort((a, b) => sign * ((b.size || 0) - (a.size || 0)))
+  const buckets = direction === "asc" ? [...SIZE_BUCKETS].reverse() : SIZE_BUCKETS
+  for (const bucket of buckets) {
+    const members = sorted.filter((message) => {
+      const size = message.size || 0
+      return size >= bucket.min && size < bucket.max
+    })
+    if (members.length === 0) continue
+    rows.push({ kind: "group", key: bucket.key, label: bucket.label, count: members.length })
+    if (collapsed.has(bucket.key)) continue
+    for (const message of members) rows.push({ kind: "message", key: message.id, message })
   }
   return rows
 }
@@ -200,6 +240,22 @@ interface MessageListProps {
   /** 「标为垃圾邮件」的目标文件夹；当前就在垃圾箱时为 undefined，菜单项隐藏 */
   junkFolderId?: string
   density: Density
+  /** 标准密度是否显示第三行摘要（宽松始终三行） */
+  standardThreeLines: boolean
+  /** 非紧凑密度是否显示日期分组组头 */
+  groupHeadersNonCompact: boolean
+  /** 组头条是否滚动吸顶 */
+  stickyGroupHeaders: boolean
+  /** 非紧凑密度的日期后是否补 HH:mm */
+  showTimeNonCompact: boolean
+  /** 搜索模式：列表里展示的是搜索结果，空状态与分组记忆都按搜索处理 */
+  searching?: boolean
+  /** 变化时把列表滚回顶部（搜索结果换了关键词要回到第一条） */
+  resetKey?: string
+  /** 搜索结果里把邮件所在的文件夹显示成紧凑表格的最后一列 */
+  folderNameOf?: (folderId: string) => string
+  /** 一个账户都没有：空状态要给「添加账户」的引导，而不是说文件夹为空 */
+  noAccounts?: boolean
   filter: ListFilter
   onFilterChange: (filter: ListFilter) => void
   loading: boolean
@@ -224,26 +280,50 @@ export function MessageList({
   onRestore,
   junkFolderId,
   density,
+  standardThreeLines,
+  groupHeadersNonCompact,
+  stickyGroupHeaders,
+  showTimeNonCompact,
+  searching = false,
+  resetKey,
+  folderNameOf,
+  noAccounts = false,
   filter,
   onFilterChange,
   loading,
   width
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  // 紧凑视图里被收起的分组（存组 key，如 group-today）
-  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([])
+  // 紧凑视图里被收起的分组（存组 key，如 group-today），按文件夹分别记：来回切文件夹时各自的折叠状态还在
+  const [collapsedByFolder, setCollapsedByFolder] = useState<Record<string, string[]>>({})
+  // 搜索结果的折叠状态单独记一份，不污染文件夹自己的组
+  const collapseKey = searching ? "__search__" : folderId
+  const collapsedGroups = collapsedByFolder[collapseKey] ?? EMPTY_GROUPS
   const compact = density === "compact"
+  // 分组口径：点紧凑列头的「日期 / 大小」切换，默认按日期
+  const [groupBy, setGroupBy] = useState<"date" | "size">("date")
+  // 分组同时决定排序方向：同一个列头反复点会在降序 / 升序之间切换
+  const [groupDir, setGroupDir] = useState<"asc" | "desc">("desc")
+  const pickGroup = (key: "date" | "size") => {
+    if (groupBy === key) {
+      setGroupDir((current) => (current === "desc" ? "asc" : "desc"))
+    } else {
+      setGroupBy(key)
+      setGroupDir("desc")
+    }
+  }
+  // 搜索结果是跨文件夹的：紧凑视图在表格最后补一列「文件夹」，普通文件夹视图不显示
+  const showFolder = compact && searching
   // 多选集合：行底色不看 selectedId（活动行），否则 Ctrl+A 只会亮一行
   const selectedSet = useMemo(() => new Set(selectedIds ?? []), [selectedIds])
 
-  // 只有换文件夹或换过滤条件才回到顶部；不能依赖 messages[0].id —— 删掉第一封也会变，
-  // 那样每删一封列表就跳回顶部（用户实测反馈）
+  // 换文件夹或换过滤条件才回到顶部；不能依赖 messages[0].id —— 删掉第一封也会变，
+  // 那样每删一封列表就跳回顶部（用户实测反馈）。折叠状态不在这里清，按文件夹各记各的
   useEffect(() => {
-    setCollapsedGroups([])
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [folderId, filter])
+  }, [folderId, filter, resetKey])
 
-  // 紧凑视图列宽：发件人 / 日期 / 大小可拖动列分隔线调整，双击恢复默认
+  // 紧凑视图列宽：发件人 / 日期 / 大小 / 文件夹（搜索时）可拖动列分隔线调整，双击恢复默认
   const [cols, setCols] = useState<CompactCols>(readCompactCols)
   const colsRef = useRef(cols)
   colsRef.current = cols
@@ -264,7 +344,11 @@ export function MessageList({
     event.preventDefault()
     event.stopPropagation()
     const available = (headerRef.current?.clientWidth ?? 0) - gutter
-    const others = (Object.keys(COL_MIN) as (keyof CompactCols)[])
+    // 文件夹列只在搜索时存在，算占用时不能凭空保留它的最小宽度
+    const resizable = (Object.keys(COL_MIN) as (keyof CompactCols)[]).filter(
+      (item) => item !== "folder" || searching
+    )
+    const others = resizable
       .filter((item) => item !== key)
       .reduce((total, item) => total + cols[item], 0)
     // 拖到主题列只剩 SUBJECT_MIN 就停，避免把主题挤没
@@ -311,10 +395,14 @@ export function MessageList({
     if (!available) return
     const room = available - COL_FIXED - SUBJECT_MIN
     setCols((current) => {
-      let extra = current.sender + current.date + current.size - room
+      let extra =
+        current.sender + current.date + current.size + (searching ? current.folder : 0) - room
       if (extra <= 0) return current
       const next = { ...current }
-      for (const key of Object.keys(COL_MIN) as (keyof CompactCols)[]) {
+      const shrinkOrder = (Object.keys(COL_MIN) as (keyof CompactCols)[]).filter(
+        (item) => item !== "folder" || searching
+      )
+      for (const key of shrinkOrder) {
         const cut = Math.min(next[key] - COL_MIN[key], extra)
         next[key] -= cut
         extra -= cut
@@ -322,7 +410,7 @@ export function MessageList({
       }
       return extra <= 0 ? next : current
     })
-  }, [compact, width, gutter])
+  }, [compact, width, gutter, searching])
 
   const resetCol = (key: keyof CompactCols) => {
     setCols((current) => {
@@ -333,30 +421,44 @@ export function MessageList({
   }
 
   const toggleGroup = (key: string) => {
-    setCollapsedGroups((current) =>
-      current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
-    )
+    setCollapsedByFolder((current) => {
+      const groups = current[collapseKey] ?? []
+      const next = groups.includes(key) ? groups.filter((item) => item !== key) : [...groups, key]
+      return { ...current, [collapseKey]: next }
+    })
   }
 
-  const rowHeight = ROW_HEIGHT[density]
+  // 标准密度的行高跟着「两行 / 三行」设置走；宽松固定三行 88px
+  const rowHeight = density === "standard" ? (standardThreeLines ? 72 : 60) : ROW_HEIGHT[density]
+  const showSnippet = !compact && (density === "comfortable" || standardThreeLines)
+  const grouped = compact || groupHeadersNonCompact
   const groupRowHeight = compact ? GROUP_HEIGHT : GROUP_HEIGHT + GROUP_BOTTOM_GAP
   // 行高是内容高度，槽位再额外加行间距；紧凑视图是表格，不加
   const rowSlot = compact ? rowHeight : rowHeight + ROW_GAP
 
-  // 三种密度都按日期分组：组头条与邮件行共用同一套虚拟列表，行高各自不同
+  // 分组：紧凑始终分组；标准/宽松由设置决定
   const collapsedSet = useMemo(() => new Set(collapsedGroups), [collapsedGroups])
-  const rows = useMemo<ListRow[]>(() => groupByDay(messages, collapsedSet), [messages, collapsedSet])
+  const rows = useMemo<ListRow[]>(
+    () =>
+      grouped
+        ? groupBy === "size"
+          ? groupBySize(messages, collapsedSet, groupDir)
+          : groupByDay(messages, collapsedSet, groupDir)
+        : messages.map((message) => ({ kind: "message", key: message.id, message })),
+    [grouped, groupBy, groupDir, messages, collapsedSet]
+  )
 
   // 每个组头条在滚动内容里的起点，用于吸顶时判断「当前是哪一组」
   const groupAnchors = useMemo(() => {
     const anchors: { key: string; label: string; count: number; start: number }[] = []
+    if (!grouped) return anchors
     let top = 0
     for (const row of rows) {
       if (row.kind === "group") anchors.push({ key: row.key, label: row.label, count: row.count, start: top })
       top += row.kind === "group" ? groupRowHeight : rowSlot
     }
     return anchors
-  }, [rows, groupRowHeight, rowSlot])
+  }, [grouped, rows, groupRowHeight, rowSlot])
 
   const [stickyGroup, setStickyGroup] = useState<(typeof groupAnchors)[number] | null>(null)
   const stickyKeyRef = useRef<string | null>(null)
@@ -364,6 +466,11 @@ export function MessageList({
   useEffect(() => {
     const element = scrollRef.current
     if (!element) return
+    if (!grouped || !stickyGroupHeaders) {
+      stickyKeyRef.current = null
+      setStickyGroup(null)
+      return
+    }
     const update = () => {
       const top = element.scrollTop
       let active: (typeof groupAnchors)[number] | null = null
@@ -382,7 +489,7 @@ export function MessageList({
     update()
     element.addEventListener("scroll", update, { passive: true })
     return () => element.removeEventListener("scroll", update)
-  }, [groupAnchors])
+  }, [groupAnchors, grouped, stickyGroupHeaders])
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -431,23 +538,23 @@ export function MessageList({
       {compact && messages.length > 0 ? (
         <div
           ref={headerRef}
-          className="flex h-7 shrink-0 items-stretch border-y border-border/60 bg-foreground/[0.05] pl-2 text-[11.5px] text-muted-foreground"
-          style={{ paddingRight: 12 + gutter }}
+          className="flex h-7 shrink-0 items-stretch border-y border-table-line bg-foreground/[0.05] text-[11.5px] text-muted-foreground"
+          style={{ paddingRight: gutter }}
         >
-          <span className={cn("flex shrink-0 items-center justify-center border-r border-border/40", COL_STATUS)}>
-            <span className="size-1.5 rounded-full bg-muted-foreground/45" />
+          <span className={cn("flex shrink-0 items-center justify-center border-r border-table-line", COL_STATUS)}>
+            <span className="size-[9px] rounded-full bg-muted-foreground/45" />
           </span>
-          <span className={cn("flex shrink-0 items-center justify-center border-r border-border/40", COL_ATTACH)}>
+          <span className={cn("flex shrink-0 items-center justify-center border-r border-table-line", COL_ATTACH)}>
             <Paperclip className="size-3 opacity-70" />
           </span>
           <span
-            className="flex shrink-0 items-center border-r border-border/40 pl-2"
+            className="flex shrink-0 items-center border-r border-table-line pl-2"
             style={{ width: cols.sender }}
           >
             发件人
           </span>
           {/* 发件人列左边界挨着固定的 18px 附件列，动不了；发件人的宽度用它与主题之间的分隔线调（向右拖变宽） */}
-          <span className="relative flex min-w-0 flex-1 items-center border-r border-border/40 pl-2">
+          <span className="relative flex min-w-0 flex-1 items-center border-r border-table-line pl-2">
             <ColHandle
               label="发件人"
               active={resizingCol === "sender"}
@@ -457,7 +564,7 @@ export function MessageList({
             <span className="truncate">主题</span>
           </span>
           <span
-            className="relative flex shrink-0 items-center justify-end gap-0.5 whitespace-nowrap border-r border-border/40 pr-1.5"
+            className="relative flex shrink-0 items-center justify-end gap-0.5 whitespace-nowrap border-r border-table-line pr-1.5"
             style={{ width: cols.date }}
           >
             <ColHandle
@@ -466,11 +573,24 @@ export function MessageList({
               onStart={(event) => startColResize("date", -1, event)}
               onReset={() => resetCol("date")}
             />
-            日期
-            <ChevronDown className="size-3 opacity-60" />
+            <button
+              type="button"
+              title={groupBy === "date" && groupDir === "desc" ? "按日期升序分组" : "按日期分组"}
+              onClick={() => pickGroup("date")}
+              className="flex items-center gap-0.5 rounded-sm py-0.5 pl-1 pr-0 transition-colors hover:text-foreground"
+            >
+              日期
+              {groupBy === "date" ? (
+                groupDir === "desc" ? (
+                  <ChevronDown className="size-3 opacity-70" />
+                ) : (
+                  <ChevronUp className="size-3 opacity-70" />
+                )
+              ) : null}
+            </button>
           </span>
           <span
-            className="relative flex shrink-0 items-center justify-end whitespace-nowrap border-r border-border/40 pr-2"
+            className="relative flex shrink-0 items-center justify-end whitespace-nowrap border-r border-table-line pr-2"
             style={{ width: cols.size }}
           >
             <ColHandle
@@ -479,11 +599,39 @@ export function MessageList({
               onStart={(event) => startColResize("size", -1, event)}
               onReset={() => resetCol("size")}
             />
-            大小
+            <button
+              type="button"
+              title={groupBy === "size" && groupDir === "desc" ? "按大小升序分组" : "按大小分组"}
+              onClick={() => pickGroup("size")}
+              className="flex items-center gap-0.5 rounded-sm py-0.5 pl-1 pr-0 transition-colors hover:text-foreground"
+            >
+              大小
+              {groupBy === "size" ? (
+                groupDir === "desc" ? (
+                  <ChevronDown className="size-3 opacity-70" />
+                ) : (
+                  <ChevronUp className="size-3 opacity-70" />
+                )
+              ) : null}
+            </button>
           </span>
           <span className={cn("flex shrink-0 items-center justify-center", COL_STAR)}>
             <Star className="size-3 opacity-70" />
           </span>
+          {showFolder ? (
+            <span
+              className="relative flex shrink-0 items-center justify-end border-l border-table-line px-2"
+              style={{ width: cols.folder }}
+            >
+              <ColHandle
+                label="文件夹"
+                active={resizingCol === "folder"}
+                onStart={(event) => startColResize("folder", -1, event)}
+                onReset={() => resetCol("folder")}
+              />
+              文件夹
+            </span>
+          ) : null}
         </div>
       ) : null}
 
@@ -498,7 +646,7 @@ export function MessageList({
         {loading && messages.length === 0 ? (
           <SkeletonRows rowHeight={rowHeight} compact={compact} />
         ) : messages.length === 0 ? (
-          <EmptyList filter={filter} />
+          <EmptyList filter={filter} searching={searching} noAccounts={noAccounts} />
         ) : (
           <>
             {/* 吸顶组头条：高度 0 的 sticky 容器 + 绝对定位的实心条，不参与滚动高度 */}
@@ -556,9 +704,13 @@ export function MessageList({
                           }
                           density={density}
                           cols={cols}
+                          showSnippet={showSnippet}
                           dateWithWeekday={dateWithWeekday}
+                          showTime={showTimeNonCompact}
+                          folderName={showFolder ? folderNameOf?.(item.message.folderId) : undefined}
                           onSelect={onSelect}
                           onToggleStar={onToggleStar}
+                          onSetRead={onSetRead}
                         />
                       </div>
                     </ContextMenuTrigger>
@@ -612,7 +764,7 @@ function GroupHeader({
         "flex h-full w-full items-center gap-1.5 px-2 text-left text-[11.5px] font-medium text-foreground/80 transition-colors",
         floating ? "bg-muted shadow-sm" : "bg-muted/70 hover:bg-muted/60",
         // 紧凑视图是全宽表格，组头条跟着表格横线走；标准/宽松是圆角卡片，组头条也收圆角
-        compact ? "border-b border-border/40" : "rounded-lg"
+        compact ? "border-b border-table-line" : "rounded-lg"
       )}
     >
       {collapsed ? (
@@ -665,14 +817,22 @@ interface RowProps {
   selected: boolean
   density: Density
   cols: CompactCols
+  /** 是否渲染摘要行（标准两行模式为 false） */
+  showSnippet: boolean
   /** 日期列够宽：日期后面加「(周X)」 */
   dateWithWeekday: boolean
+  /** 非紧凑视图的日期后是否补 HH:mm */
+  showTime: boolean
+  /** 紧凑表格最后一列的文件夹名（仅搜索时给） */
+  folderName?: string
   onSelect: (id: string, additive: boolean) => void
   onToggleStar?: (id: string) => void
+  /** 紧凑模式点圆点：read=true 标为已读 */
+  onSetRead?: (id: string, read: boolean) => void
 }
 
 /** 行组件 memo 化：删除一行时其余行的 message 对象身份不变，可以整片跳过重渲染 */
-const MessageRow = memo(function MessageRow({ message, selected, density, cols, dateWithWeekday, onSelect, onToggleStar }: RowProps) {
+const MessageRow = memo(function MessageRow({ message, selected, density, cols, showSnippet, dateWithWeekday, showTime, folderName, onSelect, onToggleStar, onSetRead }: RowProps) {
   const compact = density === "compact"
   const comfortable = density === "comfortable"
   // 已读行整体降一档明度（头像、发件人、主题、摘要、时间一起变淡），未读行保持原亮度
@@ -695,15 +855,36 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
         aria-selected={selected}
         onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey)}
         className={cn(
-          "group flex h-full w-full cursor-default select-none items-center border-b border-border/40 pl-2 pr-3 text-left",
+          "group flex h-full w-full cursor-default select-none items-center border-b border-table-line text-left",
           selected ? "bg-primary" : "hover:bg-foreground/[0.06]"
         )}
       >
-        {/* 读取状态与附件各占一列（Foxmail 口径），未读点与回形针不再挤在一个槽里 */}
+        {/* 读取状态与附件各占一列（Foxmail 口径），未读点与回形针不再挤在一个槽里。
+            紧凑模式每行都有圆点：未读蓝、已读灰，点圆点直接切换已读/未读（不选中该行） */}
         <span className={cn("flex shrink-0 items-center justify-center", COL_STATUS)}>
-          {message.unread ? (
-            <span className={cn("size-1.5 rounded-full", selected ? "bg-white" : "bg-primary")} />
-          ) : null}
+          <button
+            type="button"
+            tabIndex={-1}
+            title={message.unread ? "标为已读" : "标为未读"}
+            onClick={(event) => {
+              event.stopPropagation()
+              onSetRead?.(message.id, message.unread)
+            }}
+            className="flex size-full items-center justify-center outline-none"
+          >
+            <span
+              className={cn(
+                "size-[9px] rounded-full transition-colors duration-100",
+                selected
+                  ? message.unread
+                    ? "bg-white"
+                    : "bg-white/45"
+                  : message.unread
+                    ? "bg-primary"
+                    : "bg-muted-foreground/35 hover:bg-muted-foreground/65"
+              )}
+            />
+          </button>
         </span>
         <span className={cn("flex shrink-0 items-center justify-center", COL_ATTACH)}>
           {message.hasAttachments ? <Paperclip className={cn("size-3", mutedText)} /> : null}
@@ -767,6 +948,15 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
             />
           </button>
         </span>
+        {folderName === undefined ? null : (
+          <span
+            title={folderName}
+            className={cn("shrink-0 truncate px-2 text-right text-[11.5px]", mutedText)}
+            style={{ width: cols.folder }}
+          >
+            {folderName}
+          </span>
+        )}
       </div>
     )
   }
@@ -834,7 +1024,7 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
             {sender}
           </span>
           <span className={cn("ml-auto shrink-0 tabular-nums", compact ? "text-[11.5px]" : "text-[12px]", mutedText)}>
-            {formatListTime(message.date, { withTime: true })}
+            {formatListTime(message.date, { withTime: showTime })}
           </span>
         </div>
 
@@ -849,10 +1039,10 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
           >
             {message.subject || "（无主题）"}
           </span>
-          {comfortable ? null : indicators}
+          {showSnippet ? null : indicators}
         </div>
 
-        {comfortable ? (
+        {showSnippet ? (
           <div className="flex items-center gap-2">
             <span className={cn("truncate", compact ? "text-[12px]" : "text-[13px]", mutedText)}>{message.snippet}</span>
             {indicators}
@@ -968,12 +1158,31 @@ function MessageContextMenu({
   )
 }
 
-function EmptyList({ filter }: { filter: ListFilter }) {
+function EmptyList({
+  filter,
+  searching,
+  noAccounts
+}: {
+  filter: ListFilter
+  searching: boolean
+  noAccounts: boolean
+}) {
+  if (noAccounts) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+        <Inbox className="size-8 opacity-40" />
+        <span className="text-[13px]">还没有配置账户</span>
+        <span className="text-[12px] opacity-70">点标题栏左侧的账户胶囊，添加你的 IMAP 邮箱</span>
+      </div>
+    )
+  }
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
       {filter === "all" ? <Inbox className="size-8 opacity-40" /> : <AlignJustify className="size-8 opacity-40" />}
       <span className="text-[13px]">
-        {filter === "all" ? "这个文件夹还是空的" : filter === "unread" ? "没有未读邮件" : filter === "starred" ? "还没有星标邮件" : "没有带附件的邮件"}
+        {searching
+          ? "没有匹配的邮件"
+          : filter === "all" ? "这个文件夹还是空的" : filter === "unread" ? "没有未读邮件" : filter === "starred" ? "还没有星标邮件" : "没有带附件的邮件"}
       </span>
       {filter !== "all" ? (
         <span className="flex items-center gap-1 text-[12px] opacity-70">

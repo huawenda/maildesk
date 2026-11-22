@@ -37,6 +37,16 @@ interface SettingsDialogProps {
   onDensityChange: (density: Density) => void
   fontSize: number
   onFontSizeChange: (size: number) => void
+  standardThreeLines: boolean
+  onStandardThreeLinesChange: (value: boolean) => void
+  groupHeadersNonCompact: boolean
+  onGroupHeadersNonCompactChange: (value: boolean) => void
+  stickyGroupHeaders: boolean
+  onStickyGroupHeadersChange: (value: boolean) => void
+  showTimeNonCompact: boolean
+  onShowTimeNonCompactChange: (value: boolean) => void
+  folderCount: "unread" | "total"
+  onFolderCountChange: (value: "unread" | "total") => void
   remoteImages: boolean
   onRemoteImagesChange: (value: boolean) => void
   accounts: Account[]
@@ -118,6 +128,16 @@ export function SettingsDialog({
   onDensityChange,
   fontSize,
   onFontSizeChange,
+  standardThreeLines,
+  onStandardThreeLinesChange,
+  groupHeadersNonCompact,
+  onGroupHeadersNonCompactChange,
+  stickyGroupHeaders,
+  onStickyGroupHeadersChange,
+  showTimeNonCompact,
+  onShowTimeNonCompactChange,
+  folderCount,
+  onFolderCountChange,
   remoteImages,
   onRemoteImagesChange,
   accounts,
@@ -221,6 +241,28 @@ export function SettingsDialog({
                     </button>
                   </div>
                 </Row>
+                <Row label="标准视图显示三行" hint="标准密度在主题下多显示一行摘要；宽松密度始终三行">
+                  <Switch checked={standardThreeLines} onChange={onStandardThreeLinesChange} />
+                </Row>
+                <Row label="非紧凑模式显示日期分组" hint="关闭后，标准与宽松密度（非紧凑模式）的列表不再显示「今天 / 本周」这类组头条">
+                  <Switch checked={groupHeadersNonCompact} onChange={onGroupHeadersNonCompactChange} />
+                </Row>
+                <Row label="组头条滚动吸顶" hint="滚动列表时，把当前日期组的组头固定在列表顶部">
+                  <Switch checked={stickyGroupHeaders} onChange={onStickyGroupHeadersChange} />
+                </Row>
+                <Row label="非紧凑模式显示时分" hint="关闭后，列表右侧只显示日期，不带 HH:mm；紧凑模式始终显示时间">
+                  <Switch checked={showTimeNonCompact} onChange={onShowTimeNonCompactChange} />
+                </Row>
+                <Row label="侧栏文件夹数字" hint="侧栏文件夹右侧显示未读数还是邮件总数">
+                  <Segmented
+                    value={folderCount}
+                    options={[
+                      { value: "unread", label: "未读数" },
+                      { value: "total", label: "全部" }
+                    ]}
+                    onChange={onFolderCountChange}
+                  />
+                </Row>
                 <Row label="默认显示远程图片" hint="关闭后，邮件里的外链图片先拦截，阅读时可手动放行">
                   <Switch checked={remoteImages} onChange={onRemoteImagesChange} />
                 </Row>
@@ -236,7 +278,7 @@ export function SettingsDialog({
                     {accounts.map((account) => (
                       <div
                         key={account.id}
-                        className="flex items-center gap-3 rounded-lg bg-muted px-3 py-2.5"
+                        className="flex items-center gap-3 rounded-lg border border-border bg-foreground/[0.04] px-3 py-2.5"
                       >
                         <div className="flex size-7 items-center justify-center rounded-full bg-primary text-[11.5px] font-semibold text-white">
                           {(account.displayName || account.email).slice(0, 1).toUpperCase()}

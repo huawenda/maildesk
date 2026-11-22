@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Account, Folder, SyncState } from "@shared/types"
 import { AccountCapsule } from "@/components/AccountCapsule"
 import { AccountDialog } from "@/components/AccountDialog"
-import { CommandPalette } from "@/components/CommandPalette"
 import { MessageList, type ListFilter } from "@/components/MessageList"
 import { Notice } from "@/components/Notice"
 import { Reader } from "@/components/Reader"
 import { SettingsDialog } from "@/components/SettingsDialog"
+import type { SearchScope } from "@/components/TitleBarSearch"
 import { Sidebar } from "@/components/Sidebar"
 import { TitleBar } from "@/components/TitleBar"
 import { useHotkeys } from "@/lib/hotkeys"
@@ -92,7 +92,11 @@ export default function App() {
   // 多选集合：Ctrl+点击逐条增减、Ctrl+A 全选；selectedId 同时是其中的「活动行」
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [detail, setDetail] = useState<Message | null>(null)
-  const [paletteOpen, setPaletteOpen] = useState(false)
+  // 标题栏常驻搜索：query 为空的列表就是当前文件夹；有 query 时列表换成跨文件夹的搜索结果
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searchScope, setSearchScope] = useState<SearchScope>("from")
+  const [searchResults, setSearchResults] = useState<Message[]>([])
+  const [searchFocusToken, setSearchFocusToken] = useState(0)
   const [density, setDensity] = useState<Density>(() => readStored("maildesk.density", "standard"))
   const [collapsed, setCollapsed] = useState<boolean>(() => readStored("maildesk.sidebarCollapsed", false))
   const [fontSize, setFontSize] = useState<number>(() => readStored("maildesk.fontSize", 14))
@@ -104,6 +108,11 @@ export default function App() {
   const dragRef = useRef<{ x: number; width: number } | null>(null)
   const [backfill, setBackfill] = useState<{ done: number; total: number } | null>(null)
   const [remoteImages, setRemoteImages] = useState<boolean>(true)
+  const [standardThreeLines, setStandardThreeLines] = useState<boolean>(false)
+  const [groupHeadersNonCompact, setGroupHeadersNonCompact] = useState<boolean>(true)
+  const [stickyGroupHeaders, setStickyGroupHeaders] = useState<boolean>(true)
+  const [showTimeNonCompact, setShowTimeNonCompact] = useState<boolean>(true)
+  const [folderCount, setFolderCount] = useState<"unread" | "total">("unread")
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
@@ -128,6 +137,11 @@ export default function App() {
         setCollapsed(settings.sidebarCollapsed)
         setFontSize(settings.fontSize)
         setRemoteImages(settings.remoteImages)
+        setStandardThreeLines(settings.standardThreeLines)
+        setGroupHeadersNonCompact(settings.groupHeadersNonCompact)
+        setStickyGroupHeaders(settings.stickyGroupHeaders)
+        setShowTimeNonCompact(settings.showTimeNonCompact)
+        setFolderCount(settings.folderCount)
       })
       .catch(() => undefined)
       .finally(() => {
@@ -157,6 +171,31 @@ export default function App() {
     if (!settingsReady.current) return
     void mail.settings.set({ remoteImages }).catch(() => undefined)
   }, [remoteImages])
+
+  useEffect(() => {
+    if (!settingsReady.current) return
+    void mail.settings.set({ standardThreeLines }).catch(() => undefined)
+  }, [standardThreeLines])
+
+  useEffect(() => {
+    if (!settingsReady.current) return
+    void mail.settings.set({ groupHeadersNonCompact }).catch(() => undefined)
+  }, [groupHeadersNonCompact])
+
+  useEffect(() => {
+    if (!settingsReady.current) return
+    void mail.settings.set({ stickyGroupHeaders }).catch(() => undefined)
+  }, [stickyGroupHeaders])
+
+  useEffect(() => {
+    if (!settingsReady.current) return
+    void mail.settings.set({ showTimeNonCompact }).catch(() => undefined)
+  }, [showTimeNonCompact])
+
+  useEffect(() => {
+    if (!settingsReady.current) return
+    void mail.settings.set({ folderCount }).catch(() => undefined)
+  }, [folderCount])
 
   useEffect(() => {
     let cancelled = false
@@ -316,6 +355,50 @@ export default function App() {
 
   const navList = live ? navFolders(liveFolders) : DEMO_NAV
 
+  const searchActive = searchQuery.trim().length > 0
+
+  // 搜索结果跨文件夹：紧凑视图最后一列要显示每封邮件所在的文件夹名
+  const folderLabelOf = useCallback(
+    (id: string) => {
+      if (!live) return DEMO_NAV.find((folder) => folder.id === id)?.label ?? ""
+      return liveFolders.find((folder) => folder.id === id)?.name ?? ""
+    },
+    [live, liveFolders]
+  )
+
+  // 输入停顿 200ms 才查；搜索是全局的，结果直接当列表数据用，不再弹候选窗口
+  useEffect(() => {
+    const keyword = searchQuery.trim()
+    if (!keyword) {
+      setSearchResults([])
+      return
+    }
+    if (!live) {
+      const fields: Record<SearchScope, (message: Message) => string[]> = {
+        from: (message) => [message.fromName, message.fromEmail],
+        to: (message) => message.to,
+        subject: (message) => [message.subject],
+        body: (message) => [...message.body, message.snippet]
+      }
+      const needle = keyword.toLowerCase()
+      setSearchResults(items.filter((message) => fields[searchScope](message).join(" ").toLowerCase().includes(needle)))
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      mail.search
+        .query(keyword, { limit: 200, scope: searchScope })
+        .then((result) => {
+          if (!cancelled) setSearchResults(result.map(summaryToMessage))
+        })
+        .catch(() => undefined)
+    }, 200)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [searchQuery, searchScope, live, items])
+
   // 演示模式在内存里分文件夹；真实模式 items 已经是当前文件夹的一页
   const folderMessages = useMemo(() => {
     const list = live ? items : items.filter((message) => message.folderId === folderId)
@@ -328,33 +411,39 @@ export default function App() {
     ? (liveFolders.find((folder) => folder.id === folderId)?.totalCount ?? folderMessages.length)
     : folderMessages.length
 
-  // 「N 封」必须给全量数字：未读用库里的未读总数，其余过滤条件没有全量统计就不显示
-  const folderUnread = live
-    ? (unreadCounts[folderId] ?? 0)
-    : folderMessages.filter((message) => message.unread).length
-  const listCount: number | null = activeLabel
-    ? null
-    : filter === "all"
-      ? Math.max(folderTotal, folderMessages.length)
-      : filter === "unread"
-        ? folderUnread
-        : null
+  // 搜索时列表数据换成跨文件夹的结果，筛选页签仍然作用在这批结果上
+  const baseMessages = searchActive ? searchResults : folderMessages
 
   const visible = useMemo(() => {
     switch (filter) {
       case "unread":
-        return folderMessages.filter((message) => message.unread)
+        return baseMessages.filter((message) => message.unread)
       case "attachments":
-        return folderMessages.filter((message) => message.hasAttachments)
+        return baseMessages.filter((message) => message.hasAttachments)
       case "starred":
-        return folderMessages.filter((message) => message.starred)
+        return baseMessages.filter((message) => message.starred)
       default:
-        return folderMessages
+        return baseMessages
     }
-  }, [folderMessages, filter])
+  }, [baseMessages, filter])
+
+  // 「N 封」必须给全量数字：未读用库里的未读总数，其余过滤条件没有全量统计就不显示
+  const folderUnread = live
+    ? (unreadCounts[folderId] ?? 0)
+    : folderMessages.filter((message) => message.unread).length
+  const listCount: number | null = searchActive
+    ? visible.length
+    : activeLabel
+      ? null
+      : filter === "all"
+        ? Math.max(folderTotal, folderMessages.length)
+        : filter === "unread"
+          ? folderUnread
+          : null
 
   const selected = useMemo(() => {
-    const base = items.find((message) => message.id === selectedId)
+    // 搜索结果可能来自别的文件夹，items 里找不到时回落到结果集
+    const base = items.find((message) => message.id === selectedId) ?? searchResults.find((message) => message.id === selectedId)
     if (!base) return null
     if (detail && detail.id === base.id) {
       return {
@@ -366,7 +455,7 @@ export default function App() {
       }
     }
     return base
-  }, [items, selectedId, detail])
+  }, [items, searchResults, selectedId, detail])
 
   // 切换账户：文件夹/列表由 activeAccountId 依赖自动重取，这里只清掉跨账户的选中态
   const switchAccount = useCallback((id: string) => {
@@ -382,6 +471,7 @@ export default function App() {
       // 重复点同一个文件夹不再触发请求，否则骨架屏会永远停在那里
       if (next === folderId) return
       setFolderId(next)
+      setSearchQuery("")
       setSelectedId(null)
       setSelectedIds([])
       // 真实模式的骨架屏由取数 effect 自己开关，避免两条 loading 路径互相打脸
@@ -404,6 +494,9 @@ export default function App() {
         }))
       }
       setItems((current) => current.map((message) => (message.id === id ? { ...message, unread: !read } : message)))
+      setSearchResults((current) =>
+        current.map((message) => (message.id === id ? { ...message, unread: !read } : message))
+      )
       if (live) {
         void mail.messages
           .setRead([id], read)
@@ -424,13 +517,18 @@ export default function App() {
           return { ...message, starred: next }
         })
       )
+      setSearchResults((current) =>
+        current.map((message) => (message.id === id ? { ...message, starred: !message.starred } : message))
+      )
       if (live) void mail.messages.setFlagged([id], next).catch(() => undefined)
     },
     [live]
   )
 
-  const currentFolder = live ? liveFolders.find((folder) => folder.id === folderId) : undefined
-  const inTrash = currentFolder?.role === "trash"
+  // 搜索结果是跨文件夹的：永久删除与否要看这封邮件自己所在的文件夹，而不是列表当前选中的箱子
+  const inTrash = live
+    ? liveFolders.find((folder) => folder.id === (searchActive ? selected?.folderId : folderId))?.role === "trash"
+    : false
 
   // 一次性操作失败提示（PRD 6.6）：3.5s 后自动消失，不打断阅读
   const [notice, setNotice] = useState<string | null>(null)
@@ -480,6 +578,7 @@ export default function App() {
           if (result.failed > 0) showNotice("移动失败 · 服务器拒绝了其中 " + result.failed + " 封")
           if (result.moved === 0) return
           setItems((current) => current.filter((message) => !idSet.has(message.id)))
+          setSearchResults((current) => current.filter((message) => !idSet.has(message.id)))
           setSelectedId((current) => (current && idSet.has(current) ? null : current))
           setSelectedIds([])
           // 成功时不重取整箱：本地 filter 就是终态，重取只会让列表白闪一次。
@@ -516,6 +615,7 @@ export default function App() {
           if (result.failed > 0) showNotice("删除失败 · 服务器拒绝了其中 " + result.failed + " 封")
           if (result.deleted === 0) return
           setItems((current) => current.filter((message) => !idSet.has(message.id)))
+          setSearchResults((current) => current.filter((message) => !idSet.has(message.id)))
           setSelectedId((current) => (current && idSet.has(current) ? null : current))
           setSelectedIds([])
           // 同 moveMessage：全成功就不再重取，只有部分失败才回库对齐
@@ -539,6 +639,7 @@ export default function App() {
         if (result.failed > 0) showNotice("删除失败 · 服务器拒绝了其中 " + result.failed + " 封")
         if (result.deleted === 0) return
         setItems((current) => current.filter((message) => !idSet.has(message.id)))
+        setSearchResults((current) => current.filter((message) => !idSet.has(message.id)))
         setSelectedId((current) => (current && idSet.has(current) ? null : current))
         setSelectedIds([])
         // 批量删同样不整箱重取；部分失败时再回库
@@ -568,13 +669,13 @@ export default function App() {
 
   // Ctrl+A：选中整个当前文件夹（不受过滤页签限制），并切回「全部」让每一行都可见地变蓝
   const selectAll = useCallback(() => {
-    if (folderMessages.length === 0) return
+    if (baseMessages.length === 0) return
     setFilter("all")
-    setSelectedIds(folderMessages.map((message) => message.id))
+    setSelectedIds(baseMessages.map((message) => message.id))
     setSelectedId((current) =>
-      current && folderMessages.some((message) => message.id === current) ? current : folderMessages[0].id
+      current && baseMessages.some((message) => message.id === current) ? current : baseMessages[0].id
     )
-  }, [folderMessages])
+  }, [baseMessages])
 
   // 键盘移动不自动已读，停留 1.5s 才回写（PRD FR-03.4）；多选态（Ctrl+A/Ctrl+点击）不触发
   useEffect(() => {
@@ -619,24 +720,18 @@ export default function App() {
       delete: () => deleteSelected(),
       // Ctrl+A 只在已有选中时全选整箱（没有选中时什么也不做，但要吃掉浏览器的「全选文本」）
       "ctrl+a": () => selectAll(),
-      "/": () => setPaletteOpen(true),
-      "ctrl+k": () => setPaletteOpen(true),
+      "/": () => setSearchFocusToken((token) => token + 1),
+      "ctrl+k": () => setSearchFocusToken((token) => token + 1),
       "ctrl+r": () => runSync(),
       "ctrl+,": () => setSettingsOpen(true),
       // 垃圾箱里 Delete 是永久删除，其余是移到垃圾箱；没有确认弹窗，靠回收站兜底
       backspace: () => deleteSelected(),
       escape: () => {
-        setPaletteOpen(false)
+        setSearchQuery("")
         setSettingsOpen(false)
       }
-    },
-    !paletteOpen
+    }
   )
-
-  const search = useCallback(async (query: string) => {
-    const result = await mail.search.query(query, { limit: 20 })
-    return result.map(summaryToMessage)
-  }, [])
 
   // clock 每 30s 自增一次，触发重渲染让相对时间跟着走
   void clock
@@ -651,7 +746,7 @@ export default function App() {
         ? `已同步 · ${timeAgo(lastSyncAt)}`
         : live
           ? "尚未同步"
-          : "已同步 · 1 分钟前"
+          : "尚未连接账户"
 
   // 拖拽用 window 级监听：分隔线只有 5px 宽，靠 setPointerCapture 在指针离开元素后
   // 会丢掉后续 pointermove（实测拖一下只走一步就停），这里直接用全局监听。
@@ -694,7 +789,7 @@ export default function App() {
       )}
     >
       <TitleBar
-        sidebarWidth={collapsed ? 50 : 240}
+        sidebarWidth={collapsed ? 50 : 220}
         left={
           <AccountCapsule
             accounts={accounts}
@@ -706,7 +801,11 @@ export default function App() {
         }
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((value) => !value)}
-        onOpenSearch={() => setPaletteOpen(true)}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        searchScope={searchScope}
+        onSearchScopeChange={setSearchScope}
+        searchFocusToken={searchFocusToken}
         density={density}
         onDensityChange={setDensity}
         mode={mode}
@@ -727,9 +826,15 @@ export default function App() {
             // 一律读库里的统计：选中态不再回退到「已加载那一页」，切换文件夹也不会闪旧数字
             return unreadCounts[id] ?? 0
           }}
+          totalOf={(id) => {
+            if (!live) return items.filter((message) => message.folderId === id).length
+            return liveFolders.find((folder) => folder.id === id)?.totalCount ?? 0
+          }}
+          countMode={folderCount}
           onSelectFolder={switchFolder}
           onSelectLabel={(label) => {
             setActiveLabel((current) => (current === label ? null : label))
+            setSearchQuery("")
             setSelectedId(null)
           }}
           showLabels={!live}
@@ -742,6 +847,10 @@ export default function App() {
           <MessageList
             folderId={folderId}
             messages={visible}
+            searching={searchActive}
+            resetKey={searchActive ? searchQuery + "|" + searchScope : undefined}
+            folderNameOf={searchActive ? folderLabelOf : undefined}
+            noAccounts={!live}
             countLabel={listCount}
             selectedId={selectedId}
             selectedIds={selectedIds}
@@ -759,6 +868,10 @@ export default function App() {
             onRestore={inTrash ? restoreMessage : undefined}
             junkFolderId={junkFolderId}
             density={density}
+            standardThreeLines={standardThreeLines}
+            groupHeadersNonCompact={groupHeadersNonCompact}
+            stickyGroupHeaders={stickyGroupHeaders}
+            showTimeNonCompact={showTimeNonCompact}
             filter={filter}
             onFilterChange={setFilter}
             loading={loading}
@@ -801,19 +914,6 @@ export default function App() {
 
       <Notice message={notice} />
 
-      <CommandPalette
-        open={paletteOpen}
-        onOpenChange={setPaletteOpen}
-        messages={live ? items : seedMessages}
-        search={live ? search : undefined}
-        onOpen={(message) => {
-          setFolderId(message.folderId)
-          setActiveLabel(null)
-          setSelectedId(message.id)
-          markRead(message.id)
-        }}
-      />
-
       <SettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -823,6 +923,16 @@ export default function App() {
         onDensityChange={setDensity}
         fontSize={fontSize}
         onFontSizeChange={setFontSize}
+        standardThreeLines={standardThreeLines}
+        onStandardThreeLinesChange={setStandardThreeLines}
+        groupHeadersNonCompact={groupHeadersNonCompact}
+        onGroupHeadersNonCompactChange={setGroupHeadersNonCompact}
+        stickyGroupHeaders={stickyGroupHeaders}
+        onStickyGroupHeadersChange={setStickyGroupHeaders}
+        showTimeNonCompact={showTimeNonCompact}
+        onShowTimeNonCompactChange={setShowTimeNonCompact}
+        folderCount={folderCount}
+        onFolderCountChange={setFolderCount}
         remoteImages={remoteImages}
         onRemoteImagesChange={setRemoteImages}
         accounts={accounts}

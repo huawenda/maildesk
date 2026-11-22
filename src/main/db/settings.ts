@@ -7,7 +7,12 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   fontSize: 14,
   pageSize: 200,
-  remoteImages: true
+  remoteImages: true,
+  standardThreeLines: false,
+  groupHeadersNonCompact: true,
+  stickyGroupHeaders: true,
+  showTimeNonCompact: true,
+  folderCount: "unread"
 }
 
 export function getSettings(): Settings {

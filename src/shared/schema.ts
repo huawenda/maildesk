@@ -27,7 +27,12 @@ export const settingsSchema = z.object({
   theme: themeModeSchema,
   fontSize: z.number().int().min(12).max(18),
   pageSize: z.number().int().min(20).max(5000),
-  remoteImages: z.boolean()
+  remoteImages: z.boolean(),
+  standardThreeLines: z.boolean(),
+  groupHeadersNonCompact: z.boolean(),
+  stickyGroupHeaders: z.boolean(),
+  showTimeNonCompact: z.boolean(),
+  folderCount: z.enum(["unread", "total"])
 })
 
 export const settingsPatchSchema = settingsSchema.partial()
@@ -42,7 +47,8 @@ export const searchQuerySchema = z.object({
     .object({
       folderId: idSchema.optional(),
       accountId: idSchema.optional(),
-      limit: z.number().int().min(1).max(100).optional()
+      limit: z.number().int().min(1).max(500).optional(),
+      scope: z.enum(["from", "to", "subject", "body"]).optional()
     })
     .optional()
 })

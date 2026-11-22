@@ -222,7 +222,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                 </div>
 
                 <div className="-mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-                  填公司邮件服务器的 IMAP 地址，端口通常是 993（TLS）或 143（STARTTLS）。只用 IMAP 收信，不需要填发件服务器。
+                  只用 IMAP 收信，不需要填发件服务器
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -270,7 +270,6 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                       {test.message}
                     </span>
                   ) : null}
-                  <span className="ml-auto text-[11px] text-muted-foreground/70">会真实登录一次，只读</span>
                 </div>
 
                 {error ? <div className="rounded-lg bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{error}</div> : null}

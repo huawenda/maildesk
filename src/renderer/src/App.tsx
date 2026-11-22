@@ -918,6 +918,8 @@ export default function App() {
             searching={searchActive}
             resetKey={searchActive ? searchQuery + "|" + searchScope : undefined}
             folderNameOf={searchActive ? folderLabelOf : undefined}
+            highlightQuery={searchActive ? searchQuery.trim() : undefined}
+            highlightScope={searchActive ? searchScope : undefined}
             noAccounts={!live}
             countLabel={listCount}
             selectedId={selectedId}

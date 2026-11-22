@@ -17,6 +17,7 @@ import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import type { Density } from "@/App"
+import type { SearchScope } from "@/components/TitleBarSearch"
 
 export type ListFilter = "all" | "unread" | "attachments" | "starred"
 
@@ -241,6 +242,9 @@ interface MessageListProps {
   resetKey?: string
   /** 搜索结果里把邮件所在的文件夹显示成紧凑表格的最后一列 */
   folderNameOf?: (folderId: string) => string
+  /** 搜索关键词：命中处渲染 <mark>；为空表示不在搜索态 */
+  highlightQuery?: string
+  highlightScope?: SearchScope
   /** 一个账户都没有：空状态要给「添加账户」的引导，而不是说文件夹为空 */
   noAccounts?: boolean
   filter: ListFilter
@@ -276,6 +280,8 @@ export function MessageList({
   resetKey,
   folderNameOf,
   noAccounts = false,
+  highlightQuery,
+  highlightScope,
   filter,
   onFilterChange,
   loading,
@@ -696,6 +702,8 @@ export function MessageList({
                           dateWithWeekday={dateWithWeekday}
                           showTime={showTimeNonCompact}
                           folderName={showFolder ? folderNameOf?.(item.message.folderId) : undefined}
+                          highlightQuery={highlightQuery}
+                          highlightScope={highlightScope}
                           onSelect={onSelect}
                           onToggleStar={onToggleStar}
                           onSetRead={onSetRead}
@@ -801,6 +809,44 @@ function ColHandle({
   )
 }
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/** 把命中的关键词包成 <mark>；选中行反色，避免蓝底上的淡蓝块糊在一起 */
+const Highlighted = memo(function Highlighted({
+  text,
+  query,
+  selected
+}: {
+  text: string
+  query: string
+  selected: boolean
+}) {
+  const keyword = query.trim()
+  if (!keyword) return <>{text}</>
+  const parts = text.split(new RegExp("(" + escapeRegExp(keyword) + ")", "gi"))
+  const lower = keyword.toLowerCase()
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.toLowerCase() === lower ? (
+          <mark
+            key={index}
+            className={cn(
+              "rounded-[2px] text-inherit",
+              // 深色下 primary/25 几乎和底色融在一起，换暖色高亮（amber）才看得出来
+              selected ? "bg-white/30" : "bg-primary/25 dark:bg-star/35"
+            )}
+          >
+            {part}
+          </mark>
+        ) : (
+          part
+        )
+      )}
+    </>
+  )
+})
+
 interface RowProps {
   message: Message
   selected: boolean
@@ -814,6 +860,8 @@ interface RowProps {
   showTime: boolean
   /** 紧凑表格最后一列的文件夹名（仅搜索时给） */
   folderName?: string
+  highlightQuery?: string
+  highlightScope?: SearchScope
   onSelect: (id: string, additive: boolean, range?: boolean) => void
   onToggleStar?: (id: string) => void
   /** 紧凑模式点圆点：read=true 标为已读 */
@@ -821,7 +869,21 @@ interface RowProps {
 }
 
 /** 行组件 memo 化：删除一行时其余行的 message 对象身份不变，可以整片跳过重渲染 */
-const MessageRow = memo(function MessageRow({ message, selected, density, cols, showSnippet, dateWithWeekday, showTime, folderName, onSelect, onToggleStar, onSetRead }: RowProps) {
+const MessageRow = memo(function MessageRow({
+  message,
+  selected,
+  density,
+  cols,
+  showSnippet,
+  dateWithWeekday,
+  showTime,
+  folderName,
+  highlightQuery,
+  highlightScope,
+  onSelect,
+  onToggleStar,
+  onSetRead
+}: RowProps) {
   const compact = density === "compact"
   const comfortable = density === "comfortable"
   // 已读行整体降一档明度（头像、发件人、主题、摘要、时间一起变淡），未读行保持原亮度
@@ -832,6 +894,14 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
       ? "text-muted-foreground/65"
       : "text-muted-foreground"
   const sender = message.fromName || message.fromEmail
+  // 只在搜索态高亮：范围决定标哪个字段（收件人不在列表展示，所以 to 不高亮）
+  const highlightIn = (field: "sender" | "subject" | "snippet") => {
+    if (!highlightQuery) return false
+    if (highlightScope === "from") return field === "sender"
+    if (highlightScope === "subject") return field === "subject"
+    if (highlightScope === "body") return field === "snippet"
+    return false
+  }
   // 主题列的文字层次：日期、大小两列与它完全一致（字号 12.5、同样的已读/未读/选中明度）
   const subjectText = selected ? "text-primary-foreground" : read ? "text-foreground/65" : "text-foreground"
 
@@ -887,7 +957,11 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
           )}
           style={{ width: cols.sender }}
         >
-          {sender}
+          {highlightIn("sender") ? (
+            <Highlighted text={sender} query={highlightQuery as string} selected={selected} />
+          ) : (
+            sender
+          )}
         </span>
         <span
           title={message.subject || "（无主题）"}
@@ -897,7 +971,15 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
             subjectText
           )}
         >
-          {message.subject || "（无主题）"}
+          {highlightIn("subject") ? (
+            <Highlighted
+              text={message.subject || "（无主题）"}
+              query={highlightQuery as string}
+              selected={selected}
+            />
+          ) : (
+            message.subject || "（无主题）"
+          )}
         </span>
         <span
           className={cn("shrink-0 overflow-hidden whitespace-nowrap pr-1.5 text-right text-[12.5px] tabular-nums", subjectText)}
@@ -1010,7 +1092,11 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
               selected ? "text-primary-foreground" : read ? "text-foreground/70" : "text-foreground"
             )}
           >
-            {sender}
+            {highlightIn("sender") ? (
+              <Highlighted text={sender} query={highlightQuery as string} selected={selected} />
+            ) : (
+              sender
+            )}
           </span>
           <span className={cn("ml-auto shrink-0 tabular-nums", compact ? "text-[11.5px]" : "text-[12px]", mutedText)}>
             {formatListTime(message.date, { withTime: showTime })}
@@ -1026,14 +1112,28 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
               selected ? "text-primary-foreground" : read ? "text-foreground/65" : "text-foreground"
             )}
           >
-            {message.subject || "（无主题）"}
+            {highlightIn("subject") ? (
+              <Highlighted
+                text={message.subject || "（无主题）"}
+                query={highlightQuery as string}
+                selected={selected}
+              />
+            ) : (
+              message.subject || "（无主题）"
+            )}
           </span>
           {showSnippet ? null : indicators}
         </div>
 
         {showSnippet ? (
           <div className="flex items-center gap-2">
-            <span className={cn("truncate", compact ? "text-[12px]" : "text-[13px]", mutedText)}>{message.snippet}</span>
+            <span className={cn("truncate", compact ? "text-[12px]" : "text-[13px]", mutedText)}>
+              {highlightIn("snippet") ? (
+                <Highlighted text={message.snippet} query={highlightQuery as string} selected={selected} />
+              ) : (
+                message.snippet
+              )}
+            </span>
             {indicators}
           </div>
         ) : null}

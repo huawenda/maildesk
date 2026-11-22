@@ -12,6 +12,13 @@ import { createTray, destroyTray, testNotify } from "./tray"
 const isDev = !app.isPackaged
 const CAPTURE_PATH = process.env.MAILDESK_CAPTURE
 
+// 免安装绿色版：electron-builder 的 portable 目标会注入 PORTABLE_EXECUTABLE_DIR，
+// 把 userData（SQLite 库、日志、localStorage）收进 exe 同目录，拷走整个文件夹即可迁移/清理，
+// 不写 %APPDATA%。必须在任何 app.getPath("userData") 之前执行（日志与 openDb 都依赖它）。
+if (process.env.PORTABLE_EXECUTABLE_DIR) {
+  app.setPath("userData", join(process.env.PORTABLE_EXECUTABLE_DIR, "MailDesk-data"))
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
@@ -241,13 +248,26 @@ function createWindow(): BrowserWindow {
               console.log("capture-collapse", JSON.stringify(picked))
               await new Promise((resolve) => setTimeout(resolve, 500))
             }
+            // 在标题栏搜索胶囊里填关键词（调试列宽/文件夹列用）
+            const searchProbe = process.env.MAILDESK_CAPTURE_SEARCH
+            if (searchProbe) {
+              const typed = await win.webContents
+                .executeJavaScript(
+                  "(() => { const el = document.querySelector('input[placeholder^=\"搜索\"]'); if (!el) return 'no-input'; const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; setter.call(el, " +
+                    JSON.stringify(searchProbe) +
+                    "); el.dispatchEvent(new Event('input', { bubbles: true })); return el.value })()"
+                )
+                .catch((error) => String(error))
+              console.log("capture-search", JSON.stringify(typed))
+              await new Promise((resolve) => setTimeout(resolve, 800))
+            }
             // 拖动第 n 个列分隔线（紧凑视图，n 从 0 开始：发件人 / 日期 / 大小），值形如 "0:80"
             const colDrag = process.env.MAILDESK_CAPTURE_COLDRAG
             if (colDrag) {
               const [index, delta] = colDrag.split(":")
               const result = await win.webContents
                 .executeJavaScript(
-                  "(() => { const handles = [...document.querySelectorAll('span[title^=\"拖动调整列宽\"]')]; const el = handles[" +
+                  "(() => { const handles = [...document.querySelectorAll('span[title^=\"拖动调整\"]')]; const el = handles[" +
                     Number(index) +
                     "]; if (!el) return 'no-handle:' + handles.length; const rect = el.getBoundingClientRect(); const x = Math.round(rect.left + 2); const y = Math.round(rect.top + rect.height / 2); const opts = { bubbles: true, cancelable: true, button: 0, pointerId: 1, pointerType: 'mouse', clientX: x, clientY: y }; el.dispatchEvent(new PointerEvent('pointerdown', opts)); const move = Object.assign({}, opts, { clientX: x + " +
                     Number(delta || 0) +

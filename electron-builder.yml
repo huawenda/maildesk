@@ -16,9 +16,15 @@ win:
     - target: nsis
       arch:
         - x64
+    # 免安装绿色版：单 exe，双击即用（数据保存在 exe 同目录的 MailDesk-data）
+    - target: portable
+      arch:
+        - x64
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   shortcutName: MailDesk
   artifactName: ${productName}-${version}-setup.${ext}
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}

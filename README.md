@@ -9,7 +9,7 @@ Windows 单平台的桌面邮件客户端：只收信（IMAP），核心目标�
     npm run dev        # electron-vite dev，主进程 + 渲染进程 HMR
     npm run typecheck  # node + web 两侧类型检查
     npm run build      # 类型检查后构建到 out/
-    npm run package    # 打 Windows NSIS 安装包到 release/
+    npm run package    # 打 Windows 安装包（NSIS）+ 免安装绿色版到 release/
 
 ## 目录
 

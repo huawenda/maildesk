@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react"
-import { Dialog } from "radix-ui"
 import { ArrowLeft, Check, Loader2, Plus, Trash2 } from "lucide-react"
 import type { Account, Security } from "@shared/types"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ipcErrorMessage, mail } from "@/lib/ipc"
-import { cn } from "@/lib/utils"
 
 const SECURITY_OPTIONS: { value: Security; label: string }[] = [
   { value: "tls", label: "TLS（993）" },
@@ -24,9 +25,6 @@ interface AccountDialogProps {
   accounts: Account[]
   onChanged: (accounts: Account[]) => void
 }
-
-const fieldClass =
-  "h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-[13px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary"
 
 function Label({ children }: { children: React.ReactNode }) {
   return <div className="mb-1.5 text-[11.5px] text-muted-foreground">{children}</div>
@@ -109,13 +107,8 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]" />
-        <Dialog.Content
-          aria-describedby={undefined}
-          className="fixed left-1/2 top-1/2 z-50 flex max-h-[86vh] w-[min(560px,calc(100vw-48px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-popover shadow-2xl outline-none"
-        >
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent aria-describedby={undefined}>
           <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
             {view === "form" && accounts.length > 0 ? (
               <button
@@ -126,9 +119,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                 <ArrowLeft className="size-4" />
               </button>
             ) : null}
-            <Dialog.Title className="text-[13.5px] font-medium">
-              {view === "list" ? "账户" : "添加账户"}
-            </Dialog.Title>
+            <DialogTitle>{view === "list" ? "账户" : "添加账户"}</DialogTitle>
             <kbd className="ml-auto rounded border border-border px-1 py-px text-[10.5px] text-muted-foreground">Esc</kbd>
           </div>
 
@@ -171,28 +162,26 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>邮箱地址</Label>
-                    <input
+                    <Input
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
                       placeholder="you@example.com"
                       autoComplete="off"
-                      className={fieldClass}
                     />
                   </div>
                   <div>
                     <Label>显示名（可选）</Label>
-                    <input
+                    <Input
                       value={displayName}
                       onChange={(event) => setDisplayName(event.target.value)}
                       placeholder="Personal"
-                      className={fieldClass}
                     />
                   </div>
                 </div>
 
                 <div>
                   <Label>密码 / 授权码</Label>
-                  <input
+                  <Input
                     type="password"
                     value={password}
                     onChange={(event) => {
@@ -201,22 +190,21 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                     }}
                     placeholder="使用 DPAPI 加密后单独存储"
                     autoComplete="new-password"
-                    className={fieldClass}
                   />
                 </div>
 
                 <div className="grid grid-cols-[1fr_105px] gap-3">
                   <div>
                     <Label>IMAP 主机</Label>
-                    <input value={host} onChange={(event) => setHost(event.target.value)} className={fieldClass} />
+                    <Input value={host} onChange={(event) => setHost(event.target.value)} />
                   </div>
                   <div>
                     <Label>端口</Label>
-                    <input
+                    <Input
                       value={port}
                       onChange={(event) => setPort(event.target.value.replace(/\D/g, "").slice(0, 5))}
                       inputMode="numeric"
-                      className={cn(fieldClass, "tabular-nums")}
+                      className="tabular-nums"
                     />
                   </div>
                 </div>
@@ -228,25 +216,25 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>加密方式</Label>
-                    <select
-                      value={security}
-                      onChange={(event) => setSecurity(event.target.value as Security)}
-                      className={fieldClass}
-                    >
-                      {SECURITY_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={security} onValueChange={(value) => setSecurity(value as Security)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SECURITY_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div>
                     <Label>用户名（默认同邮箱）</Label>
-                    <input
+                    <Input
                       value={username}
                       onChange={(event) => setUsername(event.target.value)}
                       placeholder={email || "用户名"}
-                      className={fieldClass}
                     />
                   </div>
                 </div>
@@ -298,8 +286,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
               </button>
             </div>
           ) : null}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+      </DialogContent>
+    </Dialog>
   )
 }

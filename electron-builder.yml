@@ -3,6 +3,8 @@ productName: MailDesk
 directories:
   output: release
   buildResources: build
+# 没有原生依赖（node:sqlite 是 Electron 内置），跳过 @electron/rebuild 的依赖扫描
+npmRebuild: false
 files:
   - out/**/*
   - package.json

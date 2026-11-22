@@ -149,9 +149,26 @@ export function registerIpc(): void {
     return account
   })
 
-  ipcMain.handle(CH.accountsUpdate, (_event, raw: unknown) => {
+  ipcMain.handle(CH.accountsUpdate, async (_event, raw: unknown) => {
     const { id, patch } = parse(updatePayloadSchema, raw)
-    return updateAccount(id, patch)
+    const account = await updateAccount(id, patch)
+    // 只改了显示名就不用重连；连服务器的参数变了才重启这家的同步，让新凭据/主机立刻生效
+    const reconnect =
+      patch.email !== undefined ||
+      patch.imapHost !== undefined ||
+      patch.imapPort !== undefined ||
+      patch.security !== undefined ||
+      patch.username !== undefined ||
+      patch.password !== undefined
+    if (reconnect) {
+      stopAccountSync(id)
+      try {
+        startAccountSync(id)
+      } catch (error) {
+        console.error("[ipc] restart sync after account update failed", error)
+      }
+    }
+    return account
   })
 
   ipcMain.handle(CH.accountsRemove, async (_event, raw: unknown) => {

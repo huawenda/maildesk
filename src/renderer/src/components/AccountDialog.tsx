@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ArrowLeft, Check, Loader2, Plus, Trash2 } from "lucide-react"
+import { ArrowLeft, Check, Loader2, Pencil, Plus, Trash2 } from "lucide-react"
 import type { Account, Security } from "@shared/types"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
@@ -33,6 +33,8 @@ function Label({ children }: { children: React.ReactNode }) {
 export function AccountDialog({ open, onOpenChange, accounts, onChanged }: AccountDialogProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<"list" | "form">("list")
+  // 正在编辑的账户 id：null 表示新增
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [email, setEmail] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [password, setPassword] = useState("")
@@ -47,6 +49,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
   useEffect(() => {
     if (!open) return
     setView(accounts.length === 0 ? "form" : "list")
+    setEditingId(null)
     setError(null)
     setTest({ kind: "idle" })
   }, [open, accounts.length])
@@ -60,6 +63,32 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
     username: (username.trim() || email.trim()),
     password
   })
+
+  const startEdit = (account: Account) => {
+    setEditingId(account.id)
+    setEmail(account.email)
+    setDisplayName(account.displayName ?? "")
+    setPassword("")
+    setHost(account.imapHost)
+    setPort(String(account.imapPort))
+    setSecurity(account.security)
+    setUsername(account.username)
+    setTest({ kind: "idle" })
+    setError(null)
+    setView("form")
+  }
+
+  const resetForm = () => {
+    setEditingId(null)
+    setEmail("")
+    setDisplayName("")
+    setPassword("")
+    setHost("")
+    setPort("993")
+    setSecurity("tls")
+    setUsername("")
+    setTest({ kind: "idle" })
+  }
 
   const runTest = async () => {
     setTest({ kind: "testing" })
@@ -80,14 +109,24 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
     setSaving(true)
     setError(null)
     try {
-      const account = await mail.accounts.create(buildInput())
-      onChanged([...accounts, account])
-      setEmail("")
-      setDisplayName("")
-      setPassword("")
-      setUsername("")
-      setTest({ kind: "idle" })
-      setView("list")
+      if (editingId) {
+        // 编辑：密码留空表示不改；其余字段整体覆盖
+        const input = buildInput()
+        const patch = password ? input : { ...input, password: undefined }
+        const account = await mail.accounts.update(editingId, patch)
+        onChanged(accounts.map((item) => (item.id === account.id ? account : item)))
+        resetForm()
+        setView("list")
+      } else {
+        const account = await mail.accounts.create(buildInput())
+        onChanged([...accounts, account])
+        setEmail("")
+        setDisplayName("")
+        setPassword("")
+        setUsername("")
+        setTest({ kind: "idle" })
+        setView("list")
+      }
     } catch (cause) {
       setError(ipcErrorMessage(cause))
     } finally {
@@ -112,14 +151,17 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
           <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
             {view === "form" && accounts.length > 0 ? (
               <button
-                onClick={() => setView("list")}
+                onClick={() => {
+                  resetForm()
+                  setView("list")
+                }}
                 className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
                 title="返回账户列表"
               >
                 <ArrowLeft className="size-4" />
               </button>
             ) : null}
-            <DialogTitle>{view === "list" ? "账户" : "添加账户"}</DialogTitle>
+            <DialogTitle>{view === "list" ? "账户" : editingId ? "编辑账户" : "添加账户"}</DialogTitle>
             <kbd className="ml-auto rounded border border-border px-1 py-px text-[10.5px] text-muted-foreground">Esc</kbd>
           </div>
 
@@ -140,6 +182,13 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                         {account.email} · {account.imapHost}:{account.imapPort} · {account.security}
                       </div>
                     </div>
+                    <button
+                      onClick={() => startEdit(account)}
+                      title="编辑账户"
+                      className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground"
+                    >
+                      <Pencil className="size-3.5" />
+                    </button>
                     <button
                       onClick={() => remove(account)}
                       title="移除此账户"
@@ -188,7 +237,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                       setPassword(event.target.value)
                       setTest({ kind: "idle" })
                     }}
-                    placeholder="使用 DPAPI 加密后单独存储"
+                    placeholder={editingId ? "留空则不修改密码" : "使用 DPAPI 加密后单独存储"}
                     autoComplete="new-password"
                   />
                 </div>
@@ -270,7 +319,10 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
             <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-3">
               {accounts.length > 0 ? (
                 <button
-                  onClick={() => setView("list")}
+                  onClick={() => {
+                    resetForm()
+                    setView("list")
+                  }}
                   className="h-8 rounded-lg px-3 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
                   取消
@@ -278,11 +330,11 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
               ) : null}
               <button
                 onClick={save}
-                disabled={saving || !email || !password || !host}
+                disabled={saving || !email || !host || (!editingId && !password)}
                 className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                保存账户
+                {editingId ? "保存修改" : "保存账户"}
               </button>
             </div>
           ) : null}

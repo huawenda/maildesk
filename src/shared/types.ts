@@ -66,6 +66,28 @@ export interface Address {
   address: string
 }
 
+/** 下载管理器里的一条记录（会话内保留，最多 20 条） */
+export interface DownloadTask {
+  attachmentId: string
+  messageId: string
+  filename: string
+  status: "downloading" | "done" | "error" | "canceled"
+  loaded: number
+  total: number | null
+  startedAt: number
+  finishedAt: number | null
+  /** 落盘位置（保存或打开后才有），用于「打开文件夹」 */
+  path: string | null
+}
+
+/** 附件下载进度（主进程 → 渲染层，用于 chip 上的百分比） */
+export interface AttachmentProgress {
+  attachmentId: string
+  loaded: number
+  /** 解码后的总字节数，拿不到时为 null */
+  total: number | null
+}
+
 export interface Attachment {
   id: string
   messageId: string
@@ -74,6 +96,8 @@ export interface Attachment {
   size: number | null
   contentId: string | null
   localPath: string | null
+  /** BODYSTRUCTURE 的 part 号（如 "1.2"），保存/预览时直接按它下载，省掉一次结构查询 */
+  part: string | null
 }
 
 export interface MessageSummary {
@@ -213,6 +237,16 @@ export interface MailApi {
     preview(messageId: string, attachmentId: string): Promise<AttachmentPreviewResult>
     /** 取到临时目录并用系统默认程序打开（图片以外的附件走这条）。 */
     open(messageId: string, attachmentId: string): Promise<{ ok: boolean; error?: string; path?: string }>
+    /** 下载进度；返回取消订阅函数。 */
+    onProgress(cb: (progress: AttachmentProgress) => void): () => void
+    /** 当前会话的下载列表（下载中 + 最近完成）。 */
+    downloads(): Promise<DownloadTask[]>
+    /** 取消一个还在下载的附件。 */
+    cancelDownload(attachmentId: string): Promise<boolean>
+    /** 在资源管理器里定位已下载的文件。 */
+    reveal(attachmentId: string): Promise<boolean>
+    /** 下载列表变化；返回取消订阅函数。 */
+    onDownloads(cb: (tasks: DownloadTask[]) => void): () => void
   }
   search: {
     query(q: string, opts?: SearchOptions): Promise<MessageSummary[]>

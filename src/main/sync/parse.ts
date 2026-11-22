@@ -22,6 +22,23 @@ export interface AttachmentPart {
 }
 
 /**
+ * 正文内嵌图不算附件：multipart/related 里的 cid 图片，或声明成 inline 的图片。
+ * 很多营销邮件把配图写进正文（`Content-ID` + `inline`），旧逻辑只看「有没有 filename」，
+ * 于是正文图片被当成附件、列表里挂上回形针（用户反馈）。
+ */
+const isInlineBodyImage = (
+  mime: string | null | undefined,
+  disposition?: string | null,
+  contentId?: string | null
+): boolean => {
+  const type = (mime ?? "").toLowerCase()
+  if (!type.startsWith("image/")) return false
+  const disp = (disposition ?? "").toLowerCase()
+  if (disp === "attachment") return false
+  return disp === "inline" || Boolean(contentId)
+}
+
+/**
  * 从 BODYSTRUCTURE 收集附件节点（按 IMAP 自然顺序）。
  * 下载时用 part 号只取那一段，不必重拉整封信。
  */
@@ -35,6 +52,7 @@ export function collectAttachmentParts(root?: MessageStructureObject): Attachmen
     const filename = node.dispositionParameters?.filename || node.parameters?.name || null
     const isAttachment = node.disposition === "attachment" || Boolean(filename)
     if (!isAttachment) return
+    if (isInlineBodyImage(node.type, node.disposition, node.id)) return
     parts.push({
       part: node.part || "1",
       filename,
@@ -63,11 +81,10 @@ export function inspectStructure(root?: MessageStructureObject): StructureInfo {
     const type = (node.type || "").toLowerCase()
     if (type === "text/html") info.hasHtml = true
     const isText = type === "text/plain" || type === "text/html"
+    // 只认真正的附件叶节点：multipart/*（含 mixed / related）只是容器，不能因为「里面有非正文块」
+    // 就判定有附件——营销邮件常用 multipart/mixed 包正文 + 内嵌图，旧逻辑据此误挂回形针（用户反馈）
     const isAttachment = node.disposition === "attachment" || Boolean(node.dispositionParameters?.filename)
-    if (!isText && !isAttachment && type !== "multipart/alternative" && node.childNodes?.length) {
-      info.hasAttachments = true
-    }
-    if (isAttachment) info.hasAttachments = true
+    if (isAttachment && !isInlineBodyImage(node.type, node.disposition, node.id)) info.hasAttachments = true
 
     if (node.childNodes?.length) {
       for (const child of node.childNodes) walk(child)
@@ -214,15 +231,23 @@ export async function parseBody(
   const mail = await simpleParser(source)
   const rawText = (mail.text || "").trim()
   const text = rawText || (typeof mail.html === "string" ? mail.html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<[^>]+>/g, "").trim() : "")
-  const attachments: Attachment[] = mail.attachments.map((item) => ({
-    id: "",
-    messageId: id,
-    filename: item.filename ?? null,
-    mime: item.contentType ?? null,
-    size: item.size ?? null,
-    contentId: item.contentId ?? null,
-    localPath: null
-  }))
+  const attachments: Attachment[] = mail.attachments
+    // mailparser 会把 cid 内嵌图也放进 attachments（related = true），这些是正文的一部分
+    .filter(
+      (item) =>
+        !item.related && !isInlineBodyImage(item.contentType, item.contentDisposition, item.cid ?? item.contentId)
+    )
+    .map((item) => ({
+      id: "",
+      messageId: id,
+      filename: item.filename ?? null,
+      mime: item.contentType ?? null,
+      size: item.size ?? null,
+      contentId: item.contentId ?? null,
+      localPath: null,
+      // mailparser 的 partId 就是 IMAP 的 part 号；后续会用 BODYSTRUCTURE 的匹配结果覆盖
+      part: item.partId ?? null
+    }))
   if (parts && parts.length > 0) {
     const pool = [...parts]
     const take = (filename: string | null): AttachmentPart | null => {
@@ -235,6 +260,8 @@ export async function parseBody(
       const part = take(attachment.filename)
       const size = codedToDecoded(part?.size ?? null, part?.encoding ?? null)
       if (size !== null) attachment.size = size
+      // 记下分配到的 part 号：保存/预览直接按它下载，不必再取一次 BODYSTRUCTURE
+      if (part?.part) attachment.part = part.part
     }
     // 截断位置之后的附件 mailparser 根本没看到，按结构补齐元数据
     for (const part of pool) {
@@ -245,7 +272,8 @@ export async function parseBody(
         mime: part.mime,
         size: codedToDecoded(part.size, part.encoding),
         contentId: null,
-        localPath: null
+        localPath: null,
+        part: part.part
       })
     }
   }

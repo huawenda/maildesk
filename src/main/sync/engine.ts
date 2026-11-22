@@ -22,14 +22,17 @@ import {
   messageLocators,
   moveMessageRow,
   oldestUid,
+  messagesNeedingAttachmentFlags,
   saveIncoming,
+  setHasAttachments,
   setMessageBody,
   setReadById
 } from "../db/messages"
 import type { IncomingMessage, LocalUidRow } from "../db/messages"
 import { getSettings } from "../db/settings"
 import { openPassword } from "../security/credentials"
-import { collectAttachmentParts, parseBody, toIncoming } from "./parse"
+import { collectAttachmentParts, inspectStructure, parseBody, toIncoming } from "./parse"
+import { get, run } from "../db"
 
 /** 首次同步只拉最近的若干封（PRD FR-05.1），其余靠翻页时再补。 */
 const FIRST_SYNC_LIMIT = 500
@@ -105,6 +108,9 @@ export interface EngineHooks {
 export class SyncEngine {
   private client: ImapFlow | null = null
   private queue: Promise<unknown> = Promise.resolve()
+  /** 正在下载的附件：attachmentId → 中止函数（销毁 IMAP 下载流） */
+  private activeDownloads = new Map<string, () => void>()
+  private canceled = new Set<string>()
   private stopped = false
   private state: SyncState = "disconnected"
   private folderPath?: string
@@ -196,10 +202,11 @@ export class SyncEngine {
     })
   }
 
-  /** 按需下载单个附件：先读 BODYSTRUCTURE 定位 part，再只取那一段。 */
+  /** 按需下载单个附件：解析正文时已经记下 part 号就直接取那一段，省掉一次结构查询。 */
   downloadAttachment(
     messageId: string,
-    attachmentId: string
+    attachmentId: string,
+    onProgress?: (loaded: number, total: number | null) => void
   ): Promise<{ filename: string; mime: string | null; buffer: Buffer } | null> {
     return this.schedule(async () => {
       const locator = getMessageLocator(messageId)
@@ -211,25 +218,61 @@ export class SyncEngine {
       if (!client) return null
       const lock = await client.getMailboxLock(folder.path)
       try {
-        const found = await client.fetchOne(String(locator.uid), { bodyStructure: true }, { uid: true })
-        if (!found || !found.bodyStructure) return null
-        const parts = collectAttachmentParts(found.bodyStructure)
-        // 同名附件少见但仍可能：按文件名取第一个，取不到就退到第一个附件
-        const match = parts.find((item) => item.filename === attachment.filename) ?? parts[0]
-        if (!match) return null
-        const download = await client.download(String(locator.uid), match.part, { uid: true })
+        let part = attachment.part
+        let fallbackName: string | null = null
+        let fallbackMime: string | null = null
+        if (!part) {
+          // 老数据没记 part：退回取一次 BODYSTRUCTURE（按文件名匹配，取不到就第一个）
+          const found = await client.fetchOne(String(locator.uid), { bodyStructure: true }, { uid: true })
+          if (!found || !found.bodyStructure) return null
+          const parts = collectAttachmentParts(found.bodyStructure)
+          const match = parts.find((item) => item.filename === attachment.filename) ?? parts[0]
+          if (!match) return null
+          part = match.part
+          fallbackName = match.filename
+          fallbackMime = match.mime
+        }
+        const download = await client.download(String(locator.uid), part, { uid: true })
         if (!download?.content) return null
+        // 允许下载管理器取消：销毁流，循环退出后按 canceled 返回 null
+        this.activeDownloads.set(attachmentId, () => download.content?.destroy(new Error("canceled")))
+        const total = attachment.size ?? download.meta?.expectedSize ?? null
         const chunks: Buffer[] = []
-        for await (const chunk of download.content) chunks.push(Buffer.from(chunk as Uint8Array))
+        let loaded = 0
+        let lastReport = 0
+        this.canceled.delete(attachmentId)
+        for await (const chunk of download.content) {
+          const buffer = Buffer.from(chunk as Uint8Array)
+          chunks.push(buffer)
+          loaded += buffer.length
+          // 进度最多 8 次/秒：IPC 太密没必要，chip 上的百分比够用
+          const now = Date.now()
+          if (total && now - lastReport > 120) {
+            lastReport = now
+            onProgress?.(loaded, total)
+          }
+        }
+        if (this.canceled.has(attachmentId)) return null
+        onProgress?.(loaded, total ?? loaded)
         return {
-          filename: attachment.filename ?? match.filename ?? "attachment",
-          mime: attachment.mime ?? match.mime,
+          filename: attachment.filename ?? download.meta?.filename ?? fallbackName ?? "attachment",
+          mime: attachment.mime ?? download.meta?.contentType ?? fallbackMime,
           buffer: Buffer.concat(chunks)
         }
       } finally {
+        this.activeDownloads.delete(attachmentId)
         lock.release()
       }
     })
+  }
+
+  /** 取消正在进行的附件下载（下载管理器用）。 */
+  cancelDownload(attachmentId: string): boolean {
+    const abort = this.activeDownloads.get(attachmentId)
+    if (!abort) return false
+    this.canceled.add(attachmentId)
+    abort()
+    return true
   }
 
   private schedule<T>(task: () => Promise<T>): Promise<T> {
@@ -256,12 +299,58 @@ export class SyncEngine {
     // 新文件夹（uidValidity 还是 null）对账会跳过，交给随后的 syncAll 建立游标。
     await this.reconcileAccount("bootstrap")
     await this.syncAll()
+    await this.refreshAttachmentFlags()
     await this.openInboxForIdle()
     this.lastSyncAt = Date.now()
     this.setState("idling")
     this.startPolling()
     this.startReconcileTimer()
     this.startBackfill()
+  }
+
+  /**
+   * 一次性修正历史邮件的「有附件」标记：旧判定把正文内嵌图（cid / inline 图片）算成附件。
+   * 只处理「标了有附件、但还没解析过附件」的邮件，按文件夹批量取 BODYSTRUCTURE 重算；
+   * 处理完写明 marker，之后不再跑（新邮件在同步时就用新判定）。
+   */
+  private async refreshAttachmentFlags(): Promise<void> {
+    const marker = get<{ value: string }>("SELECT value FROM setting WHERE key = 'attachFlagsV6'")
+    if (marker) return
+    const candidates = messagesNeedingAttachmentFlags(500)
+    if (candidates.length === 0) {
+      run("INSERT OR REPLACE INTO setting (key, value) VALUES ('attachFlagsV6', 'true')")
+      return
+    }
+    const byFolder = new Map<string, { id: string; uid: number }[]>()
+    for (const item of candidates) {
+      const list = byFolder.get(item.folderId) ?? []
+      list.push({ id: item.id, uid: item.uid })
+      byFolder.set(item.folderId, list)
+    }
+    for (const [folderId, list] of byFolder) {
+      const folder = getFolder(folderId)
+      const client = this.client
+      if (!folder || !client) continue
+      const lock = await client.getMailboxLock(folder.path)
+      try {
+        const byUid = new Map(list.map((item) => [item.uid, item.id]))
+        const range = list.map((item) => item.uid).join(",")
+        for await (const msg of client.fetch(range, { bodyStructure: true }, { uid: true })) {
+          const id = byUid.get(Number(msg.uid))
+          if (!id) continue
+          const structure = inspectStructure((msg as { bodyStructure?: Parameters<typeof inspectStructure>[0] }).bodyStructure)
+          setHasAttachments(id, structure.hasAttachments)
+        }
+      } catch (error) {
+        if (DEBUG) console.log("[sync] attachment flags failed", folder.path, String(error))
+      } finally {
+        lock.release()
+      }
+    }
+    // 这一批就把当时的候选全部处理完了才落 marker；超过上限（还有没处理的）留到下次启动
+    if (candidates.length < 500) {
+      run("INSERT OR REPLACE INTO setting (key, value) VALUES ('attachFlagsV6', 'true')")
+    }
   }
 
   private startReconcileTimer(): void {

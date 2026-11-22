@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron"
 import { CH } from "@shared/channels"
-import type { MailApi, SyncEvent } from "@shared/types"
+import type { AttachmentProgress, DownloadTask, MailApi, SyncEvent } from "@shared/types"
 
 const api: MailApi = {
   accounts: {
@@ -29,7 +29,25 @@ const api: MailApi = {
     preview: (messageId, attachmentId) =>
       ipcRenderer.invoke(CH.attachmentsPreview, { messageId, attachmentId }),
     open: (messageId, attachmentId) =>
-      ipcRenderer.invoke(CH.attachmentsOpen, { messageId, attachmentId })
+      ipcRenderer.invoke(CH.attachmentsOpen, { messageId, attachmentId }),
+    /** 订阅下载进度（保存 / 打开 / 预览共用），返回取消订阅函数 */
+    onProgress: (cb) => {
+      const listener = (_event: unknown, payload: AttachmentProgress) => cb(payload)
+      ipcRenderer.on(CH.attachmentsProgress, listener)
+      return () => {
+        ipcRenderer.removeListener(CH.attachmentsProgress, listener)
+      }
+    },
+    downloads: () => ipcRenderer.invoke(CH.attachmentsDownloads),
+    cancelDownload: (attachmentId) => ipcRenderer.invoke(CH.attachmentsCancel, attachmentId),
+    reveal: (attachmentId) => ipcRenderer.invoke(CH.attachmentsReveal, attachmentId),
+    onDownloads: (cb) => {
+      const listener = (_event: unknown, payload: DownloadTask[]) => cb(payload)
+      ipcRenderer.on(CH.attachmentsDownloads, listener)
+      return () => {
+        ipcRenderer.removeListener(CH.attachmentsDownloads, listener)
+      }
+    }
   },
   search: {
     query: (q, opts) => ipcRenderer.invoke(CH.searchQuery, { q, opts })

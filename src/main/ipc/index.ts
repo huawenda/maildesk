@@ -29,7 +29,11 @@ import {
 import { getSettings, setSettings } from "../db/settings"
 import { probeImap } from "../net/probe"
 import {
+  cancelAttachmentDownload,
   downloadAttachment,
+  listAttachmentDownloads,
+  recordDownloadPath,
+  revealAttachment,
   loadMessageBody,
   markReadRemote,
   moveMessages,
@@ -213,6 +217,7 @@ export function registerIpc(): void {
     if (!file) return { saved: false, error: "network: 拉取附件失败，请先同步这封邮件" }
     await writeFile(picked.filePath, file.buffer)
     setAttachmentPath(attachmentId, picked.filePath)
+    recordDownloadPath(attachmentId, picked.filePath)
     return { saved: true, path: picked.filePath }
   })
 
@@ -245,6 +250,7 @@ export function registerIpc(): void {
     const target = await uniquePath(dir, safeFilename(file.filename ?? meta.filename ?? "附件"))
     await writeFile(target, file.buffer)
     const failure = await shell.openPath(target)
+    if (!failure) recordDownloadPath(attachmentId, target)
     return failure ? { ok: false, error: failure } : { ok: true, path: target }
   })
 
@@ -268,10 +274,17 @@ export function registerIpc(): void {
       const target = await uniquePath(dir, safeFilename(item.filename ?? "附件"))
       await writeFile(target, file.buffer)
       setAttachmentPath(item.id, target)
+      recordDownloadPath(item.id, target)
       saved += 1
     }
     return { saved, dir }
   })
+
+  ipcMain.handle(CH.attachmentsDownloads, () => listAttachmentDownloads())
+  ipcMain.handle(CH.attachmentsCancel, (_event, raw: unknown) =>
+    cancelAttachmentDownload(parse(idSchema, raw))
+  )
+  ipcMain.handle(CH.attachmentsReveal, (_event, raw: unknown) => revealAttachment(parse(idSchema, raw)))
 
   ipcMain.handle(CH.searchQuery, (_event, raw: unknown) => {
     const { q, opts } = parse(searchQuerySchema, raw)

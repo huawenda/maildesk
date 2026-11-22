@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { mail } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
+import { DownloadsPopover } from "@/components/DownloadsPopover"
 import { TitleBarSearch, type SearchScope } from "@/components/TitleBarSearch"
 
 const densityOptions: { id: Density; label: string }[] = [
@@ -154,6 +155,8 @@ export function TitleBar({
             focusToken={searchFocusToken}
           />
         </div>
+
+        <DownloadsPopover triggerClassName={ICON_BUTTON} />
 
         <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5 [-webkit-app-region:no-drag]">
           {themeOptions.map(({ mode: option, icon: Icon, label }) => (

@@ -1,6 +1,7 @@
-import { BrowserWindow } from "electron"
+import { BrowserWindow, shell } from "electron"
 import { CH } from "@shared/channels"
-import type { SyncEvent, SyncState, SyncStatus } from "@shared/types"
+import { existsSync } from "node:fs"
+import type { DownloadTask, SyncEvent, SyncState, SyncStatus } from "@shared/types"
 import { listAccounts } from "../db/accounts"
 import { getFolder } from "../db/folders"
 import { getMessageLocator } from "../db/messages"
@@ -72,6 +73,59 @@ export async function syncNow(accountId?: string): Promise<void> {
   }
 }
 
+const downloads = new Map<string, DownloadTask>()
+const MAX_FINISHED = 20
+
+function emitDownloads(): void {
+  const tasks = listAttachmentDownloads()
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send(CH.attachmentsDownloads, tasks)
+  }
+}
+
+/** 下载中的排前面，其余按开始时间倒序；只保留最近 20 条已完成记录。 */
+export function listAttachmentDownloads(): DownloadTask[] {
+  const all = [...downloads.values()]
+  const active = all.filter((task) => task.status === "downloading")
+  const finished = all
+    .filter((task) => task.status !== "downloading")
+    .sort((a, b) => (b.finishedAt ?? b.startedAt) - (a.finishedAt ?? a.startedAt))
+    .slice(0, MAX_FINISHED)
+  return [...active, ...finished]
+}
+
+/** 保存/打开成功后记下落盘路径，浮层里的「打开文件夹」用它。 */
+export function recordDownloadPath(attachmentId: string, path: string): void {
+  const task = downloads.get(attachmentId)
+  if (!task) return
+  task.path = path
+  if (task.status === "downloading") {
+    task.status = "done"
+    task.finishedAt = Date.now()
+  }
+  emitDownloads()
+}
+
+/** 在资源管理器里定位文件；路径失效时返回 false。 */
+export function revealAttachment(attachmentId: string): boolean {
+  const path = downloads.get(attachmentId)?.path
+  if (!path || !existsSync(path)) return false
+  shell.showItemInFolder(path)
+  return true
+}
+
+export function cancelAttachmentDownload(attachmentId: string): boolean {
+  const task = downloads.get(attachmentId)
+  if (!task || task.status !== "downloading") return false
+  for (const engine of engines.values()) {
+    if (engine.cancelDownload(attachmentId)) break
+  }
+  task.status = "canceled"
+  task.finishedAt = Date.now()
+  emitDownloads()
+  return true
+}
+
 /** 附件下载按邮件所属账户路由到对应引擎（多账户时不能下错账号）。 */
 export async function downloadAttachment(
   messageId: string,
@@ -82,7 +136,45 @@ export async function downloadAttachment(
   if (!folder) return null
   const engine = engineFor(folder.accountId)
   if (!engine) return null
-  return engine.downloadAttachment(messageId, attachmentId)
+  const previous = downloads.get(attachmentId)
+  const task: DownloadTask = {
+    attachmentId,
+    messageId,
+    filename: previous?.filename ?? "附件",
+    status: "downloading",
+    loaded: 0,
+    total: previous?.total ?? null,
+    startedAt: Date.now(),
+    finishedAt: null,
+    path: null
+  }
+  downloads.set(attachmentId, task)
+  emitDownloads()
+  try {
+    const result = await engine.downloadAttachment(messageId, attachmentId, (loaded, total) => {
+      task.loaded = loaded
+      task.total = total ?? task.total
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send(CH.attachmentsProgress, { attachmentId, loaded, total })
+        }
+      }
+      emitDownloads()
+    })
+    if (task.status === "canceled") return null
+    task.status = result ? "done" : "error"
+    task.finishedAt = Date.now()
+    if (result?.filename) task.filename = result.filename
+    emitDownloads()
+    return result
+  } catch (error) {
+    if (task.status !== "canceled") {
+      task.status = "error"
+      task.finishedAt = Date.now()
+      emitDownloads()
+    }
+    throw error
+  }
 }
 
 const PRECEDENCE: SyncState[] = ["error", "fetching", "selecting", "connecting", "idling", "disconnected"]

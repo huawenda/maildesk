@@ -114,6 +114,8 @@ export function Reader({
   const [senderBusy, setSenderBusy] = useState(false)
   const [senderMessages, setSenderMessages] = useState<Message[]>([])
   const senderListRef = useRef<HTMLDivElement>(null)
+  // 附件下载进度（attachmentId → 0–100），用于 chip 上的百分比
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({})
   // 图片附件内联预览：点开时才回 IMAP 取，不预先下载
   const [preview, setPreview] = useState<{ attachment: Attachment; name: string; dataUrl: string } | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
@@ -128,6 +130,17 @@ export function Reader({
       setSenderClosing(false)
     }, 120)
   }
+
+  // 订阅主进程的附件下载进度：只更新百分比，不参与下载流程
+  useEffect(
+    () =>
+      mail.attachments.onProgress(({ attachmentId, loaded, total }) => {
+        const percent = total && total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : null
+        if (percent === null) return
+        setDownloadProgress((current) => ({ ...current, [attachmentId]: percent }))
+      }),
+    []
+  )
 
   // 抽屉：Esc 收起；换一封邮件（尤其换了发件人）时直接收起，避免看到上一位发件人的列表
   useEffect(() => {
@@ -407,6 +420,7 @@ export function Reader({
                       key={attachment.id ?? attachment.name}
                       attachment={attachment}
                       state={attachment.id ? saveStates[attachment.id] : undefined}
+                      progress={attachment.id ? downloadProgress[attachment.id] : undefined}
                       onOpen={() => void openAttachment(attachment)}
                       onSave={() => void saveAttachment(attachment)}
                       onSaveAll={() => void saveAllAttachments()}
@@ -591,12 +605,15 @@ export function Reader({
 function AttachmentChip({
   attachment,
   state,
+  progress,
   onOpen,
   onSave,
   onSaveAll
 }: {
   attachment: Attachment
   state?: SaveState
+  /** 下载百分比（0–100），只在 saving 时显示 */
+  progress?: number
   onOpen: () => void
   onSave: () => void
   onSaveAll: () => void
@@ -619,7 +636,13 @@ function AttachmentChip({
           )}
         >
           {state === "saving" ? (
-            <Loader2 className="size-3 animate-spin text-muted-foreground" />
+            progress !== undefined ? (
+              <span className="w-7 shrink-0 text-right text-[10.5px] tabular-nums text-muted-foreground">
+                {progress}%
+              </span>
+            ) : (
+              <Loader2 className="size-3 animate-spin text-muted-foreground" />
+            )
           ) : state === "saved" ? (
             <Check className="size-3 text-[#34D399]" />
           ) : (

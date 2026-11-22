@@ -50,6 +50,7 @@ interface AttachmentRow {
   size: number | null
   content_id: string | null
   local_path: string | null
+  part: string | null
 }
 
 const parseAddresses = (json: string | null): Address[] => {
@@ -89,7 +90,8 @@ const toAttachment = (row: AttachmentRow): Attachment => ({
   mime: row.mime,
   size: row.size,
   contentId: row.content_id,
-  localPath: row.local_path
+  localPath: row.local_path,
+  part: row.part
 })
 
 /**
@@ -327,6 +329,22 @@ export function needsBody(id: string): boolean {
   return !getMessageLocator(id).hasBody
 }
 
+/** 同步层用 BODYSTRUCTURE 重新判定后回写「有没有附件」。 */
+export function setHasAttachments(id: string, has: boolean): void {
+  run("UPDATE message SET has_attachments = ? WHERE id = ?", boolean(has), id)
+}
+
+/** 旧版本把正文内嵌图算成附件：取出还没按新规则复核过的邮件（有标记但没解析过附件）。 */
+export function messagesNeedingAttachmentFlags(limit: number): { id: string; folderId: string; uid: number }[] {
+  return all<{ id: string; folder_id: string; uid: number }>(
+    `SELECT m.id, m.folder_id, m.uid FROM message m
+     WHERE m.has_attachments = 1
+       AND NOT EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id)
+     ORDER BY m.sent_at DESC LIMIT ?`,
+    limit
+  ).map((row) => ({ id: row.id, folderId: row.folder_id, uid: row.uid }))
+}
+
 /** 懒加载回来的正文与附件。 */
 export function setMessageBody(
   id: string,
@@ -335,19 +353,27 @@ export function setMessageBody(
   hasHtml: boolean,
   attachments: Attachment[] = []
 ): void {
-  run("UPDATE message SET body_text = ?, body_html = ?, has_html = ? WHERE id = ?", bodyText, bodyHtml, boolean(hasHtml), id)
+  run(
+    "UPDATE message SET body_text = ?, body_html = ?, has_html = ?, has_attachments = ? WHERE id = ?",
+    bodyText,
+    bodyHtml,
+    boolean(hasHtml),
+    boolean(attachments.length > 0),
+    id
+  )
   if (attachments.length === 0) return
   run("DELETE FROM attachment WHERE message_id = ?", id)
   for (const item of attachments) {
     run(
-      "INSERT INTO attachment (id, message_id, filename, mime, size, content_id, local_path) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO attachment (id, message_id, filename, mime, size, content_id, local_path, part) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       item.id || randomUUID(),
       id,
       item.filename,
       item.mime,
       item.size,
       item.contentId,
-      item.localPath
+      item.localPath,
+      item.part
     )
   }
 }

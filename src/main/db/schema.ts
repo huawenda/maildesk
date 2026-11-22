@@ -121,5 +121,21 @@ export const MIGRATIONS: string[] = [
   `
   DELETE FROM attachment;
   UPDATE message SET body_text = NULL, body_html = NULL WHERE has_attachments = 1;
+  `,
+  // v6：附件判定不再把正文内嵌图（cid / inline 图片）算成附件。
+  // 已解析过的邮件里，附件行都带 content_id 的说明它们是内嵌图：把这些邮件的
+  // has_attachments 清掉（回形针消失），其余邮件等点开时按新规则重新解析。
+  `
+  UPDATE message SET has_attachments = 0
+  WHERE id IN (
+    SELECT message_id FROM attachment
+    GROUP BY message_id
+    HAVING SUM(CASE WHEN content_id IS NULL THEN 0 ELSE 1 END) = COUNT(*)
+  );
+  DELETE FROM attachment WHERE content_id IS NOT NULL;
+  `,
+  // v7：记住附件的 BODYSTRUCTURE part 号，下载时不必再 fetchOne 一次结构
+  `
+  ALTER TABLE attachment ADD COLUMN part TEXT;
   `
 ]

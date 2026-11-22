@@ -39,7 +39,7 @@ src/preload/         contextBridge，唯一对外出口 window.mail
 src/renderer/src/     React UI（唯一的重构区域）
   components/        业务组件（TitleBar/Sidebar/MessageList/Reader）
   components/ui/     shadcn 生成物，除必要调整外不要手改
-                     现有 button / context-menu / dropdown-menu / input / select / dialog；
+                     现有 button / context-menu / dropdown-menu / input / select / dialog / popover；
                      input 与 select 的 trigger 已改成项目口径（bg-muted、border-input、rounded-lg、13px、focus 只换边框色），
                      新增表单不要再写 fieldClass，直接用 <Input> / <Select>；账户弹窗已切到 ui/dialog 封装
   lib/               theme / mock / utils
@@ -112,7 +112,10 @@ docs/                PRD、UI 参考、截图
 - selftest 会往库里写测试账户与 `density=compact / sidebarCollapsed=true` 设置，跑完记得清理，否则 UI 打开就是折叠态。
 - `mailparser`/自建解码只管正文；列表 snippet 必须在首屏同步时按 `Content-Transfer-Encoding`（base64 / quoted-printable）还原再按 charset 解码，否则中文摘要全是乱码。
 - **正文右键菜单复用列表那一套**：`MessageContextMenu` 已抽到独立文件，`MessageList` 与 `Reader` 都从这里引，不要在两边各写一份。`Reader` 用 `ContextMenu` + `ContextMenuTrigger asChild` 包住正文滚动容器（`bodyRef`），菜单里的 id 级回调在 Reader 里包一层（`onMove(_id, folderId)` 等）。HTML 正文的 iframe 右键不会冒泡到父文档，靠 `HtmlBody` 在同源 `contentDocument` 上挂 `contextmenu`（sandbox 仍是 `allow-same-origin`，不要加 allow-scripts），把 `iframe` 内坐标换算成页面坐标回调给 Reader，再向 `bodyRef` 派发一个合成 `MouseEvent("contextmenu")` 让 Radix 在鼠标位置打开。附件 chip 自带的右键菜单是嵌套的，内层会拦下事件，不会同时弹外层菜单。
+- **正文内嵌图不算附件**：`multipart/related` 里带 `Content-ID` 的图片、`Content-Disposition: inline` 的图片，在 `collectAttachmentParts`、`inspectStructure.hasAttachments` 与 `parseBody` 三处都要用 `isInlineBodyImage()` 过滤掉（mailparser 的 `related === true` 同理）；`multipart/related` 容器本身也不能触发 `hasAttachments`。旧逻辑只看「有没有 filename」，营销邮件正文配图因此被挂上回形针（用户反馈）。schema v6 已清理这类历史数据，`setMessageBody` 会按解析结果回写 `has_attachments`。
 - 附件 chip 的交互：**左键 = 打开**（图片走 `attachments:preview` 内联预览；其他走新的 `attachments:open`——下载到 `app.getPath("temp")/maildesk-attachments` 后 `shell.openPath`，不弹保存框），**右键 = ContextMenu（打开 / 保存… / 保存全部…）**，三项目标都是消息级（保存全部作用于整封邮件）。演示数据没有附件 id 时按钮 `disabled`。不要再把左键做成「直接弹保存对话框」。
+- **下载管理器在 `sync/manager.ts` 维护会话内 registry**（`Map<attachmentId, DownloadTask>`，最多保留 20 条完成记录）：`downloadAttachment` 创建/更新任务并通过 `attachments:downloads` 推送快照，进度仍推 `attachments:progress`；取消走 `attachments:cancel` → `engine.cancelDownload()`（销毁下载流，引擎按 `canceled` 集合返回 null，manager 把任务标成 canceled）。UI 是 `DownloadsPopover`（标题栏深浅切换左侧，用 `components/ui/popover` 的 Radix Popover 定位/外点关闭/Esc，`sideOffset={12}`，**用组件默认样式**，不要叠 rounded-xl/shadow-2xl/p-0）。保存/打开成功后调 `recordDownloadPath()` 把落盘路径写进任务，「打开文件夹」走 `attachments:reveal` → `shell.showItemInFolder`。，不要把它做成左侧栏或对话框。
+- **附件下载别再做多余的 BODYSTRUCTURE 查询**：`parseBody` 匹配到 part 后把 `part` 写进 `attachment` 表（schema v7），`engine.downloadAttachment` 有 part 就直接 `client.download(uid, part, { uid: true })`，只有老数据（part 为 NULL）才 `fetchOne` 回退。下载过程中按 120ms 节流向渲染层推 `attachments:progress`（`{ attachmentId, loaded, total }`），Reader 订阅后在 chip 上显示百分比（`mail.attachments.onProgress` 返回取消订阅函数）；total 优先用 `attachment.size`（BODYSTRUCTURE 折算后的解码大小），其次 `download.meta.expectedSize`。目前仍是「整包读进内存再写盘 + 单连接串行」，流式落盘与 saveAll 并发是后续优化。
 - 附件二进制**不进 SQLite**：`attachment` 表只存元数据，且只有在解析正文时才会写入（`setMessageBody`）；下载走 `engine.downloadAttachment` —— 先 `fetchOne(uid, { bodyStructure: true })` 找出 part，再 `client.download(uid, part, { uid: true })` 取那一段。图片预览复用同一条下载链路，转成 data URL（上限 8MB）。
 - `fetchOne` 返回 `FetchMessageObject | false`，写成 `if (!found?.bodyStructure)` 不会窄化类型（报 TS2339），必须 `if (!found || !found.bodyStructure)`。
 - 截图时想看图片附件预览：`MAILDESK_CAPTURE_SELECT=1 MAILDESK_CAPTURE_ATT=0`（点第 0 个附件 chip，图片会打开预览层）。
@@ -132,6 +135,7 @@ docs/                PRD、UI 参考、截图
 - 分隔线拖拽**不要用 `setPointerCapture`**：把手只有 5px 宽，指针一离开元素后续 `pointermove` 就收不到（实测拖一下只走一步然后卡住），必须改成 `resizing` 时在 `window` 上挂 `pointermove/pointerup/pointercancel`，宽度上限用 `window.innerWidth` 实时算。
 - **删邮件不能让列表跳回顶部、也不能闪**：`MessageList` 里回顶部的 effect 只能依赖 `folderId` 与 `filter`，依赖 `messages[0]?.id` 时删掉首行也会归零（用户实测「每删一次就刷新到最顶部」）。删除/移动成功后**不要 `setRefreshTick`**：本地 `filter` 已经是终态，整箱重取只会白闪（只有 `result.failed > 0` 时猜不出哪几封还在，才回库兜底）。主进程 `afterLocalChange` 的 `messages` 事件 `added` 恒为 0，渲染层只据此刷计数、不重拉列表；新邮件事件才是 `added > 0`。骨架屏只在 `loading && messages.length === 0` 时渲染（否则清空容器高度、`scrollTop` 被夹到 0）；**紧凑列头的条件里不能带 `loading`**，否则每次刷新列头卸载、内容上移 28px，就是用户报的「强制刷新一下、闪烁」。
 - 列表不分页：`src/main/db/messages.ts` 的 `listMessages(folderId)` 一次返回整箱（`ORDER BY sent_at DESC, rowid DESC`），IPC 是 `messages:list`，渲染层 `mail.messages.list(folderId)`。「N 封」用 `folder.totalCount`；因为整箱都在内存里，日期分组的 `(N 封)` 之和必须等于它，不要再用 `visibleCount` 之类的窗口切片去分组——那会让组头合计只有 50，用户会当成总数对不上（m05334 的真实故障）。
+- **编辑账户**复用 `AccountDialog` 的同一张表单（`editingId` 区分新增/编辑，密码留空 = 不改）；保存走 `accounts.update`。主进程在更新后只在连接参数（email / host / port / security / username / password）变化时 `stopAccountSync` + `startAccountSync`，只改显示名不重连。
 - 账户表单只保留「自定义 IMAP」一种形态（用户明确要求去掉 QQ/163/126/Gmail/Outlook 预设，只连公司自建服务器）；不要再加回服务商预设，也不要在代码里硬编码任何公司的 host。
 - **代码里不能出现 SMTP 依赖**：账户只配 IMAP，添加账户/测试连接/同步全程不碰 25/465/587。公司自建服务器常常只有 993 通，任何“顺手探测一下发件服务器”的改动都会让账户加不上（PRD FR-01 第 5 条）。
 - 单实例锁：跑隔离同步测试或截图前必须先停 dev，否则新实例静默退出；`MAILDESK_DATA_DIR` 指向测试库即可不影响真实库。

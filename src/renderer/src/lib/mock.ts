@@ -45,24 +45,31 @@ export interface Folder {
   icon: "inbox" | "archive" | "junk" | "trash"
 }
 
-export const folders: Folder[] = [
-  { id: "inbox", label: "收件箱", icon: "inbox" },
-  { id: "archive", label: "归档", icon: "archive" },
-  { id: "junk", label: "垃圾邮件", icon: "junk" },
-  { id: "trash", label: "垃圾箱", icon: "trash" }
-]
+/** 只有 dev 构建才有演示数据：正式包没有账户时就是空列表 + 引导，绝不显示假邮件 */
+const DEMO = import.meta.env.DEV
+
+export const folders: Folder[] = DEMO
+  ? [
+      { id: "inbox", label: "收件箱", icon: "inbox" },
+      { id: "archive", label: "归档", icon: "archive" },
+      { id: "junk", label: "垃圾邮件", icon: "junk" },
+      { id: "trash", label: "垃圾箱", icon: "trash" }
+    ]
+  : []
 
 export interface Label {
   name: string
   color: string
 }
 
-export const labels: Label[] = [
-  { name: "工作", color: "#2659CC" },
-  { name: "设计", color: "#A78BFA" },
-  { name: "账单", color: "#F0B65C" },
-  { name: "订阅", color: "#34D399" }
-]
+export const labels: Label[] = DEMO
+  ? [
+      { name: "工作", color: "#2659CC" },
+      { name: "设计", color: "#A78BFA" },
+      { name: "账单", color: "#F0B65C" },
+      { name: "订阅", color: "#34D399" }
+    ]
+  : []
 
 interface FixtureMessage extends Omit<Message, "date" | "size" | "attachments" | "hasAttachments" | "bodyHtml"> {
   receivedAgoMinutes: number
@@ -83,7 +90,8 @@ function hydrate(fixtures: FixtureMessage[], now: number): Message[] {
 
 /* 以下为占位数据：用于把列表撑到「虚拟滚动 + 分页」有意义的数据量。
    接入真实库（M2）后整段删除，fixtures/messages.json 保留为手写回归样本。 */
-const fillers = (() => {
+const fillers: FixtureMessage[] = DEMO
+  ? (() => {
   let seed = 20261121
   const rand = () => {
     seed = (seed + 0x6d2b79f5) | 0
@@ -172,10 +180,13 @@ const fillers = (() => {
   }
   return out
 })()
+  : []
 
 const now = Date.now()
 
-export const messages: Message[] = [...hydrate(raw as FixtureMessage[], now), ...hydrate(fillers, now)].sort(byDateDesc)
+export const messages: Message[] = DEMO
+  ? [...hydrate(raw as FixtureMessage[], now), ...hydrate(fillers, now)].sort(byDateDesc)
+  : []
 
 export const inboxUnread = messages.filter((m) => m.folderId === "inbox" && m.unread).length
 

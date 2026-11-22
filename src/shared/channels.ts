@@ -29,6 +29,7 @@ export const CH = {
   attachmentsSave: "attachments:save",
   attachmentsSaveAll: "attachments:save-all",
   attachmentsPreview: "attachments:preview",
+  attachmentsOpen: "attachments:open",
 
   searchQuery: "search:query",
 

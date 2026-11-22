@@ -233,6 +233,21 @@ export function registerIpc(): void {
     }
   })
 
+  // 打开附件：先落到 userData/temp 再用系统默认程序打开，不经过保存对话框
+  ipcMain.handle(CH.attachmentsOpen, async (_event, raw: unknown) => {
+    const { messageId, attachmentId } = parse(attachmentRefSchema, raw)
+    const meta = getAttachment(attachmentId)
+    if (!meta) return { ok: false, error: "not-found: attachment" }
+    const file = await downloadAttachment(messageId, attachmentId)
+    if (!file) return { ok: false, error: "network: 拉取附件失败，请先同步这封邮件" }
+    const dir = join(app.getPath("temp"), "maildesk-attachments")
+    await mkdir(dir, { recursive: true })
+    const target = await uniquePath(dir, safeFilename(file.filename ?? meta.filename ?? "附件"))
+    await writeFile(target, file.buffer)
+    const failure = await shell.openPath(target)
+    return failure ? { ok: false, error: failure } : { ok: true, path: target }
+  })
+
   ipcMain.handle(CH.attachmentsSaveAll, async (event, raw: unknown) => {
     const messageId = parse(idSchema, raw)
     const detail = getMessage(messageId)

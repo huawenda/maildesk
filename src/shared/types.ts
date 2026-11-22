@@ -139,6 +139,8 @@ export interface Settings {
   showTimeNonCompact: boolean
   /** 侧栏文件夹角标显示未读数还是邮件总数 */
   folderCount: "unread" | "total"
+  /** 点窗口关闭键时最小化到托盘，而不是退出应用 */
+  closeToTray: boolean
 }
 
 export type TestResult =
@@ -209,6 +211,8 @@ export interface MailApi {
     saveAll(messageId: string): Promise<{ saved: number; dir?: string; error?: string }>
     /** 图片附件的 data URL，只用于内联预览（上限 8MB）。 */
     preview(messageId: string, attachmentId: string): Promise<AttachmentPreviewResult>
+    /** 取到临时目录并用系统默认程序打开（图片以外的附件走这条）。 */
+    open(messageId: string, attachmentId: string): Promise<{ ok: boolean; error?: string; path?: string }>
   }
   search: {
     query(q: string, opts?: SearchOptions): Promise<MessageSummary[]>

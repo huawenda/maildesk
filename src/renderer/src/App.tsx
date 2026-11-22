@@ -113,6 +113,7 @@ export default function App() {
   const [stickyGroupHeaders, setStickyGroupHeaders] = useState<boolean>(true)
   const [showTimeNonCompact, setShowTimeNonCompact] = useState<boolean>(true)
   const [folderCount, setFolderCount] = useState<"unread" | "total">("unread")
+  const [closeToTray, setCloseToTray] = useState<boolean>(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
@@ -142,6 +143,7 @@ export default function App() {
         setStickyGroupHeaders(settings.stickyGroupHeaders)
         setShowTimeNonCompact(settings.showTimeNonCompact)
         setFolderCount(settings.folderCount)
+        setCloseToTray(settings.closeToTray)
       })
       .catch(() => undefined)
       .finally(() => {
@@ -196,6 +198,11 @@ export default function App() {
     if (!settingsReady.current) return
     void mail.settings.set({ folderCount }).catch(() => undefined)
   }, [folderCount])
+
+  useEffect(() => {
+    if (!settingsReady.current) return
+    void mail.settings.set({ closeToTray }).catch(() => undefined)
+  }, [closeToTray])
 
   useEffect(() => {
     let cancelled = false
@@ -483,8 +490,16 @@ export default function App() {
     [live, folderId]
   )
 
+  // 选中后 1.5s 自动已读的定时器；用户手动「标为未读」时要能取消掉它
+  const autoReadRef = useRef<string | null>(null)
+  const autoReadTimer = useRef<number | null>(null)
+
   const markRead = useCallback(
     (id: string, read = true) => {
+      if (!read && autoReadTimer.current) {
+        window.clearTimeout(autoReadTimer.current)
+        autoReadTimer.current = null
+      }
       const target = itemsRef.current.find((message) => message.id === id)
       if (target && target.unread === read) {
         // 乐观更新角标，随后用 unreadTick 让库里的真实值覆盖
@@ -651,7 +666,22 @@ export default function App() {
   }, [selectedIds, selectedId, live, inTrash, showNotice])
 
   const select = useCallback(
-    (id: string, additive = false) => {
+    (id: string, additive = false, range = false) => {
+      // Shift+点击：从当前活动行到点击行整段选中（不标已读，和 Ctrl+点击一致）
+      if (range) {
+        const anchor = selectedId ?? id
+        const from = visible.findIndex((message) => message.id === anchor)
+        const to = visible.findIndex((message) => message.id === id)
+        if (from === -1 || to === -1) {
+          setSelectedIds([id])
+          setSelectedId(id)
+          return
+        }
+        const [start, end] = from <= to ? [from, to] : [to, from]
+        setSelectedIds(visible.slice(start, end + 1).map((message) => message.id))
+        setSelectedId(id)
+        return
+      }
       if (!additive) {
         setSelectedIds([id])
         setSelectedId(id)
@@ -664,8 +694,27 @@ export default function App() {
       setSelectedIds(next)
       setSelectedId(has ? (next[next.length - 1] ?? null) : id)
     },
-    [markRead, selectedIds]
+    [markRead, selectedId, selectedIds, visible]
   )
+
+  // Shift+U / 右键「全部标为已读」：一次 IPC 批量把当前列表里未读的标掉
+  const markAllRead = useCallback(() => {
+    const ids = baseMessages.filter((message) => message.unread).map((message) => message.id)
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
+    const patch = (list: Message[]) =>
+      list.map((message) => (idSet.has(message.id) ? { ...message, unread: false } : message))
+    setItems(patch)
+    setSearchResults(patch)
+    // 乐观清掉当前箱角标；搜索态是跨文件夹的，等 unreadTick 回读
+    if (!searchActive) setUnreadCounts((current) => ({ ...current, [folderId]: 0 }))
+    if (live) {
+      void mail.messages
+        .setRead(ids, true)
+        .then(() => setUnreadTick((tick) => tick + 1))
+        .catch(() => undefined)
+    }
+  }, [baseMessages, live, searchActive, folderId])
 
   // Ctrl+A：选中整个当前文件夹（不受过滤页签限制），并切回「全部」让每一行都可见地变蓝
   const selectAll = useCallback(() => {
@@ -677,11 +726,29 @@ export default function App() {
     )
   }, [baseMessages])
 
-  // 键盘移动不自动已读，停留 1.5s 才回写（PRD FR-03.4）；多选态（Ctrl+A/Ctrl+点击）不触发
+  // 键盘移动不自动已读，停留 1.5s 才回写（PRD FR-03.4）；多选态（Ctrl+A/Ctrl+点击）不触发。
+  // 自动已读只对「这一次选中的邮件」生效一次：右键「标为未读」会把 unread 翻回 true，
+  // 不能让同一个 selectedId 再触发一轮，否则用户刚标的未读 1.5s 后又被改回已读（实测反馈）。
   useEffect(() => {
-    if (!selectedId || selectedIds.length > 1 || selected?.unread !== true) return
-    const timer = window.setTimeout(() => markRead(selectedId), 1500)
-    return () => window.clearTimeout(timer)
+    if (!selectedId) {
+      autoReadRef.current = null
+      return
+    }
+    if (autoReadRef.current === selectedId) return
+    // 这一次选中只处理一次：选中时是已读（哪怕之后右键标为未读）都不再排自动已读，
+    // 否则「标为未读」会被 1.5s 后的定时器立刻改回已读
+    autoReadRef.current = selectedId
+    if (selectedIds.length > 1 || selected?.unread !== true) return
+    autoReadTimer.current = window.setTimeout(() => {
+      autoReadTimer.current = null
+      markRead(selectedId)
+    }, 1500)
+    return () => {
+      if (autoReadTimer.current) {
+        window.clearTimeout(autoReadTimer.current)
+        autoReadTimer.current = null
+      }
+    }
   }, [selectedId, selectedIds.length, selected?.unread, markRead])
 
   const moveSelection = useCallback(
@@ -717,6 +784,7 @@ export default function App() {
       enter: () => selectedId && markRead(selectedId),
       u: () => selectedId && markRead(selectedId, false),
       s: () => selectedId && toggleStar(selectedId),
+      "shift+u": () => markAllRead(),
       delete: () => deleteSelected(),
       // Ctrl+A 只在已有选中时全选整箱（没有选中时什么也不做，但要吃掉浏览器的「全选文本」）
       "ctrl+a": () => selectAll(),
@@ -861,6 +929,7 @@ export default function App() {
               setSelectedIds((current) => (current.includes(id) ? current : [id]))
             }}
             onSetRead={markRead}
+            onMarkAllRead={markAllRead}
             onMove={moveMessage}
             moveTargets={moveTargets}
             onDelete={deleteMessage}
@@ -904,6 +973,19 @@ export default function App() {
             remoteImages={remoteImages}
             onToggleStar={() => selectedId && toggleStar(selectedId)}
             onToggleUnread={() => selectedId && markRead(selectedId, false)}
+            onSetRead={markRead}
+            onMarkAllRead={markAllRead}
+            junkFolderId={junkFolderId}
+            onRestore={inTrash ? restoreMessage : undefined}
+            onNavigate={(target: Message) => {
+              // 抽屉里跳到别的文件夹的邮件：切箱、清搜索、选中并标已读
+              setFolderId(target.folderId)
+              setSearchQuery("")
+              setActiveLabel(null)
+              setSelectedId(target.id)
+              setSelectedIds([target.id])
+              markRead(target.id)
+            }}
             moveTargets={moveTargets}
             onMove={(targetFolderId) => selectedId && moveMessage(selectedId, targetFolderId)}
             onDelete={() => selectedId && deleteMessage(selectedId)}
@@ -933,6 +1015,8 @@ export default function App() {
         onShowTimeNonCompactChange={setShowTimeNonCompact}
         folderCount={folderCount}
         onFolderCountChange={setFolderCount}
+        closeToTray={closeToTray}
+        onCloseToTrayChange={setCloseToTray}
         remoteImages={remoteImages}
         onRemoteImagesChange={setRemoteImages}
         accounts={accounts}

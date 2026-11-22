@@ -47,6 +47,8 @@ interface SettingsDialogProps {
   onShowTimeNonCompactChange: (value: boolean) => void
   folderCount: "unread" | "total"
   onFolderCountChange: (value: "unread" | "total") => void
+  closeToTray: boolean
+  onCloseToTrayChange: (value: boolean) => void
   remoteImages: boolean
   onRemoteImagesChange: (value: boolean) => void
   accounts: Account[]
@@ -138,6 +140,8 @@ export function SettingsDialog({
   onShowTimeNonCompactChange,
   folderCount,
   onFolderCountChange,
+  closeToTray,
+  onCloseToTrayChange,
   remoteImages,
   onRemoteImagesChange,
   accounts,
@@ -263,6 +267,9 @@ export function SettingsDialog({
                     onChange={onFolderCountChange}
                   />
                 </Row>
+                <Row label="关闭窗口时最小化到托盘" hint="关闭后点窗口的 × 会退出应用；开启后只隐藏窗口，从托盘菜单「退出」才真正退出">
+                  <Switch checked={closeToTray} onChange={onCloseToTrayChange} />
+                </Row>
                 <Row label="默认显示远程图片" hint="关闭后，邮件里的外链图片先拦截，阅读时可手动放行">
                   <Switch checked={remoteImages} onChange={onRemoteImagesChange} />
                 </Row>
@@ -311,10 +318,9 @@ export function SettingsDialog({
             {section === "sync" ? (
               <>
                 <div className="mt-1 space-y-2 rounded-lg bg-muted/60 px-3 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
-                  <div>连接账户后会无条件把该邮箱里的全部邮件下载到本地：首屏先同步最近 200 封，其余在后台按批补齐，一直补到服务端最后一封，不做策略截断，也不是按需分页。</div>
-                  <div>只同步邮件头部，正文仍在点开时加载；列表一次载入整个文件夹，不再滚动分页。</div>
-                  <div>同步间隔：服务器支持 IDLE 时实时推送；QQ 等不主动推送的服务商由 60 秒兜底轮询补齐。</div>
-                  <div>后台补全历史时，侧栏底部会显示「补全历史 已同步 / 总数」。</div>
+                  <div>连接账户后会无条件把该邮箱里的全部邮件下载到本地：首屏先同步最近 200 封，其余在后台按批补齐，一直补到服务端最后一封</div>
+                  <div>只同步邮件头部，正文仍在点开时加载；列表一次载入整个文件夹，不再滚动分页</div>
+                  <div>同步间隔：服务器支持 IDLE 时实时推送</div>
                 </div>
               </>
             ) : null}

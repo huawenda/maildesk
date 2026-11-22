@@ -12,7 +12,8 @@ export const DEFAULT_SETTINGS: Settings = {
   groupHeadersNonCompact: true,
   stickyGroupHeaders: true,
   showTimeNonCompact: true,
-  folderCount: "unread"
+  folderCount: "unread",
+  closeToTray: false
 }
 
 export function getSettings(): Settings {

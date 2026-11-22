@@ -27,7 +27,9 @@ const api: MailApi = {
       ipcRenderer.invoke(CH.attachmentsSave, { messageId, attachmentId }),
     saveAll: (messageId) => ipcRenderer.invoke(CH.attachmentsSaveAll, messageId),
     preview: (messageId, attachmentId) =>
-      ipcRenderer.invoke(CH.attachmentsPreview, { messageId, attachmentId })
+      ipcRenderer.invoke(CH.attachmentsPreview, { messageId, attachmentId }),
+    open: (messageId, attachmentId) =>
+      ipcRenderer.invoke(CH.attachmentsOpen, { messageId, attachmentId })
   },
   search: {
     query: (q, opts) => ipcRenderer.invoke(CH.searchQuery, { q, opts })

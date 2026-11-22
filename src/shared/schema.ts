@@ -32,7 +32,8 @@ export const settingsSchema = z.object({
   groupHeadersNonCompact: z.boolean(),
   stickyGroupHeaders: z.boolean(),
   showTimeNonCompact: z.boolean(),
-  folderCount: z.enum(["unread", "total"])
+  folderCount: z.enum(["unread", "total"]),
+  closeToTray: z.boolean()
 })
 
 export const settingsPatchSchema = settingsSchema.partial()

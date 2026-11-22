@@ -100,9 +100,14 @@ interface HtmlBodyProps {
   fontSize?: number
   /** 设置里的「默认显示远程图片」；不传时按放行处理 */
   remoteImages?: boolean
+  /** iframe 里右键时回调页面坐标（正文区右键菜单用） */
+  onContextMenu?: (x: number, y: number) => void
 }
 
-export function HtmlBody({ html, fontSize = 14, remoteImages }: HtmlBodyProps) {
+export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: HtmlBodyProps) {
+  // 用 ref 让 handleLoad 里挂的监听始终拿到最新的回调
+  const contextMenuRef = useRef(onContextMenu)
+  contextMenuRef.current = onContextMenu
   const [allowed, setAllowed] = useState(remoteImages ?? true)
   const [height, setHeight] = useState(160)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
@@ -130,6 +135,16 @@ export function HtmlBody({ html, fontSize = 14, remoteImages }: HtmlBodyProps) {
     const frame = frameRef.current
     const doc = frame?.contentDocument
     if (!frame || !doc) return
+
+    // iframe 里的右键不会冒泡到父文档：同源（sandbox allow-same-origin）下直接给它的 document 挂监听，
+    // 换算成页面坐标交给正文区，打开和列表同一套右键菜单
+    doc.addEventListener("contextmenu", (event: MouseEvent) => {
+      const handler = contextMenuRef.current
+      if (!handler) return
+      event.preventDefault()
+      const rect = frame.getBoundingClientRect()
+      handler(rect.left + event.clientX, rect.top + event.clientY)
+    })
 
     const measure = () => {
       // 邮件多是 600px 定宽表格，窗口窄了右侧会被裁掉：按比例整体缩放（不放大）。

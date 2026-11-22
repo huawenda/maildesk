@@ -15,7 +15,8 @@ function normalize(event: KeyboardEvent): string {
   const parts: string[] = []
   if (event.ctrlKey || event.metaKey) parts.push("ctrl")
   if (event.altKey) parts.push("alt")
-  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key.toLowerCase()
+  if (event.shiftKey) parts.push("shift")
+  const key = event.key.toLowerCase()
   parts.push(key)
   return parts.join("+")
 }

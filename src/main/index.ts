@@ -1,8 +1,10 @@
-import { app, BrowserWindow, Menu, nativeTheme, session, shell } from "electron"
+import { app, BrowserWindow, Menu, nativeTheme, screen, session, shell } from "electron"
 import { join } from "node:path"
 import { writeFile } from "node:fs/promises"
+import { readFileSync, writeFileSync } from "node:fs"
 import { CH } from "@shared/channels"
 import { closeDb, openDb } from "./db"
+import { getSettings } from "./db/settings"
 import { registerIpc } from "./ipc"
 import { initLogging } from "./log"
 import { runSelfTest } from "./selftest"
@@ -11,6 +13,12 @@ import { createTray, destroyTray, testNotify } from "./tray"
 
 const isDev = !app.isPackaged
 const CAPTURE_PATH = process.env.MAILDESK_CAPTURE
+
+// 「关闭到托盘」时窗口只是 hide，真正退出（托盘菜单 / app.quit）要先放行 close
+let quitting = false
+app.on("before-quit", () => {
+  quitting = true
+})
 
 // 免安装绿色版：electron-builder 的 portable 目标会注入 PORTABLE_EXECUTABLE_DIR，
 // 把 userData（SQLite 库、日志、localStorage）收进 exe 同目录，拷走整个文件夹即可迁移/清理，
@@ -31,10 +39,66 @@ if (!app.requestSingleInstanceLock()) {
   })
 }
 
+/** 窗口位置/大小/最大化存在 userData 下，启动时恢复（越界时夹回当前显示器工作区） */
+interface WindowState {
+  x?: number
+  y?: number
+  width: number
+  height: number
+  maximized?: boolean
+}
+
+const windowStateFile = () => join(app.getPath("userData"), "window-state.json")
+const DEFAULT_BOUNDS: WindowState = { width: 1320, height: 840 }
+
+function readWindowState(): WindowState {
+  try {
+    const parsed = JSON.parse(readFileSync(windowStateFile(), "utf8")) as Partial<WindowState>
+    return {
+      x: typeof parsed.x === "number" ? parsed.x : undefined,
+      y: typeof parsed.y === "number" ? parsed.y : undefined,
+      width: typeof parsed.width === "number" ? parsed.width : DEFAULT_BOUNDS.width,
+      height: typeof parsed.height === "number" ? parsed.height : DEFAULT_BOUNDS.height,
+      maximized: parsed.maximized === true
+    }
+  } catch {
+    return DEFAULT_BOUNDS
+  }
+}
+
+function saveWindowState(win: BrowserWindow): void {
+  if (win.isDestroyed()) return
+  // 最大化时 getBounds 是屏幕尺寸，要存 getNormalBounds，取消最大化后才会回到原来的大小
+  const bounds = win.isMaximized() ? win.getNormalBounds() : win.getBounds()
+  try {
+    writeFileSync(
+      windowStateFile(),
+      JSON.stringify({ ...bounds, maximized: win.isMaximized() } satisfies WindowState)
+    )
+  } catch {
+    /* 磁盘只读等场景忽略，下次启动用默认值 */
+  }
+}
+
 function createWindow(): BrowserWindow {
+  const saved = readWindowState()
+  // 显示器拔掉/分辨率变化后旧坐标可能落到屏幕外，先按工作区夹一次
+  const area = screen.getDisplayMatching({
+    x: saved.x ?? 0,
+    y: saved.y ?? 0,
+    width: saved.width,
+    height: saved.height
+  }).workArea
+  const width = Math.min(Math.max(saved.width, 1000), area.width)
+  const height = Math.min(Math.max(saved.height, 640), area.height)
+  const x = saved.x === undefined ? undefined : Math.min(Math.max(saved.x, area.x), area.x + area.width - width)
+  const y = saved.y === undefined ? undefined : Math.min(Math.max(saved.y, area.y), area.y + area.height - height)
+
   const win = new BrowserWindow({
-    width: 1320,
-    height: 840,
+    width,
+    height,
+    x,
+    y,
     minWidth: 1000,
     minHeight: 640,
     show: false,
@@ -52,7 +116,10 @@ function createWindow(): BrowserWindow {
     }
   })
 
-  win.on("ready-to-show", () => win.show())
+  win.on("ready-to-show", () => {
+    if (saved.maximized) win.maximize()
+    win.show()
+  })
 
   // 自绘标题栏需要知道最大化状态来换图标。
   const pushWindowState = () => {
@@ -60,6 +127,35 @@ function createWindow(): BrowserWindow {
   }
   win.on("maximize", pushWindowState)
   win.on("unmaximize", pushWindowState)
+
+  // 记住窗口大小/位置：拖动和缩放节流 400ms 存一次，最大化状态与关闭时立即存
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  const scheduleSave = () => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      saveTimer = null
+      saveWindowState(win)
+    }, 400)
+  }
+  win.on("resize", scheduleSave)
+  win.on("move", scheduleSave)
+  win.on("maximize", () => saveWindowState(win))
+  win.on("unmaximize", () => saveWindowState(win))
+  win.on("close", (event) => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveWindowState(win)
+    // 设置里开了「关闭时最小化到托盘」就只隐藏窗口；托盘菜单的「退出」会先置 quitting
+    if (quitting) return
+    let toTray = false
+    try {
+      toTray = getSettings().closeToTray
+    } catch {
+      toTray = false
+    }
+    if (!toTray) return
+    event.preventDefault()
+    win.hide()
+  })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) void shell.openExternal(url)

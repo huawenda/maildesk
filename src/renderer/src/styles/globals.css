@@ -169,3 +169,40 @@
   height: 0;
 }
 
+/* 右侧抽屉（发件人邮件列表）的出入场：只动 transform / opacity，120–160ms */
+@keyframes maildesk-drawer-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes maildesk-drawer-out {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+
+.drawer-in {
+  animation: maildesk-drawer-in 160ms ease-out;
+}
+
+.drawer-out {
+  animation: maildesk-drawer-out 120ms ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer-in,
+  .drawer-out {
+    animation: none;
+  }
+}

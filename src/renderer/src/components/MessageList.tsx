@@ -5,31 +5,16 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronRight,
-  FolderInput,
   Inbox,
   Loader2,
-  Mail,
-  MailOpen,
   Paperclip,
-  ShieldAlert,
-  Star,
-  Trash2,
-  Undo2
+  Star
 } from "lucide-react"
 import { avatarColor, formatCompactTime, formatListTime, initials } from "@/lib/format"
 import type { Message } from "@/lib/mock"
+import { MessageContextMenu } from "@/components/MessageContextMenu"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuShortcut,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger
-} from "@/components/ui/context-menu"
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
 import type { Density } from "@/App"
 
@@ -222,13 +207,15 @@ interface MessageListProps {
   selectedId: string | null
   /** 多选集合（Ctrl+点击 / Ctrl+A）；selectedId 是其中的「活动行」，决定阅读器与滚动定位 */
   selectedIds?: string[]
-  onSelect: (id: string, additive: boolean) => void
+  onSelect: (id: string, additive: boolean, range?: boolean) => void
   /** 星标列直接切换（紧凑视图每行都显示星标） */
   onToggleStar?: (id: string) => void
   /** 右键菜单：只高亮该行，不标已读、不打开正文 */
   onContextSelect?: (id: string) => void
   /** 右键菜单：标为已读 / 未读 */
   onSetRead?: (id: string, read: boolean) => void
+  /** 右键菜单：把整个当前列表标为已读（Shift+U 同效） */
+  onMarkAllRead?: () => void
   /** 右键菜单：移动到指定文件夹 */
   onMove?: (id: string, folderId: string) => void
   moveTargets?: { id: string; label: string }[]
@@ -273,6 +260,7 @@ export function MessageList({
   onToggleStar,
   onContextSelect,
   onSetRead,
+  onMarkAllRead,
   onMove,
   moveTargets,
   onDelete,
@@ -720,6 +708,7 @@ export function MessageList({
                       junkFolderId={junkFolderId}
                       permanentDelete={permanentDelete}
                       onSetRead={onSetRead}
+                      onMarkAllRead={onMarkAllRead}
                       onToggleStar={onToggleStar}
                       onMove={onMove}
                       onDelete={onDelete}
@@ -825,7 +814,7 @@ interface RowProps {
   showTime: boolean
   /** 紧凑表格最后一列的文件夹名（仅搜索时给） */
   folderName?: string
-  onSelect: (id: string, additive: boolean) => void
+  onSelect: (id: string, additive: boolean, range?: boolean) => void
   onToggleStar?: (id: string) => void
   /** 紧凑模式点圆点：read=true 标为已读 */
   onSetRead?: (id: string, read: boolean) => void
@@ -853,7 +842,7 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
         id={`msg-${message.id}`}
         role="option"
         aria-selected={selected}
-        onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey)}
+        onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey, event.shiftKey)}
         className={cn(
           "group flex h-full w-full cursor-default select-none items-center border-b border-table-line text-left",
           selected ? "bg-primary" : "hover:bg-foreground/[0.06]"
@@ -981,7 +970,7 @@ const MessageRow = memo(function MessageRow({ message, selected, density, cols, 
       id={`msg-${message.id}`}
       role="option"
       aria-selected={selected}
-      onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey)}
+      onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey, event.shiftKey)}
       className={cn(
         "group flex h-full w-full cursor-default select-none items-center gap-3 rounded-lg pl-2 pr-3 text-left",
         selected ? "bg-primary" : "hover:bg-foreground/[0.06]"
@@ -1084,77 +1073,6 @@ function SkeletonRows({ rowHeight, compact }: { rowHeight: number; compact: bool
         </div>
       ))}
     </div>
-  )
-}
-
-/** 邮件行右键菜单：对齐 Foxmail 的「标为未读 / 星标置顶 / 标为垃圾邮件 / 移动到… / 删除」 */
-function MessageContextMenu({
-  message,
-  moveTargets,
-  junkFolderId,
-  permanentDelete,
-  onSetRead,
-  onToggleStar,
-  onMove,
-  onDelete,
-  onRestore
-}: {
-  message: Message
-  moveTargets?: { id: string; label: string }[]
-  junkFolderId?: string
-  permanentDelete?: boolean
-  onSetRead?: (id: string, read: boolean) => void
-  onToggleStar?: (id: string) => void
-  onMove?: (id: string, folderId: string) => void
-  onDelete?: (id: string) => void
-  onRestore?: (id: string) => void
-}) {
-  return (
-    <ContextMenuContent>
-      <ContextMenuItem onSelect={() => onSetRead?.(message.id, message.unread)}>
-        {message.unread ? <MailOpen className="size-4" /> : <Mail className="size-4" />}
-        {message.unread ? "标为已读" : "标为未读"}
-        {message.unread ? null : <ContextMenuShortcut>U</ContextMenuShortcut>}
-      </ContextMenuItem>
-      <ContextMenuItem onSelect={() => onToggleStar?.(message.id)}>
-        <Star className="size-4" fill={message.starred ? "currentColor" : "none"} />
-        {message.starred ? "取消星标" : "星标置顶"}
-        <ContextMenuShortcut>S</ContextMenuShortcut>
-      </ContextMenuItem>
-      {junkFolderId ? (
-        <ContextMenuItem onSelect={() => onMove?.(message.id, junkFolderId)}>
-          <ShieldAlert className="size-4" />
-          标为垃圾邮件
-        </ContextMenuItem>
-      ) : null}
-      {moveTargets && moveTargets.length > 0 && onMove ? (
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>
-            <FolderInput className="size-4" />
-            移动到…
-          </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="max-h-72 overflow-y-auto">
-            {moveTargets.map((folder) => (
-              <ContextMenuItem key={folder.id} onSelect={() => onMove(message.id, folder.id)}>
-                <span className="truncate">{folder.label}</span>
-              </ContextMenuItem>
-            ))}
-          </ContextMenuSubContent>
-        </ContextMenuSub>
-      ) : null}
-      {permanentDelete && onRestore ? (
-        <ContextMenuItem onSelect={() => onRestore(message.id)}>
-          <Undo2 className="size-4" />
-          复原
-        </ContextMenuItem>
-      ) : null}
-      <ContextMenuSeparator />
-      <ContextMenuItem variant="destructive" onSelect={() => onDelete?.(message.id)}>
-        <Trash2 className="size-4" />
-        {permanentDelete ? "永久删除" : "删除"}
-        <ContextMenuShortcut>Delete</ContextMenuShortcut>
-      </ContextMenuItem>
-    </ContextMenuContent>
   )
 }
 

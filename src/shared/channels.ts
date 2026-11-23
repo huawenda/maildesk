@@ -3,6 +3,7 @@ export const CH = {
   appInfo: "app:info",
   appOpenExternal: "app:open-external",
   appChrome: "app:chrome",
+  appZoom: "app:zoom",
 
   windowMinimize: "window:minimize",
   windowToggleMaximize: "window:toggle-maximize",
@@ -17,6 +18,8 @@ export const CH = {
   accountsRemove: "accounts:remove",
 
   foldersList: "folders:list",
+  foldersScan: "folders:scan",
+  foldersSetEnabled: "folders:set-enabled",
 
   messagesList: "messages:list",
   messagesGet: "messages:get",

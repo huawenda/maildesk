@@ -247,6 +247,9 @@ interface MessageListProps {
   highlightScope?: SearchScope
   /** 一个账户都没有：空状态要给「添加账户」的引导，而不是说文件夹为空 */
   noAccounts?: boolean
+  /** 正在连接/下载：首屏没有邮件时显示同步进度，而不是「这个文件夹还是空的」 */
+  syncing?: boolean
+  syncHint?: string
   filter: ListFilter
   onFilterChange: (filter: ListFilter) => void
   loading: boolean
@@ -280,6 +283,8 @@ export function MessageList({
   resetKey,
   folderNameOf,
   noAccounts = false,
+  syncing = false,
+  syncHint,
   highlightQuery,
   highlightScope,
   filter,
@@ -637,10 +642,10 @@ export function MessageList({
         className={cn("scrollbar-overlay min-h-0 flex-1 overflow-y-auto pb-2", compact ? "px-0" : "px-2")}
       >
         {/* 刷新已有数据时不换成骨架屏：骨架会把滚动容器内容清空，滚动位置随之归零 */}
-        {loading && messages.length === 0 ? (
+        {loading && messages.length === 0 && !syncing ? (
           <SkeletonRows rowHeight={rowHeight} compact={compact} />
         ) : messages.length === 0 ? (
-          <EmptyList filter={filter} searching={searching} noAccounts={noAccounts} />
+          <EmptyList filter={filter} searching={searching} noAccounts={noAccounts} syncing={syncing} syncHint={syncHint} />
         ) : (
           <>
             {/* 吸顶组头条：高度 0 的 sticky 容器 + 绝对定位的实心条，不参与滚动高度 */}
@@ -1179,12 +1184,26 @@ function SkeletonRows({ rowHeight, compact }: { rowHeight: number; compact: bool
 function EmptyList({
   filter,
   searching,
-  noAccounts
+  noAccounts,
+  syncing = false,
+  syncHint
 }: {
   filter: ListFilter
   searching: boolean
   noAccounts: boolean
+  syncing?: boolean
+  syncHint?: string
 }) {
+  if (syncing && !searching && filter === "all") {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
+        <Loader2 className="size-8 animate-spin text-primary/70" />
+        <span className="text-[13px]">首次同步进行中</span>
+        {syncHint ? <span className="text-[12px] opacity-80 tabular-nums">{syncHint}</span> : null}
+        <span className="text-[11.5px] opacity-60">首次同步会把整个邮箱下载到本地，可以先做别的</span>
+      </div>
+    )
+  }
   if (noAccounts) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">

@@ -51,18 +51,26 @@ const cspFor = (allowRemote: boolean) =>
   ].join("; ")
 
 /**
- * 邮件是按「浅色印刷品」设计的：绝大多数正文用深色字配白/浅灰底。
- * 强行反色会毁掉品牌色与对比度（招商银行那类深色字 + 浅色底板只剩一片深灰），
- * 所以正文一律按浅色文档渲染，保留邮件原始配色，只是把画布固定成白色。
+ * 文本优先的正文样式：不还原「印刷品」原版式，也不再整页缩放。
+ * 正文按阅读器宽度回流，字号有下限；图片与表格最多铺满阅读区，
+ * 仍然超宽的定宽表格交给 iframe 自身横向滚动，而不是把整封邮件缩成一张小图。
  */
-const baseCss = (fontSize: number) => `
-  html, body { margin: 0; padding: 0; height: auto !important; overflow: hidden; background: #ffffff; color-scheme: light; }
-  body { font: ${fontSize + 0.5}px/1.75 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color: #1f1f1f; word-break: break-word; }
-  img { max-width: 100%; height: auto; }
-  a { color: #1a5fd0; text-decoration: none; }
+const baseCss = (fontSize: number, dark: boolean) => `
+  html, body { margin: 0; padding: 0; height: auto !important; background: transparent; color-scheme: ${dark ? "dark" : "light"}; }
+  body { font: ${fontSize}px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color: ${dark ? "#E8E8E8" : "#242424"}; word-break: break-word; }
+  img { max-width: 100% !important; height: auto; }
+  a { color: ${dark ? "#8AB4F8" : "#1a5fd0"}; text-decoration: none; }
   a:hover { text-decoration: underline; }
   table { max-width: 100%; }
-  blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid #d8d8d8; color: #6b6b6b; }
+  /* Excel/Outlook 粘贴的数据表：按浅色「纸」渲染，保留 Excel 的边框、底纹、
+     字体与对齐；深色主题下也不会把无底色单元格变成黑底白字。 */
+  table[data-maildesk-table] {
+    border-collapse: collapse;
+    background-color: #ffffff;
+    color: #202020;
+  }
+  td, th { overflow-wrap: break-word; }
+  blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid ${dark ? "#3a3a3a" : "#d8d8d8"}; color: ${dark ? "#a6a6a6" : "#6b6b6b"}; }
   pre { white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; }
 `
 
@@ -76,6 +84,16 @@ function prepare(raw: string, allowRemote: boolean): Prepared {
   const clean = DOMPurify.sanitize(raw, { FORBID_TAGS, FORBID_ATTR })
   const doc = new DOMParser().parseFromString(clean, "text/html")
   let blocked = 0
+  // 标记「数据表」：带 border 属性、或单元格自己写了边框样式。只给这类表铺白底，
+  // 邮件布局用的隐形表格不动，避免整封邮件又变回白纸卡片。
+  doc.querySelectorAll("table").forEach((table) => {
+    const borderAttr = table.getAttribute("border")
+    const hasBorder = borderAttr !== null && borderAttr.trim() !== "" && borderAttr.trim() !== "0"
+    const cellBorder = Array.from(table.querySelectorAll("td, th")).some(
+      (cell) => cell.hasAttribute("border") || /border/i.test(cell.getAttribute("style") ?? "")
+    )
+    if (hasBorder || cellBorder) table.setAttribute("data-maildesk-table", "1")
+  })
   doc.querySelectorAll("img").forEach((img) => {
     const src = img.getAttribute("src") ?? ""
     // cid: 内嵌图片的二进制不落库，这里先换成占位，避免一整排碎图标
@@ -94,9 +112,43 @@ function prepare(raw: string, allowRemote: boolean): Prepared {
   return { html: doc.body.innerHTML, blocked }
 }
 
+type Rgba = [number, number, number, number]
+
+/** 同时认 hex 与 rgb()/rgba()（--card 是 hex，computed style 是 rgb）。 */
+function parseColor(value: string): Rgba {
+  const text = value.trim()
+  const hex = text.match(/^#([0-9a-f]{6})$/i)
+  if (hex) {
+    const n = Number.parseInt(hex[1], 16)
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255, 1]
+  }
+  const match = text.match(/rgba?\(([^)]+)\)/)
+  if (match) {
+    const parts = match[1].split(/[,\s/]+/).filter(Boolean).map(Number)
+    return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0, parts[3] ?? 1]
+  }
+  return [0, 0, 0, 0]
+}
+
+function luminance([r, g, b]: Rgba): number {
+  const channel = (value: number) => {
+    const c = value / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+function contrastRatio(a: Rgba, b: Rgba): number {
+  const la = luminance(a)
+  const lb = luminance(b)
+  const high = Math.max(la, lb)
+  const low = Math.min(la, lb)
+  return (high + 0.05) / (low + 0.05)
+}
+
 interface HtmlBodyProps {
   html: string
-  /** 正文字号，来自设置（HTML 正文比纯文本 +0.5px 补齐渲染差异） */
+  /** 正文字号，来自设置（HTML 正文与纯文本共用） */
   fontSize?: number
   /** 设置里的「默认显示远程图片」；不传时按放行处理 */
   remoteImages?: boolean
@@ -110,8 +162,17 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
   contextMenuRef.current = onContextMenu
   const [allowed, setAllowed] = useState(remoteImages ?? true)
   const [height, setHeight] = useState(160)
+  // 主题类挂在 <html> 上：邮件正文要跟着换底色/字色，否则深色下深字直接消失
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"))
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
+
+  useEffect(() => {
+    const root = document.documentElement
+    const observer = new MutationObserver(() => setDark(root.classList.contains("dark")))
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] })
+    return () => observer.disconnect()
+  }, [])
 
   // 设置变化即时生效：关掉开关后当前这封也会立刻拦截图片
   useEffect(() => {
@@ -122,8 +183,8 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
 
   const document_ = useMemo(
     () =>
-      `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(allowed)}"><style>${baseCss(fontSize)}</style></head><body>${prepared.html}</body></html>`,
-    [prepared.html, fontSize, allowed]
+      `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(allowed)}"><style>${baseCss(fontSize, dark)}</style></head><body>${prepared.html}</body></html>`,
+    [prepared.html, fontSize, dark, allowed]
   )
 
   useEffect(() => {
@@ -146,30 +207,57 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
       handler(rect.left + event.clientX, rect.top + event.clientY)
     })
 
-    const measure = () => {
-      // 邮件多是 600px 定宽表格，窗口窄了右侧会被裁掉：按比例整体缩放（不放大）。
-      // 关键：必须把 zoom 临时归 1 再读 scrollWidth。带着旧缩放读出来的宽度已经被
-      // 缩过一遍，窗口恢复原始尺寸时比例会一直算成「刚好」，邮件永远停在缩小状态
-      // （用户实测：压缩窗口再恢复，图片/正文回不到原始大小）。
-      const width = frame.clientWidth
-      if (width) {
-        const current = Number.parseFloat(doc.documentElement.style.zoom || "1")
-        doc.documentElement.style.zoom = "1"
-        const naturalWidth = Math.max(doc.body.scrollWidth, doc.documentElement.scrollWidth)
-        doc.documentElement.style.zoom = String(current)
-        const zoom = Math.min(1, Math.max(0.6, width / Math.max(1, naturalWidth)))
-        if (Math.abs(current - zoom) > 0.01) doc.documentElement.style.zoom = String(zoom)
-      }
+    // 字体与源邮件一致：不改字号、字重、字体族，只处理「深字压深底 / 白字压白底」这种
+    // 看不清的极端情况（见下方对比度兜底）
+    const canvas = parseColor(getComputedStyle(document.documentElement).getPropertyValue("--card") || "")
+    const fallbackCanvas: Rgba = dark ? [18, 18, 18, 1] : [240, 240, 240, 1]
+    const page: Rgba = canvas[3] > 0 ? canvas : fallbackCanvas
 
-      // 用内容实际高度，不用 documentElement.scrollHeight：后者不可能小于 iframe 当前高度，会只增不减
+    const normalize = () => {
+      const nodes = doc.querySelectorAll<HTMLElement>("body, body *")
+      for (const el of nodes) {
+        const directText = Array.from(el.childNodes).some(
+          (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim().length > 0
+        )
+        if (!directText) continue
+        const style = getComputedStyle(el)
+
+        // 有效背景：往上找第一个真正有底色的祖先。遇到邮件自带的版式底图就直接放弃改色，
+        // 那种情况颜色是按底图设计的，强行反转会把文字变成看不见的浅色。
+        let node: HTMLElement | null = el
+        let background: Rgba | null = null
+        while (node) {
+          const computed = getComputedStyle(node)
+          if (computed.backgroundImage && computed.backgroundImage !== "none") {
+            background = null
+            node = null
+            break
+          }
+          const color = parseColor(computed.backgroundColor)
+          if (color[3] > 0.05) {
+            background = color
+            break
+          }
+          node = node.parentElement
+        }
+        if (node === null) continue
+        const background_ = background ?? page
+        if (contrastRatio(parseColor(style.color), background_) < 3) {
+          el.style.color = luminance(background_) > 0.45 ? "#242424" : "#E8E8E8"
+        }
+      }
+    }
+    normalize()
+
+    // 只量内容高度，不再按内容宽度缩放整页（缩放会把整封邮件变成一张小图）
+    const measure = () => {
       const content = Math.max(doc.body.getBoundingClientRect().height, doc.documentElement.scrollHeight)
       const next = Math.max(80, Math.ceil(content))
       setHeight((value) => (Math.abs(value - next) > 1 ? next : value))
     }
+
     // 失效图片：Chrome 默认画碎图图标，原邮件（QQ 等）走图片代理 + 直接隐藏。
-    // 追踪像素（0×0 / 1×1，常见实现是返回 1 字节的“图片”）直接移除；
-    // 有正常声明尺寸的失败图保留尺寸，换成浅灰占位 div——不能只删 src，
-    // 留下一个空的 <img> 浏览器照样会画碎图图标（实测）。
+    // 追踪像素（0×0 / 1×1）直接移除；有正常声明尺寸的失败图保留尺寸换成浅灰占位。
     const neutralize = (img: HTMLImageElement) => {
       const w = Number(img.getAttribute("width") ?? 0)
       const h = Number(img.getAttribute("height") ?? 0)
@@ -182,7 +270,7 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
       box.style.cssText =
         `display:flex;align-items:center;justify-content:center;` +
         `width:${w}px;height:${h}px;max-width:100%;box-sizing:border-box;` +
-        `background:#f2f2f2;border-radius:6px;color:#8a8a8a;font-size:12px;`
+        `background:${dark ? "#242424" : "#f2f2f2"};border-radius:6px;color:${dark ? "#8a8a8a" : "#8a8a8a"};font-size:12px;`
       img.replaceWith(box)
     }
     doc.querySelectorAll("img").forEach((img) => {
@@ -207,9 +295,13 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
         toggle.setAttribute("role", "button")
         toggle.textContent = label
         toggle.style.cssText =
-          "margin:12px 0;padding:6px 10px;border:1px solid #d8d8d8;border-radius:8px;" +
-          "background:#f7f7f7;color:#5f5f5f;font:12px/1.5 -apple-system,'Segoe UI','Microsoft YaHei',sans-serif;" +
-          "cursor:pointer;user-select:none;"
+          "margin:12px 0;padding:6px 10px;border:1px solid " +
+          (dark ? "#3a3a3a" : "#d8d8d8") +
+          ";border-radius:8px;background:" +
+          (dark ? "#1f1f1f" : "#f7f7f7") +
+          ";color:" +
+          (dark ? "#a6a6a6" : "#5f5f5f") +
+          ";font:12px/1.5 -apple-system,'Segoe UI','Microsoft YaHei',sans-serif;cursor:pointer;user-select:none;"
         node.style.display = "none"
         toggle.addEventListener("click", () => {
           const hidden = node.style.display === "none"
@@ -252,12 +344,12 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
   return (
     <div>
       {prepared.blocked > 0 && !allowed ? (
-        <div className="flex items-center gap-2 border-b border-black/10 bg-[#f5f3ef] px-3 py-1.5 text-[12px] text-[#5f5a52]">
+        <div className="flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5 text-[12px] text-muted-foreground">
           <ImageOff className="size-3.5 shrink-0" />
           <span>已拦截 {prepared.blocked} 张远程图片</span>
           <button
             onClick={() => setAllowed(true)}
-            className="ml-auto rounded px-1.5 py-0.5 text-[12px] font-medium text-[#1a5fd0] transition-colors hover:bg-[#1a5fd0]/10"
+            className="ml-auto rounded px-1.5 py-0.5 text-[12px] font-medium text-primary transition-colors hover:bg-primary/10"
           >
             显示图片
           </button>
@@ -269,7 +361,7 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
         sandbox="allow-same-origin"
         srcDoc={document_}
         onLoad={handleLoad}
-        className="block w-full border-0 bg-white"
+        className="block w-full border-0 bg-transparent"
         style={{ height }}
       />
     </div>

@@ -137,5 +137,16 @@ export const MIGRATIONS: string[] = [
   // v7：记住附件的 BODYSTRUCTURE part 号，下载时不必再 fetchOne 一次结构
   `
   ALTER TABLE attachment ADD COLUMN part TEXT;
+  `,
+  // v8：文件夹可见 / 同步开关。历史数据默认全部启用，升级后不会突然少文件夹；
+  // 新账户由 refreshFolders 决定默认值（系统文件夹开、自建文件夹关）。
+  `
+  ALTER TABLE folder ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+  `,
+  // v9：正文内嵌 cid 图片改为同步时一并下载并转 data URL。旧正文里存的是 cid 占位，
+  // 清空后由启动时的 bodyBackfillLoop 用新逻辑重新预下载。
+  `
+  UPDATE message SET body_text = NULL, body_html = NULL
+  WHERE body_html LIKE '%cid:%';
   `
 ]

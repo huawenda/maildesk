@@ -15,6 +15,7 @@ interface FolderRow {
   unread_count: number
   sort_order: number
   backfill_uid: number | null
+  enabled: number
 }
 
 const toFolder = (row: FolderRow): Folder => ({
@@ -30,7 +31,8 @@ const toFolder = (row: FolderRow): Folder => ({
   totalCount: row.total_count,
   unreadCount: row.unread_count,
   sortOrder: row.sort_order,
-  backfillUid: row.backfill_uid
+  backfillUid: row.backfill_uid,
+  enabled: row.enabled !== 0
 })
 
 const ROLE_ORDER: Record<string, number> = { inbox: 0, archive: 1, sent: 2, drafts: 3, junk: 4, trash: 5 }
@@ -94,13 +96,14 @@ export function upsertFolder(folder: Folder): void {
   const sortOrder = folder.role ? (ROLE_ORDER[folder.role] ?? 10) : 50 + folder.sortOrder
   run(
     `INSERT INTO folder (id, account_id, path, name, delimiter, role, uid_validity, uid_next,
-       last_synced_uid, total_count, unread_count, sort_order, backfill_uid)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       last_synced_uid, total_count, unread_count, sort_order, backfill_uid, enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(account_id, path) DO UPDATE SET
        name = excluded.name, delimiter = excluded.delimiter, role = excluded.role,
        uid_validity = excluded.uid_validity, uid_next = excluded.uid_next,
        total_count = excluded.total_count, unread_count = excluded.unread_count,
        sort_order = excluded.sort_order`,
+    // enabled 不在 ON CONFLICT 里更新：同步刷新文件夹不能覆盖用户的选择
     folder.id,
     folder.accountId,
     folder.path,
@@ -113,6 +116,24 @@ export function upsertFolder(folder: Folder): void {
     folder.totalCount,
     folder.unreadCount,
     sortOrder,
-    folder.backfillUid
+    folder.backfillUid,
+    folder.enabled ? 1 : 0
   )
+}
+
+/**
+ * 保存「选择文件夹」的结果：paths 里的启用，其余隐藏；收件箱始终启用。
+ * 隐藏只影响侧栏显示与后续同步，已经下载到本地的邮件保留。
+ */
+export function setFolderSelection(accountId: string, paths: string[]): void {
+  run("UPDATE folder SET enabled = 0 WHERE account_id = ?", accountId)
+  if (paths.length > 0) {
+    const placeholders = paths.map(() => "?").join(",")
+    run(
+      `UPDATE folder SET enabled = 1 WHERE account_id = ? AND path IN (${placeholders})`,
+      accountId,
+      ...paths
+    )
+  }
+  run("UPDATE folder SET enabled = 1 WHERE account_id = ? AND role = 'inbox'", accountId)
 }

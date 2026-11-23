@@ -11,7 +11,9 @@ const api: MailApi = {
     remove: (id) => ipcRenderer.invoke(CH.accountsRemove, id)
   },
   folders: {
-    list: (accountId) => ipcRenderer.invoke(CH.foldersList, accountId)
+    list: (accountId) => ipcRenderer.invoke(CH.foldersList, accountId),
+    scan: (accountId) => ipcRenderer.invoke(CH.foldersScan, accountId),
+    setEnabled: (accountId, paths) => ipcRenderer.invoke(CH.foldersSetEnabled, accountId, paths)
   },
   messages: {
     list: (folderId) => ipcRenderer.invoke(CH.messagesList, { folderId }),
@@ -71,6 +73,7 @@ const api: MailApi = {
     getInfo: () => ipcRenderer.invoke(CH.appInfo),
     openExternal: (url) => ipcRenderer.invoke(CH.appOpenExternal, url),
     setChrome: (color) => ipcRenderer.invoke(CH.appChrome, color),
+    setZoom: (factor) => ipcRenderer.invoke(CH.appZoom, factor),
     minimizeWindow: () => ipcRenderer.invoke(CH.windowMinimize),
     toggleMaximizeWindow: () => ipcRenderer.invoke(CH.windowToggleMaximize),
     closeWindow: () => ipcRenderer.invoke(CH.windowClose),

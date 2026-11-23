@@ -14,7 +14,7 @@ import {
 } from "@shared/schema"
 import type { Account, TestResult } from "@shared/types"
 import { listAccounts, createAccount, updateAccount, removeAccount } from "../db/accounts"
-import { listFolders } from "../db/folders"
+import { listFolders, setFolderSelection } from "../db/folders"
 import {
   getAttachment,
   getMessage,
@@ -38,6 +38,7 @@ import {
   markReadRemote,
   moveMessages,
   deleteMessages,
+  scanFolders,
   startAccountSync,
   stopAccountSync,
   syncNow,
@@ -121,6 +122,12 @@ export function registerIpc(): void {
     windowOf(event)?.setBackgroundColor(background)
   })
 
+  // 界面缩放：影响整个 webContents（标题栏、列表、正文 iframe 一起缩放）
+  ipcMain.handle(CH.appZoom, (event, raw: unknown) => {
+    const factor = parse(z.number().min(0.5).max(2), raw)
+    windowOf(event)?.webContents.setZoomFactor(factor)
+  })
+
   ipcMain.handle(CH.windowMinimize, (event) => windowOf(event)?.minimize())
   ipcMain.handle(CH.windowToggleMaximize, (event) => {
     const win = windowOf(event)
@@ -178,6 +185,19 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(CH.foldersList, (_event, raw: unknown) => listFolders(parse(idSchema.optional(), raw)))
+
+  // 扫描服务器文件夹（顺带写库），给「选择文件夹」弹窗用
+  ipcMain.handle(CH.foldersScan, (_event, raw: unknown) => scanFolders(parse(idSchema, raw)))
+
+  ipcMain.handle(CH.foldersSetEnabled, (_event, rawAccount: unknown, rawPaths: unknown) => {
+    const accountId = parse(idSchema, rawAccount)
+    const paths = parse(z.array(z.string().max(1024)).max(5000), rawPaths)
+    setFolderSelection(accountId, paths)
+    const folders = listFolders(accountId)
+    // 新勾选的文件夹要立刻开始同步；不阻塞弹窗返回
+    void syncNow(accountId).catch(() => undefined)
+    return folders
+  })
 
   ipcMain.handle(CH.messagesList, (_event, raw: unknown) => {
     const query = parse(listQuerySchema, raw)

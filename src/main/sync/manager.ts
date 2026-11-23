@@ -1,9 +1,9 @@
 import { BrowserWindow, shell } from "electron"
 import { CH } from "@shared/channels"
 import { existsSync } from "node:fs"
-import type { DownloadTask, SyncEvent, SyncState, SyncStatus } from "@shared/types"
+import type { DownloadTask, Folder, SyncEvent, SyncState, SyncStatus } from "@shared/types"
 import { listAccounts } from "../db/accounts"
-import { getFolder } from "../db/folders"
+import { getFolder, listFolders } from "../db/folders"
 import { getMessageLocator } from "../db/messages"
 import { SyncEngine } from "./engine"
 
@@ -61,6 +61,13 @@ export function stopAccountSync(accountId: string): void {
 export function stopSync(): void {
   for (const engine of engines.values()) engine.stop()
   engines.clear()
+}
+
+/** 「选择文件夹」：连服务器刷新清单并返回全部文件夹（含未勾选的）。 */
+export async function scanFolders(accountId: string): Promise<Folder[]> {
+  const engine = engineFor(accountId)
+  if (!engine) return listFolders(accountId)
+  return engine.scanFolders()
 }
 
 export async function syncNow(accountId?: string): Promise<void> {

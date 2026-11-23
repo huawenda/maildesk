@@ -6,7 +6,7 @@ export interface AppInfo {
 
 export type Density = "compact" | "standard" | "comfortable"
 export type ThemeMode = "dark" | "light" | "system"
-export type Security = "tls" | "starttls" | "none"
+export type Security = "tls" | "starttls" | "tls-insecure" | "none"
 export type FolderRole = "inbox" | "sent" | "drafts" | "trash" | "junk" | "archive" | null
 
 /** 归一化错误码，UI 只展示这张表里的值（PRD 7.6）。 */
@@ -59,6 +59,8 @@ export interface Folder {
   sortOrder: number
   /** 历史回溯游标：下一批从哪里往前翻，null 表示还没开始过；< 1 表示已经翻到最底。 */
   backfillUid: number | null
+  /** 是否在侧栏显示并参与同步（由「选择文件夹」决定） */
+  enabled: boolean
 }
 
 export interface Address {
@@ -165,6 +167,8 @@ export interface Settings {
   folderCount: "unread" | "total"
   /** 点窗口关闭键时最小化到托盘，而不是退出应用 */
   closeToTray: boolean
+  /** 界面整体缩放：0 = 自动（小屏用 90%），其余为 0.9 / 1 / 1.1 / 1.25 */
+  uiScale: number
 }
 
 export type TestResult =
@@ -185,11 +189,19 @@ export interface SyncStatus {
   folder?: string
   lastSyncAt?: number
   error?: string
+  /** 本轮同步开始的时刻（界面用来显示耗时；刷新页面后也能恢复） */
+  startedAt?: number
+  /** 当前文件夹的下载进度快照，供晚于同步启动的界面初始化 */
+  progress?: { folder: string; fetched: number; total: number }
+  /** 正文预下载进度快照 */
+  bodies?: { done: number; total: number }
 }
 
 export type SyncEvent =
   | { type: "state"; status: SyncStatus }
-  | { type: "progress"; accountId?: string; folder: string; fetched: number }
+  | { type: "progress"; accountId?: string; folder: string; fetched: number; total?: number }
+  /** 同步时预下载正文的进度（历史邮件的正文补齐）。 */
+  | { type: "bodies"; done: number; total: number; finished?: boolean }
   | {
       type: "backfill"
       accountId?: string
@@ -203,6 +215,8 @@ export type SyncEvent =
   | { type: "messages"; folderId: string; added: number }
   /** 双向对账的结果：本地库被服务器状态修正了多少条（界面据此重拉列表）。 */
   | { type: "reconcile"; added: number; removed: number; moved: number; flags: number }
+  /** 历史邮件的收件人/抄送姓名按原始头修正过（界面据此重拉列表，不弹新邮件提示）。 */
+  | { type: "recipients"; updated: number }
 
 export interface MailApi {
   accounts: {
@@ -214,6 +228,10 @@ export interface MailApi {
   }
   folders: {
     list(accountId?: string): Promise<Folder[]>
+    /** 扫描服务器文件夹清单并写库，供「选择文件夹」使用 */
+    scan(accountId: string): Promise<Folder[]>
+    /** 保存勾选：paths 为要启用的路径，其余隐藏；收件箱强制启用 */
+    setEnabled(accountId: string, paths: string[]): Promise<Folder[]>
   }
   messages: {
     /** 一次返回该文件夹全部邮件：连接上账户就全量下载，不做渐进式分页。 */
@@ -266,6 +284,8 @@ export interface MailApi {
     openExternal(url: string): Promise<void>
     /** 让窗口底色跟随页面主题，避免拖动/缩放时闪出白色。 */
     setChrome(color: { background: string; symbol: string }): Promise<void>
+    /** 整体界面缩放（webContents zoom factor） */
+    setZoom(factor: number): Promise<void>
     /** 自绘标题栏的窗口控制（窗口是 frame: false，系统按钮不存在）。 */
     minimizeWindow(): Promise<void>
     toggleMaximizeWindow(): Promise<void>

@@ -269,7 +269,10 @@ export function clearFolderMessages(folderId: string): void {
 /** 目录计数以本地库为准，避免服务器 STATUS 与本地差集打架。 */
 /** 托盘角标用：全库未读总数（所有账户所有文件夹）。 */
 export function countUnread(): number {
-  const row = get<{ c: number }>("SELECT COUNT(*) AS c FROM message WHERE is_read = 0")
+  // 只数用户选择显示的文件夹：隐藏文件夹的未读不该留在托盘角标上
+  const row = get<{ c: number }>(
+    "SELECT COUNT(*) AS c FROM message m JOIN folder f ON f.id = m.folder_id WHERE f.enabled = 1 AND m.is_read = 0"
+  )
   return row ? Number(row.c) : 0
 }
 
@@ -334,6 +337,79 @@ export function setHasAttachments(id: string, has: boolean): void {
   run("UPDATE message SET has_attachments = ? WHERE id = ?", boolean(has), id)
 }
 
+/** 用原始 To/Cc 头重新写一次收件人（ENVELOPE 没有真实姓名时的一次性修正）。 */
+export function setRecipients(id: string, to: Address[], cc: Address[]): void {
+  run("UPDATE message SET to_json = ?, cc_json = ? WHERE id = ?", JSON.stringify(to), JSON.stringify(cc), id)
+}
+
+/** 同步时批量预下载正文：UID → 本地 id，正文只能按 id 写。 */
+export function messageIdsByUids(folderId: string, uids: number[]): Map<number, string> {
+  const result = new Map<number, string>()
+  if (uids.length === 0) return result
+  const placeholders = uids.map(() => "?").join(",")
+  const rows = all<{ id: string; uid: number }>(
+    `SELECT id, uid FROM message WHERE folder_id = ? AND uid IN (${placeholders})`,
+    folderId,
+    ...uids
+  )
+  for (const row of rows) result.set(row.uid, row.id)
+  return result
+}
+
+/** 从一批 id 里挑出还没有正文的（重复同步时不要覆盖已有正文与附件本地路径）。 */
+export function idsNeedingBody(ids: string[]): Set<string> {
+  if (ids.length === 0) return new Set()
+  const placeholders = ids.map(() => "?").join(",")
+  const rows = all<{ id: string }>(
+    `SELECT id FROM message
+     WHERE id IN (${placeholders}) AND (body_text IS NULL OR (has_html = 1 AND body_html IS NULL))`,
+    ...ids
+  )
+  return new Set(rows.map((row) => row.id))
+}
+
+/** 摘要缺失但正文已在库里（老数据）：本地就能补，不必再联网。 */
+export function messagesMissingSnippet(
+  limit: number
+): { id: string; bodyText: string | null; bodyHtml: string | null }[] {
+  return all<{ id: string; body_text: string | null; body_html: string | null }>(
+    `SELECT id, body_text, body_html FROM message
+     WHERE (snippet IS NULL OR snippet = '')
+       AND body_text IS NOT NULL AND TRIM(body_text) <> ''
+     LIMIT ?`,
+    limit
+  ).map((row) => ({ id: row.id, bodyText: row.body_text, bodyHtml: row.body_html }))
+}
+
+export function setSnippet(id: string, snippet: string): void {
+  run("UPDATE message SET snippet = ? WHERE id = ?", snippet, id)
+}
+
+/** 一次同步开始时先数一下总共有多少封缺正文，给进度条用。 */
+export function countMessagesNeedingBody(): number {
+  const row = get<{ c: number }>(
+    `SELECT COUNT(*) AS c FROM message m JOIN folder f ON f.id = m.folder_id
+     WHERE f.enabled = 1 AND (m.body_text IS NULL OR (m.has_html = 1 AND m.body_html IS NULL))`
+  )
+  return Number(row?.c ?? 0)
+}
+
+/**
+ * 还没有本地正文的邮件（含「声明有 HTML 但只缓存了纯文本」的老数据）。
+ * 启动后的正文补齐按这个列表往前推，补完之后点开任何一封都不会再回服务器。
+ */
+export function messagesNeedingBody(
+  limit: number
+): { id: string; folderId: string; uid: number }[] {
+  return all<{ id: string; folder_id: string; uid: number }>(
+    `SELECT id, folder_id, uid FROM message
+     WHERE (body_text IS NULL OR (has_html = 1 AND body_html IS NULL))
+       AND folder_id IN (SELECT id FROM folder WHERE enabled = 1)
+     ORDER BY COALESCE(sent_at, 0) DESC LIMIT ?`,
+    limit
+  ).map((row) => ({ id: row.id, folderId: row.folder_id, uid: row.uid }))
+}
+
 /** 旧版本把正文内嵌图算成附件：取出还没按新规则复核过的邮件（有标记但没解析过附件）。 */
 export function messagesNeedingAttachmentFlags(limit: number): { id: string; folderId: string; uid: number }[] {
   return all<{ id: string; folder_id: string; uid: number }>(
@@ -345,20 +421,22 @@ export function messagesNeedingAttachmentFlags(limit: number): { id: string; fol
   ).map((row) => ({ id: row.id, folderId: row.folder_id, uid: row.uid }))
 }
 
-/** 懒加载回来的正文与附件。 */
+/** 写入正文与附件元数据；snippet 只在传入时覆盖（选填：同步预下载时顺手补摘要）。 */
 export function setMessageBody(
   id: string,
   bodyText: string,
   bodyHtml: string | null,
   hasHtml: boolean,
-  attachments: Attachment[] = []
+  attachments: Attachment[] = [],
+  snippet?: string | null
 ): void {
   run(
-    "UPDATE message SET body_text = ?, body_html = ?, has_html = ?, has_attachments = ? WHERE id = ?",
+    "UPDATE message SET body_text = ?, body_html = ?, has_html = ?, has_attachments = ?, snippet = COALESCE(?, snippet) WHERE id = ?",
     bodyText,
     bodyHtml,
     boolean(hasHtml),
     boolean(attachments.length > 0),
+    snippet?.trim() ? snippet : null,
     id
   )
   if (attachments.length === 0) return

@@ -6,7 +6,8 @@ import { getSettings, setSettings } from "./db/settings"
 import { openPassword } from "./security/credentials"
 import { all, get } from "./db"
 import { probeImap } from "./net/probe"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { buildImapOptions } from "./sync/connection"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 /**
@@ -30,14 +31,17 @@ export async function runUidCheck(email: string): Promise<void> {
       all<{ uid: number }>("SELECT uid FROM message WHERE folder_id = ?", folder.id).map((row) => row.uid)
     )
     const { ImapFlow } = await import("imapflow")
-    const client = new ImapFlow({
-      host: account.imapHost,
-      port: account.imapPort,
-      secure: account.security === "tls",
-      auth: { user: account.username || account.email || "", pass: password ?? "" },
-      logger: false,
-      clientInfo: { name: "MailDesk", version: app.getVersion(), vendor: "local" }
-    })
+    const client = new ImapFlow(
+      buildImapOptions(
+        {
+          host: account.imapHost,
+          port: account.imapPort,
+          security: account.security,
+          username: account.username || account.email || ""
+        },
+        password ?? ""
+      )
+    )
     await client.connect()
     const lock = await client.getMailboxLock(folder.path)
     try {
@@ -104,20 +108,37 @@ export async function runServerOp(op: string, subject: string, target?: string):
       return
     }
     const password = await openPassword(account.id)
+    if (op === "probe") {
+      // 用库里已保存的账号实测「测试连接」，验证 probe 与同步参数一致
+      const security = (subject || "tls") as "tls" | "starttls" | "tls-insecure" | "none"
+      const result = await probeImap({
+        email: account.email,
+        imapHost: account.imapHost,
+        imapPort: account.imapPort,
+        security,
+        username: account.username || account.email,
+        password: password ?? ""
+      })
+      console.log("SERVEROP " + JSON.stringify({ op, security, result }))
+      return
+    }
     const folder = listFolders(account.id).find((item) => item.role === "inbox")
     if (!folder) {
       console.log("SERVEROP " + JSON.stringify({ error: "inbox folder not found" }))
       return
     }
     const { ImapFlow } = await import("imapflow")
-    const client = new ImapFlow({
-      host: account.imapHost,
-      port: account.imapPort,
-      secure: account.security === "tls",
-      auth: { user: account.username || account.email || "", pass: password ?? "" },
-      logger: false,
-      clientInfo: { name: "MailDesk", version: app.getVersion(), vendor: "local" }
-    })
+    const client = new ImapFlow(
+      buildImapOptions(
+        {
+          host: account.imapHost,
+          port: account.imapPort,
+          security: account.security,
+          username: account.username || account.email || ""
+        },
+        password ?? ""
+      )
+    )
     await client.connect()
     const safe = (value: unknown): string =>
       JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? Number(item) : item))
@@ -134,6 +155,137 @@ export async function runServerOp(op: string, subject: string, target?: string):
         }
       }
       console.log("SERVEROP " + safe({ op, rows }))
+      await client.logout()
+      return
+    }
+    if (op === "append") {
+      // 造一封「30 收件人 + 30 抄送」的样例邮件直接 APPEND 到指定邮箱（默认收件箱），
+      // 用于验收收件人/抄送展示。只走 IMAP，不涉及发信。
+      const mailbox = subject || "INBOX"
+      const encoded = (text: string) => `=?UTF-8?B?${Buffer.from(text, "utf8").toString("base64")}?=`
+      const recipients: [string, string][] = [
+        ["张伟/研发总监/技术中心", "zhang.wei@huaxin-tech.com"],
+        ["王芳/财务经理/财务部", "wang.fang@huaxin-tech.com"],
+        ["李娜/招聘主管/人力资源部", "li.na@huaxin-tech.com"],
+        ["刘洋/产品经理/产品部", "liu.yang@huaxin-tech.com"],
+        ["陈静/法务专员/法务合规部", "chen.jing@huaxin-tech.com"],
+        ["杨帆/运维工程师/技术中心", "yang.fan@huaxin-tech.com"],
+        ["赵磊/销售经理/华东销售部", "zhao.lei@huaxin-tech.com"],
+        ["黄敏/市场专员/市场部", "huang.min@huaxin-tech.com"],
+        ["周涛/实施顾问/交付中心", "zhou.tao@huaxin-tech.com"],
+        ["吴倩/行政主管/行政部", "wu.qian@huaxin-tech.com"],
+        ["徐强/架构师/技术中心", "xu.qiang@huaxin-tech.com"],
+        ["孙丽/会计/财务部", "sun.li@huaxin-tech.com"],
+        ["马超/测试工程师/质量保障部", "ma.chao@huaxin-tech.com"],
+        ["朱婷/品牌经理/市场部", "zhu.ting@huaxin-tech.com"],
+        ["胡军/采购经理/供应链部", "hu.jun@huaxin-tech.com"],
+        ["郭静/薪酬专员/人力资源部", "guo.jing@huaxin-tech.com"],
+        ["何勇/技术经理/技术中心", "he.yong@huaxin-tech.com"],
+        ["高圆圆/设计主管/用户体验部", "gao.yuanyuan@huaxin-tech.com"],
+        ["林峰/数据工程师/数据平台部", "lin.feng@huaxin-tech.com"],
+        ["罗琳/客户成功经理/客户服务部", "luo.lin@huaxin-tech.com"],
+        ["郑凯/渠道经理/华东销售部", "zheng.kai@huaxin-tech.com"],
+        ["梁爽/新媒体运营/市场部", "liang.shuang@huaxin-tech.com"],
+        ["谢楠/项目经理/交付中心", "xie.nan@huaxin-tech.com"],
+        ["唐宁/前端工程师/技术中心", "tang.ning@huaxin-tech.com"],
+        ["韩雪/合规经理/法务合规部", "han.xue@huaxin-tech.com"],
+        ["曹阳/物流专员/供应链部", "cao.yang@huaxin-tech.com"],
+        ["邓超/售前顾问/解决方案部", "deng.chao@huaxin-tech.com"],
+        ["许晴/培训主管/人力资源部", "xu.qing@huaxin-tech.com"],
+        ["冯刚/安全工程师/信息安全部", "feng.gang@huaxin-tech.com"],
+        ["曾媛/总经办助理/总经办", "zeng.yuan@huaxin-tech.com"]
+      ]
+      const copies: [string, string][] = [
+        ["沈梦/投资经理/长源资本", "shen.meng@longyuan-capital.com"],
+        ["彭飞/商务经理/东风物流", "peng.fei@df-logistics.cn"],
+        ["吕梁/合伙人/长源资本", "lv.liang@longyuan-capital.com"],
+        ["苏晴/运营专员/东风物流", "su.qing@df-logistics.cn"],
+        ["卢俊/技术总监/华信科技", "lu.jun@huaxin-tech.com"],
+        ["蒋雯/投资分析师/长源资本", "jiang.wen@longyuan-capital.com"],
+        ["蔡明/仓配经理/东风物流", "cai.ming@df-logistics.cn"],
+        ["贾玲/市场经理/华信科技", "jia.ling@huaxin-tech.com"],
+        ["丁宁/风控主管/长源资本", "ding.ning@longyuan-capital.com"],
+        ["魏然/客服主管/东风物流", "wei.ran@df-logistics.cn"],
+        ["薛峰/渠道总监/华信科技", "xue.feng@huaxin-tech.com"],
+        ["叶青/财务顾问/长源资本", "ye.qing@longyuan-capital.com"],
+        ["阎磊/项目经理/东风物流", "yan.lei@df-logistics.cn"],
+        ["余薇/总裁办/华信科技", "yu.wei@huaxin-tech.com"],
+        ["潘越/投后管理/长源资本", "pan.yue@longyuan-capital.com"],
+        ["杜鹃/单证主管/东风物流", "du.juan@df-logistics.cn"],
+        ["戴维/CTO/华信科技", "dai.wei@huaxin-tech.com"],
+        ["夏雨/审计经理/长源资本", "xia.yu@longyuan-capital.com"],
+        ["钟灵/调度专员/东风物流", "zhong.ling@df-logistics.cn"],
+        ["汪洋/交付总监/华信科技", "wang.yang@huaxin-tech.com"],
+        ["田甜/品牌顾问/长源资本", "tian.tian@longyuan-capital.com"],
+        ["任远/运输经理/东风物流", "ren.yuan@df-logistics.cn"],
+        ["姜涛/研发经理/华信科技", "jiang.tao@huaxin-tech.com"],
+        ["范冰/法务顾问/长源资本", "fan.bing@longyuan-capital.com"],
+        ["方圆/客服专员/东风物流", "fang.yuan@df-logistics.cn"],
+        ["石磊/产品总监/华信科技", "shi.lei@huaxin-tech.com"],
+        ["姚明/董事总经理/长源资本", "yao.ming@longyuan-capital.com"],
+        ["谭松/区域经理/东风物流", "tan.song@df-logistics.cn"],
+        ["廖凡/安全负责人/华信科技", "liao.fan@huaxin-tech.com"],
+        ["邹市/财务经理/长源资本", "zou.shi@longyuan-capital.com"]
+      ]
+      const header = ([name, address]: [string, string]) => `${encoded(name)} <${address}>`
+      const to = recipients.map(header)
+      const cc = copies.map(header)
+      const html =
+        "<html><body style=\"font-family:sans-serif\">" +
+        "<h2>收件人 / 抄送展示样例</h2>" +
+        "<p>这封邮件由 MailDesk 通过 IMAP APPEND 放进邮箱，只用于检查人员展示，不经过发信服务器。</p>" +
+        "<p>收件人 30 位，抄送 30 位，显示名采用「姓名/职位/部门」，全部带完整邮箱地址。</p>" +
+        "</body></html>"
+      const body = Buffer.from(html, "utf8").toString("base64").replace(/(.{76})/g, "$1\r\n")
+      const raw = [
+        `From: ${encoded("华信科技 行政部")} <admin@huaxin-tech.com>`,
+        "To: " + to.join(",\r\n "),
+        "Cc: " + cc.join(",\r\n "),
+        `Subject: ${encoded("【展示样例】收件人 30 + 抄送 30（姓名/职位/部门）")}`,
+        `Date: ${new Date().toUTCString()}`,
+        `Message-ID: <maildesk-recipients-${Date.now()}@maildesk.local>`,
+        "MIME-Version: 1.0",
+        "Content-Type: text/html; charset=utf-8",
+        "Content-Transfer-Encoding: base64",
+        "",
+        body
+      ].join("\r\n")
+      const result = await client.append(mailbox, Buffer.from(raw, "utf8"), [], new Date())
+      console.log("SERVEROP " + safe({ op, mailbox, to: to.length, cc: cc.length, result }))
+      await client.logout()
+      return
+    }
+    if (op === "raw") {
+      // 打印服务器上某封邮件的 To/Cc 原始头（诊断 APPEND/编码/收件人姓名问题）
+      const uid = Number(subject)
+      const box = target || "INBOX"
+      const lock = await client.getMailboxLock(box)
+      try {
+        const found = await client.fetchOne(String(uid), { headers: ["to", "cc"] }, { uid: true })
+        const head = found && found.headers ? Buffer.from(found.headers).toString("utf8") : ""
+        console.log("SERVEROP " + safe({ op, uid, box, head: head.slice(0, 2000) }))
+      } finally {
+        lock.release()
+      }
+      await client.logout()
+      return
+    }
+    if (op === "appendfile") {
+      // 把本地 .eml 原样 APPEND 进邮箱（测试复杂 MIME：表格 + 内嵌截图）
+      const file = process.env.MAILDESK_APPEND_FILE
+      if (!file) {
+        console.log("SERVEROP " + JSON.stringify({ op, error: "MAILDESK_APPEND_FILE missing" }))
+        return
+      }
+      const mailbox = subject || "INBOX"
+      const raw = readFileSync(file)
+      const result = await client.append(mailbox, raw, [], new Date())
+      console.log(
+        "SERVEROP " +
+          JSON.stringify({ op, mailbox, bytes: raw.length, result }, (_key, value) =>
+            typeof value === "bigint" ? Number(value) : value
+          )
+      )
       await client.logout()
       return
     }

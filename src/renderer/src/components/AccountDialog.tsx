@@ -10,8 +10,12 @@ import { ipcErrorMessage, mail } from "@/lib/ipc"
 const SECURITY_OPTIONS: { value: Security; label: string }[] = [
   { value: "tls", label: "TLS（993）" },
   { value: "starttls", label: "STARTTLS（143）" },
+  { value: "tls-insecure", label: "TLS · 忽略证书（993）" },
   { value: "none", label: "不加密" }
 ]
+
+const securityLabel = (value: Security): string =>
+  SECURITY_OPTIONS.find((option) => option.value === value)?.label ?? value
 
 type TestState =
   | { kind: "idle" }
@@ -179,7 +183,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[13px]">{account.displayName || account.email}</div>
                       <div className="truncate text-[11.5px] text-muted-foreground">
-                        {account.email} · {account.imapHost}:{account.imapPort} · {account.security}
+                        {account.email} · {account.imapHost}:{account.imapPort} · {securityLabel(account.security)}
                       </div>
                     </div>
                     <button
@@ -302,12 +306,13 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                       <Check className="size-3.5" /> {test.message}
                     </span>
                   ) : null}
-                  {test.kind === "fail" ? (
-                    <span className="min-w-0 flex-1 truncate text-[12px] text-destructive" title={test.message}>
-                      {test.message}
-                    </span>
-                  ) : null}
                 </div>
+
+                {test.kind === "fail" ? (
+                  <div className="rounded-lg bg-destructive/10 px-3 py-2 text-[12px] leading-relaxed text-destructive">
+                    {test.message}
+                  </div>
+                ) : null}
 
                 {error ? <div className="rounded-lg bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{error}</div> : null}
               </div>

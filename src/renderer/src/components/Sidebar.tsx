@@ -5,6 +5,7 @@ import {
   ChevronRight,
   FilePenLine,
   Folder,
+  FolderCog,
   Inbox,
   RefreshCw,
   Send,
@@ -40,6 +41,8 @@ interface SidebarProps {
   countMode: "unread" | "total"
   onSelectFolder: (id: string) => void
   onSelectLabel: (label: string) => void
+  /** 打开「选择要显示的文件夹」弹窗 */
+  onManageFolders: () => void
   showLabels: boolean
   syncing: boolean
   syncLabel: string
@@ -58,6 +61,7 @@ export function Sidebar({
   countMode,
   onSelectFolder,
   onSelectLabel,
+  onManageFolders,
   showLabels,
   syncing,
   syncLabel,
@@ -85,7 +89,9 @@ export function Sidebar({
     >
       <nav
         ref={navRef}
-        className="scrollbar-overlay flex max-h-[45vh] flex-col gap-px overflow-y-auto"
+        // 文件夹列表吃掉设置区以上的全部高度：公司邮箱的个人文件夹很多，
+        // 旧的 max-h-[45vh] 会在窗口还很空的时候就截断，剩下的只能靠内层滚动找
+        className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-px overflow-y-auto"
         aria-label="文件夹"
       >
         {folders.map((folder) => {
@@ -175,6 +181,17 @@ export function Sidebar({
       )}
 
       <div className="mt-auto flex flex-col gap-1">
+        <button
+          onClick={onManageFolders}
+          title="选择要显示的文件夹"
+          className={cn(
+            "flex h-7 items-center gap-1.5 rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
+            collapsed ? "justify-center px-0" : "px-2"
+          )}
+        >
+          <FolderCog className="size-3.5 shrink-0" />
+          {collapsed ? null : <span className="truncate">选择文件夹</span>}
+        </button>
         <button
           onClick={onSync}
           title="手动同步 (Ctrl R)"

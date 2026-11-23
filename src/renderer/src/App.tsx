@@ -5,6 +5,7 @@ import { AccountDialog } from "@/components/AccountDialog"
 import { MessageList, type ListFilter } from "@/components/MessageList"
 import { Notice } from "@/components/Notice"
 import { Reader } from "@/components/Reader"
+import { FolderPickerDialog } from "@/components/FolderPickerDialog"
 import { SettingsDialog } from "@/components/SettingsDialog"
 import type { SearchScope } from "@/components/TitleBarSearch"
 import { Sidebar } from "@/components/Sidebar"
@@ -70,6 +71,20 @@ const timeAgo = (timestamp: number): string => {
   return hours < 24 ? `${hours} 小时前` : `${Math.round(hours / 24)} 天前`
 }
 
+/** 侧栏可见文件夹：启用项 + 它们的祖先容器（容器本身不参与同步，只是分组标题）。 */
+function visibleFolderList(folders: Folder[]): Folder[] {
+  const enabled = folders.filter((folder) => folder.enabled)
+  const keep = new Set(enabled.map((folder) => folder.path))
+  for (const folder of enabled) {
+    const delimiter = folder.delimiter || "/"
+    const parts = folder.path.split(delimiter)
+    for (let index = 1; index < parts.length; index += 1) {
+      keep.add(parts.slice(0, index).join(delimiter))
+    }
+  }
+  return folders.filter((folder) => keep.has(folder.path))
+}
+
 export default function App() {
   const { mode, setMode } = useThemeMode()
   const [version, setVersion] = useState<string>()
@@ -77,6 +92,7 @@ export default function App() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null)
   const [accountsOpen, setAccountsOpen] = useState(false)
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [liveFolders, setLiveFolders] = useState<Folder[]>([])
   const [folderTick, setFolderTick] = useState(0)
   // 侧栏角标以本地库为准（和列表未读态同源），fileId -> 未读数
@@ -114,10 +130,16 @@ export default function App() {
   const [showTimeNonCompact, setShowTimeNonCompact] = useState<boolean>(true)
   const [folderCount, setFolderCount] = useState<"unread" | "total">("unread")
   const [closeToTray, setCloseToTray] = useState<boolean>(false)
+  // 界面整体缩放：0 = 自动（1080p 这类小屏默认 90%），避免公司电脑上元素显大
+  const [uiScale, setUiScale] = useState<number>(() => readStored("maildesk.uiScale", 0))
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
   const [syncState, setSyncState] = useState<SyncState>("disconnected")
+  // 首次同步/增量同步的可观测进度：正在取哪个文件夹、取到第几封
+  const [syncProgress, setSyncProgress] = useState<{ folder: string; fetched: number; total: number } | null>(null)
+  const [bodyProgress, setBodyProgress] = useState<{ done: number; total: number } | null>(null)
+  const [syncStartedAt, setSyncStartedAt] = useState<number | null>(null)
   const [syncError, setSyncError] = useState<string | undefined>()
   const [lastSyncAt, setLastSyncAt] = useState<number | undefined>()
   // 只为了让「已同步 · N 分钟前」随时间自己走，不参与业务逻辑
@@ -144,6 +166,7 @@ export default function App() {
         setShowTimeNonCompact(settings.showTimeNonCompact)
         setFolderCount(settings.folderCount)
         setCloseToTray(settings.closeToTray)
+        setUiScale(settings.uiScale ?? 0)
       })
       .catch(() => undefined)
       .finally(() => {
@@ -168,6 +191,17 @@ export default function App() {
     store("maildesk.fontSize", fontSize)
     if (settingsReady.current) void mail.settings.set({ fontSize }).catch(() => undefined)
   }, [fontSize])
+
+  useEffect(() => {
+    store("maildesk.uiScale", uiScale)
+    if (settingsReady.current) void mail.settings.set({ uiScale }).catch(() => undefined)
+  }, [uiScale])
+
+  // 自动档：1080p 及以下（含 1080p/125% 的 1536×864）整体用 90%，2K 保持 100%
+  useEffect(() => {
+    const auto = window.screen.availWidth <= 1920 || window.screen.availHeight <= 1080 ? 0.9 : 1
+    void mail.app.setZoom(uiScale > 0 ? uiScale : auto).catch(() => undefined)
+  }, [uiScale])
 
   useEffect(() => {
     if (!settingsReady.current) return
@@ -237,7 +271,7 @@ export default function App() {
         setLiveFolders(list)
         // 容器目录（\Noselect）不可选中：旧选中项若落在容器上，落回收件箱
         const selectable = new Set(
-          navFolders(list)
+          navFolders(visibleFolderList(list))
             .filter((folder) => folder.selectable)
             .map((folder) => folder.id)
         )
@@ -310,6 +344,14 @@ export default function App() {
         setSyncState(event.status.state)
         setSyncError(event.status.error)
         if (event.status.lastSyncAt) setLastSyncAt(event.status.lastSyncAt)
+        // 状态里带完整快照：事件订阅晚于同步启动时也能立刻显示出进度
+        setSyncStartedAt(event.status.startedAt ?? null)
+        setSyncProgress(event.status.progress ?? null)
+        setBodyProgress(event.status.bodies ?? null)
+      } else if (event.type === "progress") {
+        setSyncProgress({ folder: event.folder, fetched: event.fetched, total: event.total ?? 0 })
+      } else if (event.type === "bodies") {
+        setBodyProgress(event.finished ? null : { done: event.done, total: event.total })
       } else if (event.type === "messages") {
         setFolderTick((tick) => tick + 1)
         // 主进程的本地变更回执（移动/删除/已读）added 恒为 0，界面已经改好了，
@@ -322,6 +364,9 @@ export default function App() {
           setRefreshTick((tick) => tick + 1)
           setUnreadTick((tick) => tick + 1)
         }
+      } else if (event.type === "recipients") {
+        // 收件人姓名被原始头修正：列表项里的 to/cc 是旧的，重拉一次即可
+        if (event.updated > 0) setRefreshTick((tick) => tick + 1)
       } else if (event.type === "backfill") {
         setBackfill(event.finished ? null : { done: event.done, total: event.total })
       }
@@ -332,6 +377,9 @@ export default function App() {
         setSyncState(status.state)
         setSyncError(status.error)
         if (status.lastSyncAt) setLastSyncAt(status.lastSyncAt)
+        setSyncStartedAt(status.startedAt ?? null)
+        setSyncProgress(status.progress ?? null)
+        setBodyProgress(status.bodies ?? null)
       })
       .catch(() => undefined)
     return off
@@ -341,6 +389,13 @@ export default function App() {
     const timer = window.setInterval(() => setClock((value) => value + 1), 30_000)
     return () => window.clearInterval(timer)
   }, [])
+
+  // 连接/下载期间每秒刷新一次耗时，用户能确认「还在动」而不是卡住
+  useEffect(() => {
+    if (!syncStartedAt) return
+    const timer = window.setInterval(() => setClock((value) => value + 1), 1_000)
+    return () => window.clearInterval(timer)
+  }, [syncStartedAt])
 
   // 选中邮件后才拉正文（PRD 7.6 懒加载）
   useEffect(() => {
@@ -360,7 +415,8 @@ export default function App() {
     }
   }, [live, selectedId])
 
-  const navList = live ? navFolders(liveFolders) : DEMO_NAV
+  // 侧栏只展示用户勾选过的文件夹；hidden 的仍在库里，可以在「选择文件夹」里重新勾上
+  const navList = live ? navFolders(visibleFolderList(liveFolders)) : DEMO_NAV
 
   const searchActive = searchQuery.trim().length > 0
 
@@ -804,17 +860,30 @@ export default function App() {
   // clock 每 30s 自增一次，触发重渲染让相对时间跟着走
   void clock
   const syncing = syncState === "connecting" || syncState === "selecting" || syncState === "fetching"
+  const folderLabelOfPath = (path: string) => {
+    const folder = liveFolders.find((item) => item.path === path)
+    return (folder && navList.find((item) => item.id === folder.id)?.label) || path
+  }
+  const elapsed = syncStartedAt ? Math.max(0, Math.round((Date.now() - syncStartedAt) / 1000)) : 0
   const syncLabel = syncing
-    ? "正在同步…"
-    : backfill
-      ? `补全历史 ${backfill.done} / ${backfill.total}`
-      : syncState === "error"
-      ? (syncError ?? "同步出错")
-      : lastSyncAt
-        ? `已同步 · ${timeAgo(lastSyncAt)}`
-        : live
-          ? "尚未同步"
-          : "尚未连接账户"
+    ? syncState === "connecting"
+      ? `正在连接服务器…（${elapsed}s）`
+      : syncState === "selecting"
+        ? `正在打开${syncProgress ? " " + folderLabelOfPath(syncProgress.folder) : "文件夹"}…`
+        : syncProgress
+          ? `正在下载 ${folderLabelOfPath(syncProgress.folder)} ${syncProgress.fetched} / ${syncProgress.total || "?"}`
+          : `正在下载邮件…（${elapsed}s）`
+    : bodyProgress
+      ? `正在下载正文 ${bodyProgress.done} / ${bodyProgress.total}`
+      : backfill
+        ? `补全历史 ${backfill.done} / ${backfill.total}`
+        : syncState === "error"
+          ? (syncError ?? "同步出错")
+          : lastSyncAt
+            ? `已同步 · ${timeAgo(lastSyncAt)}`
+            : live
+              ? "尚未同步"
+              : "尚未连接账户"
 
   // 拖拽用 window 级监听：分隔线只有 5px 宽，靠 setPointerCapture 在指针离开元素后
   // 会丢掉后续 pointermove（实测拖一下只走一步就停），这里直接用全局监听。
@@ -900,6 +969,7 @@ export default function App() {
           }}
           countMode={folderCount}
           onSelectFolder={switchFolder}
+          onManageFolders={() => setFolderPickerOpen(true)}
           onSelectLabel={(label) => {
             setActiveLabel((current) => (current === label ? null : label))
             setSearchQuery("")
@@ -920,6 +990,8 @@ export default function App() {
             folderNameOf={searchActive ? folderLabelOf : undefined}
             highlightQuery={searchActive ? searchQuery.trim() : undefined}
             highlightScope={searchActive ? searchScope : undefined}
+            syncing={syncing}
+            syncHint={syncLabel}
             noAccounts={!live}
             countLabel={listCount}
             selectedId={selectedId}
@@ -1019,6 +1091,8 @@ export default function App() {
         onFolderCountChange={setFolderCount}
         closeToTray={closeToTray}
         onCloseToTrayChange={setCloseToTray}
+        uiScale={uiScale}
+        onUiScaleChange={setUiScale}
         remoteImages={remoteImages}
         onRemoteImagesChange={setRemoteImages}
         accounts={accounts}
@@ -1040,6 +1114,13 @@ export default function App() {
           setSelectedId(null)
           setFolderTick((tick) => tick + 1)
         }}
+      />
+
+      <FolderPickerDialog
+        open={folderPickerOpen}
+        onOpenChange={setFolderPickerOpen}
+        accountId={activeAccountId}
+        onSaved={() => setFolderTick((tick) => tick + 1)}
       />
     </div>
   )

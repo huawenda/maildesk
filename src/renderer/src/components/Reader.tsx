@@ -109,6 +109,8 @@ export function Reader({
   const [saveAllState, setSaveAllState] = useState<SaveState | null>(null)
   // 「该发件人的全部邮件」抽屉
   const [senderOpen, setSenderOpen] = useState(false)
+  /** 抽屉当前展示的发件地址：点了同一位发件人的其他邮件时保持展开 */
+  const [senderAddress, setSenderAddress] = useState("")
   // 退场动画期间保持挂载，动画结束（130ms）后再卸载
   const [senderClosing, setSenderClosing] = useState(false)
   const [senderBusy, setSenderBusy] = useState(false)
@@ -153,9 +155,23 @@ export function Reader({
   }, [senderOpen, senderClosing])
 
   useEffect(() => {
+    if (!senderOpen) return
+    // 切文件夹时 items 还没回来、message 会短暂为 null：这时不要收起，避免抽屉闪一下
+    if (!message) return
+    // 从抽屉里点同一发件人的另一封邮件时保持展开；换成别人（从列表切换）才收起
+    const address = (message.fromEmail ?? "").toLowerCase()
+    if (address === senderAddress) return
     setSenderOpen(false)
     setSenderClosing(false)
-  }, [message?.id])
+  }, [message, senderOpen, senderAddress])
+
+  // 抽屉里点开另一封后，把当前这封滚进可视区
+  useEffect(() => {
+    if (!senderOpen) return
+    senderListRef.current
+      ?.querySelector<HTMLElement>('[data-current="true"]')
+      ?.scrollIntoView({ block: "nearest" })
+  }, [message?.id, senderOpen])
 
   // 浮层只要处于「加载中 / 出错 / 已加载」任一状态就得能关掉：
   // 预览失败时 preview 是 null，只清 preview 会把错误提示永久钉在屏幕上（用户实测卡死）。
@@ -262,8 +278,9 @@ export function Reader({
     setSenderClosing(false)
     setSenderOpen(true)
     setSenderBusy(true)
+    const address = (message.fromEmail || "").toLowerCase()
+    setSenderAddress(address)
     try {
-      const address = (message.fromEmail || "").toLowerCase()
       const results = await mail.search.query(message.fromEmail, { scope: "from", limit: 200 })
       setSenderMessages(
         results
@@ -303,7 +320,8 @@ export function Reader({
                 {message.subject || "（无主题）"}
               </h2>
 
-              <div className="mt-4 flex items-start gap-3">
+              {/* 头像与右侧两行（姓名/图标、邮箱/时间）整体垂直居中，不要顶对齐 */}
+              <div className="mt-4 flex items-center gap-3">
                 <span
                   className="flex size-8 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold text-white"
                   style={{ backgroundColor: avatarColor(message.fromName || message.fromEmail) }}
@@ -438,10 +456,9 @@ export function Reader({
               ) : null}
 
               {message.bodyHtml ? (
-                // HTML 邮件按浅色印刷品渲染：白纸卡片保留邮件原配色，不做深色反色。
-                // 宽度贴着内容（上限 720px）并居中——铺满阅读器的话，600px 定宽邮件
-                // 右侧会留一大片白，卡片就不像「一张纸」而像一块白色面板。
-                <div className="mx-auto mt-6 w-full max-w-[720px] overflow-hidden rounded-xl bg-white ring-1 ring-black/10 dark:ring-black/20">
+                // 文本优先：正文直接落在画布上，不再套「印刷品」白纸卡片，也不整页缩放。
+                // 邮件自己的浅色底/底图仍然保留，深色主题下由 HtmlBody 做一次对比度兜底。
+                <div className="mt-6 w-full">
                   <HtmlBody
                     key={message.id}
                     html={message.bodyHtml}
@@ -531,10 +548,8 @@ export function Reader({
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => {
-                      onNavigate(item)
-                      closeSenderDrawer()
-                    }}
+                    data-current={item.id === message.id ? "true" : undefined}
+                    onClick={() => onNavigate(item)}
                     className={cn(
                       "flex w-full flex-col gap-1 rounded-lg px-3 py-2 text-left transition-colors",
                       item.id === message.id ? "bg-accent" : "hover:bg-accent/60"
@@ -670,36 +685,94 @@ function AttachmentChip({
   )
 }
 
+/** 收件人展示用的联系条目：库里的 to/cc 是「姓名 <地址>」字符串。 */
+interface Contact {
+  name: string
+  address: string
+  full: string
+}
+
+function parseContact(value: string): Contact {
+  const match = value.match(/^\s*(.*?)\s*<([^>]+)>\s*$/)
+  if (match) {
+    return {
+      name: match[1].replace(/^["']|["']$/g, "").trim(),
+      address: match[2].trim(),
+      full: value.trim()
+    }
+  }
+  return { name: "", address: value.trim(), full: value.trim() }
+}
+
+const contactLabel = (contact: Contact): string => contact.name || contact.address
+
+/** 折叠态摘要：人少时全列，人多时只给前两位 + 总数，避免几十个地址把头部撑爆。 */
+function summarizeContacts(contacts: Contact[], verb: string): string {
+  if (contacts.length === 0) return `${verb}（无）`
+  if (contacts.length <= 3) return `${verb} ${contacts.map(contactLabel).join("、")}`
+  return `${verb} ${contacts.slice(0, 2).map(contactLabel).join("、")} 等 ${contacts.length} 人`
+}
+
+function ContactSection({ label, contacts }: { label: string; contacts: Contact[] }) {
+  const listRef = useRef<HTMLDivElement>(null)
+  return (
+    <section className="mt-2.5 first:mt-0">
+      <div className="mb-1 flex items-baseline gap-1.5">
+        <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+        <span className="text-[10.5px] tabular-nums text-muted-foreground/70">{contacts.length}</span>
+      </div>
+      <div ref={listRef} className="scrollbar-overlay max-h-[260px] overflow-y-auto">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-x-3 gap-y-1 pb-0.5">
+          {contacts.map((contact, index) => (
+            <div key={`${contact.full}-${index}`} title={contact.full} className="min-w-0 py-0.5">
+              {/* 公司邮箱的显示名常常是「姓名/职位/部门」这样的长文本：整段同色、允许换行，
+                  不要拆段加粗或改色（用户要求统一观感） */}
+              <div className="break-words text-[11.5px] leading-[1.4] text-foreground/90">
+                {contactLabel(contact)}
+              </div>
+              {contact.name ? (
+                <div className="truncate text-[10.5px] leading-[1.4] text-muted-foreground">
+                  {contact.address}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+      <OverlayScrollbar target={listRef} />
+    </section>
+  )
+}
+
 function Recipients({ message }: { message: Message }) {
   const [open, setOpen] = useState(false)
-  const summary = `发给 ${message.to.join("、")}${message.cc.length > 0 ? `，抄送 ${message.cc.length} 人` : ""}`
+  const to = message.to.map(parseContact)
+  const cc = message.cc.map(parseContact)
+  const summary = summarizeContacts(to, "发给") + (cc.length > 0 ? ` · 抄送 ${cc.length} 人` : "")
 
   return (
     <div className="mt-2 text-[12px] text-muted-foreground">
       <button
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-1 rounded transition-colors hover:text-foreground"
+        className="flex max-w-full items-center gap-1 rounded transition-colors hover:text-foreground"
         aria-expanded={open}
       >
-        <span>{summary}</span>
-        <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
+        <span className="truncate">{summary}</span>
+        <ChevronDown className={cn("size-3 shrink-0 transition-transform", open && "rotate-180")} />
       </button>
       {open ? (
-        <div className="mt-1.5 space-y-0.5 rounded-md bg-muted/60 px-2.5 py-1.5">
-          <div>
-            <span className="text-muted-foreground/70">发件人：</span>
-            {message.fromName} &lt;{message.fromEmail}&gt;
+        <div className="mt-1.5 rounded-lg bg-muted/50 px-2.5 py-2">
+          <div className="flex items-baseline gap-1.5">
+            <span className="shrink-0 text-[11px] font-medium text-muted-foreground">发件人</span>
+            <span className="min-w-0 truncate text-[11.5px] text-foreground/90">
+              {message.fromName || message.fromEmail}
+            </span>
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+              &lt;{message.fromEmail}&gt;
+            </span>
           </div>
-          <div>
-            <span className="text-muted-foreground/70">收件人：</span>
-            {message.to.join("、")}
-          </div>
-          {message.cc.length > 0 ? (
-            <div>
-              <span className="text-muted-foreground/70">抄送：</span>
-              {message.cc.join("、")}
-            </div>
-          ) : null}
+          <ContactSection label="收件人" contacts={to} />
+          {cc.length > 0 ? <ContactSection label="抄送" contacts={cc} /> : null}
         </div>
       ) : null}
     </div>

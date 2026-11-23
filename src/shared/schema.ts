@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export const securitySchema = z.enum(["tls", "starttls", "none"])
+export const securitySchema = z.enum(["tls", "starttls", "tls-insecure", "none"])
 export const densitySchema = z.enum(["compact", "standard", "comfortable"])
 export const themeModeSchema = z.enum(["dark", "light", "system"])
 
@@ -33,7 +33,9 @@ export const settingsSchema = z.object({
   stickyGroupHeaders: z.boolean(),
   showTimeNonCompact: z.boolean(),
   folderCount: z.enum(["unread", "total"]),
-  closeToTray: z.boolean()
+  closeToTray: z.boolean(),
+  // 0 = 自动；其余为实际缩放系数
+  uiScale: z.number().min(0).max(1.5)
 })
 
 export const settingsPatchSchema = settingsSchema.partial()

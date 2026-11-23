@@ -1,6 +1,6 @@
-import { app } from "electron"
 import { ImapFlow } from "imapflow"
-import type { Account, Folder, FolderRole, SyncEvent, SyncState, SyncStatus } from "@shared/types"
+import type { MessageStructureObject } from "imapflow"
+import type { Account, Address, Folder, FolderRole, SyncEvent, SyncState, SyncStatus } from "@shared/types"
 import {
   findFolderByPath,
   deleteFolder,
@@ -15,23 +15,45 @@ import {
 import {
   clearFolderMessages,
   countFolder,
+  countMessagesNeedingBody,
   deleteMessages as deleteMessageRows,
   folderUidIndex,
   getAttachment,
   getMessageLocator,
+  idsNeedingBody,
+  messageIdsByUids,
   messageLocators,
+  messagesMissingSnippet,
   moveMessageRow,
+  messagesNeedingBody,
   oldestUid,
   messagesNeedingAttachmentFlags,
   saveIncoming,
   setHasAttachments,
   setMessageBody,
-  setReadById
+  setReadById,
+  setRecipients,
+  setSnippet
 } from "../db/messages"
 import type { IncomingMessage, LocalUidRow } from "../db/messages"
 import { getSettings } from "../db/settings"
 import { openPassword } from "../security/credentials"
-import { collectAttachmentParts, inspectStructure, parseBody, toIncoming } from "./parse"
+import { buildImapOptions } from "./connection"
+import {
+  attachmentsFromParts,
+  bodyFromParts,
+  collectAttachmentParts,
+  collectInlineImages,
+  collectTextParts,
+  decodeBinaryPart,
+  embedCidImages,
+  headerField,
+  inspectStructure,
+  parseAddressHeader,
+  parseBody,
+  toIncoming,
+  toSnippet
+} from "./parse"
 import { get, run } from "../db"
 
 /** 首次同步只拉最近的若干封（PRD FR-05.1），其余靠翻页时再补。 */
@@ -41,6 +63,9 @@ const BATCH_SIZE = 50
 /** 历史回溯每批的封数：只取头部（ENVELOPE/FLAGS/SIZE），一个往返能拿一整批。 */
 const BACKFILL_BATCH = 200
 const MAX_SOURCE = 512 * 1024
+/** 正文内嵌截图单张上限 2MB、整封合计 8MB；超过仍按占位显示，避免把库撑爆。 */
+const MAX_INLINE_IMAGE = 2 * 1024 * 1024
+const MAX_INLINE_TOTAL = 8 * 1024 * 1024
 const BACKOFF_MAX = 60_000
 /**
  * 兜底轮询间隔。IDLE 在部分服务商（实测 QQ）上不会主动推送新邮件，只有客户端再说话时才回
@@ -78,22 +103,24 @@ const roleOf = (specialUse?: string): FolderRole => {
   }
 }
 
-const FETCH_QUERY = {
+/**
+ * 列表头 + BODYSTRUCTURE：BODYSTRUCTURE 用来定位正文块与附件 part。
+ * 正文随后按 part 号单独取（见 fetchBodies），不把附件二进制顺带拉下来。
+ */
+const STRUCTURE_QUERY = {
   envelope: true,
   flags: true,
   internalDate: true,
   size: true,
   bodyStructure: true,
-  bodyParts: ["1", "1.1", "1.2"]
+  // 收件人/抄送的姓名只在原始头里可靠（QQ 的 ENVELOPE 会给本地部分）
+  headers: ["to", "cc"]
 }
 
-/** 历史回溯只取头部，不取 BODYSTRUCTURE：一批 200 封一个往返，摘要与附件信息等点开时再补。 */
-const HEADER_QUERY = {
-  envelope: true,
-  flags: true,
-  internalDate: true,
-  size: true
-}
+const FETCH_QUERY = STRUCTURE_QUERY
+
+/** 历史回溯同样要结构：正文预下载靠它找 part。 */
+const HEADER_QUERY = STRUCTURE_QUERY
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
@@ -116,6 +143,9 @@ export class SyncEngine {
   private folderPath?: string
   private error?: string
   private lastSyncAt?: number
+  private startedAt?: number
+  private progress?: { folder: string; fetched: number; total: number }
+  private bodyProgress?: { done: number; total: number }
   private failures = 0
   private retryTimer: NodeJS.Timeout | null = null
   private pollTimer: NodeJS.Timeout | null = null
@@ -136,7 +166,10 @@ export class SyncEngine {
       accountId: this.account.id,
       folder: this.folderPath,
       lastSyncAt: this.lastSyncAt,
-      error: this.error
+      error: this.error,
+      startedAt: this.startedAt,
+      progress: this.progress,
+      bodies: this.bodyProgress
     }
   }
 
@@ -162,8 +195,10 @@ export class SyncEngine {
   syncNow(): Promise<void> {
     return this.schedule(async () => {
       this.failures = 0
+      this.startedAt = Date.now()
       await this.ensureConnected()
       await this.syncAll()
+      await this.refreshRecipientNames()
       await this.reconcileAccount("manual")
       await this.openInboxForIdle()
       this.lastSyncAt = Date.now()
@@ -172,6 +207,158 @@ export class SyncEngine {
       this.startReconcileTimer()
       this.startBackfill()
     })
+  }
+
+  /**
+   * 正文预下载：按 BODYSTRUCTURE 里的 part 号把 text/plain 与 text/html 取回来解码落库。
+   * 必须在已持有该文件夹 mailbox lock 时调用。附件二进制不在这里取（仍按需下载）。
+   */
+  private async fetchBodies(
+    folderId: string,
+    items: { uid: number; structure?: MessageStructureObject }[]
+  ): Promise<void> {
+    const client = this.client
+    if (!client || items.length === 0) return
+    const allIds = messageIdsByUids(folderId, items.map((item) => item.uid))
+    // 已经有正文的跳过：重复同步不能覆盖正文，也不能重插附件（会丢已保存的本地路径）
+    const pending = idsNeedingBody([...allIds.values()])
+    const ids = new Map([...allIds].filter(([, id]) => pending.has(id)))
+    if (ids.size === 0) return
+    items = items.filter((item) => ids.has(item.uid))
+    const byUid = new Map(items.map((item) => [item.uid, item]))
+    const groups = new Map<string, { ids: string[]; uids: number[] }>()
+    const noText: typeof items = []
+    for (const item of items) {
+      const parts = collectTextParts(item.structure)
+      if (parts.length === 0) {
+        noText.push(item)
+        continue
+      }
+      const images = collectInlineImages(item.structure).filter(
+        (image) => image.size === null || image.size <= MAX_INLINE_IMAGE
+      )
+      const ids = [...new Set([...parts.map((part) => part.id), ...images.map((image) => image.part)])]
+      const key = ids.join(",")
+      let group = groups.get(key)
+      if (!group) {
+        group = { ids, uids: [] }
+        groups.set(key, group)
+      }
+      group.uids.push(item.uid)
+    }
+    for (const item of noText) {
+      const id = ids.get(item.uid)
+      if (!id) continue
+      const attachments = attachmentsFromParts(collectAttachmentParts(item.structure), id)
+      setMessageBody(id, "", null, false, attachments)
+    }
+    for (const group of groups.values()) {
+      for (let offset = 0; offset < group.uids.length; offset += BATCH_SIZE) {
+        const chunk = group.uids.slice(offset, offset + BATCH_SIZE)
+        const bodies = new Map<number, Map<string, Buffer>>()
+        for await (const message of client.fetch(chunk.join(","), { bodyParts: group.ids }, { uid: true })) {
+          if (typeof message.uid === "number" && message.bodyParts) {
+            bodies.set(message.uid, message.bodyParts)
+          }
+        }
+        for (const uid of chunk) {
+          const item = byUid.get(uid)
+          const id = ids.get(uid)
+          if (!item || !id) continue
+          const bodyParts = bodies.get(uid) ?? new Map<string, Buffer>()
+          const body = bodyFromParts(collectTextParts(item.structure), bodyParts)
+          let html = body.html
+          if (html) {
+            // 内嵌截图：cid: 引用换成本地 data URL，正文里直接可见
+            const images = new Map<string, string>()
+            let total = 0
+            for (const image of collectInlineImages(item.structure)) {
+              if (image.size !== null && image.size > MAX_INLINE_IMAGE) continue
+              const raw = bodyParts.get(image.part)
+              if (!raw) continue
+              const buffer = decodeBinaryPart(raw, image.encoding)
+              if (buffer.length === 0 || buffer.length > MAX_INLINE_IMAGE) continue
+              if (total + buffer.length > MAX_INLINE_TOTAL) break
+              total += buffer.length
+              images.set(image.contentId.toLowerCase(), `data:${image.mime};base64,${buffer.toString("base64")}`)
+            }
+            html = embedCidImages(html, images)
+          }
+          const attachments = attachmentsFromParts(collectAttachmentParts(item.structure), id)
+          setMessageBody(
+            id,
+            body.text,
+            html,
+            html !== null,
+            attachments,
+            toSnippet(body.text || html || "")
+          )
+        }
+      }
+    }
+  }
+
+  /**
+   * 历史邮件正文补齐：旧版本只在点开时拉正文，库里还有大量 body_text 为空的邮件。
+   * 分批（每批 200 封）按文件夹取 BODYSTRUCTURE，再走 fetchBodies；补完为止。
+   */
+  private async bodyBackfillLoop(): Promise<void> {
+    const total = countMessagesNeedingBody()
+    if (total === 0) return
+    let done = 0
+    this.bodyProgress = { done, total }
+    this.hooks.emit({ type: "bodies", done, total })
+    while (!this.stopped) {
+      const candidates = messagesNeedingBody(200)
+      if (candidates.length === 0) {
+        console.log("[sync] body backfill done", this.account.email)
+        this.bodyProgress = undefined
+        this.hooks.emit({ type: "bodies", done: total, total, finished: true })
+        return
+      }
+      const byFolder = new Map<string, { id: string; uid: number }[]>()
+      for (const item of candidates) {
+        const list = byFolder.get(item.folderId) ?? []
+        list.push({ id: item.id, uid: item.uid })
+        byFolder.set(item.folderId, list)
+      }
+      let processed = 0
+      for (const [folderId, list] of byFolder) {
+        if (this.stopped) return
+        const folder = getFolder(folderId)
+        const client = this.client
+        if (!folder || !client) return
+        if (!folder.enabled) continue
+        const lock = await client.getMailboxLock(folder.path)
+        try {
+          const items: { uid: number; structure?: MessageStructureObject }[] = []
+          const range = list.map((item) => item.uid).join(",")
+          for await (const message of client.fetch(range, { bodyStructure: true }, { uid: true })) {
+            if (typeof message.uid === "number") {
+              items.push({ uid: message.uid, structure: message.bodyStructure })
+            }
+          }
+          await this.fetchBodies(folderId, items)
+          processed += items.length
+          done += items.length
+          this.bodyProgress = { done: Math.min(done, total), total }
+          this.hooks.emit({ type: "bodies", done: Math.min(done, total), total })
+        } catch (error) {
+          console.error("[sync] body backfill failed", folder.path, String(error))
+        } finally {
+          lock.release()
+        }
+      }
+      // 一封也没处理（网络/服务器拒绝）就停下，别在启动时空转
+      if (processed === 0) {
+        this.bodyProgress = undefined
+        this.hooks.emit({ type: "bodies", done, total, finished: true })
+        return
+      }
+      await sleep(120)
+    }
+    this.bodyProgress = undefined
+    this.hooks.emit({ type: "bodies", done, total, finished: true })
   }
 
   /** 点开邮件时才拉全文：返回是否拿到了正文。 */
@@ -194,7 +381,14 @@ export class SyncEngine {
         if (!found || !found.source) return false
         // 正文只取前 MAX_SOURCE 字节：附件会被截断，尺寸必须靠 BODYSTRUCTURE 纠正
         const parsed = await parseBody(messageId, found.source, collectAttachmentParts(found.bodyStructure))
-        setMessageBody(messageId, parsed.text, parsed.html, parsed.hasHtml, parsed.attachments)
+        setMessageBody(
+          messageId,
+          parsed.text,
+          parsed.html,
+          parsed.hasHtml,
+          parsed.attachments,
+          toSnippet(parsed.text || parsed.html || "")
+        )
         return true
       } finally {
         lock.release()
@@ -286,11 +480,17 @@ export class SyncEngine {
     if (patch.folder !== undefined) this.folderPath = patch.folder
     if (patch.error !== undefined) this.error = patch.error
     if (state === "disconnected") this.folderPath = undefined
+    if (state === "idling" || state === "error" || state === "disconnected") {
+      // 一轮同步结束：耗时与文件夹进度都收掉（正文补齐有自己的进度条）
+      this.startedAt = undefined
+      this.progress = undefined
+    }
     this.hooks.emit({ type: "state", status: this.status() })
   }
 
   private async bootstrap(): Promise<void> {
     if (this.stopped) return
+    this.startedAt = Date.now()
     await this.ensureConnected()
     // refreshFolders 由 reconcileAccount 开头调用（手动同步 / 3 分钟对账也会走一遍，
     // 网页版删掉的文件夹不必等重启才消失）。
@@ -300,6 +500,7 @@ export class SyncEngine {
     await this.reconcileAccount("bootstrap")
     await this.syncAll()
     await this.refreshAttachmentFlags()
+    await this.refreshRecipientNames()
     await this.openInboxForIdle()
     this.lastSyncAt = Date.now()
     this.setState("idling")
@@ -330,7 +531,7 @@ export class SyncEngine {
     for (const [folderId, list] of byFolder) {
       const folder = getFolder(folderId)
       const client = this.client
-      if (!folder || !client) continue
+      if (!folder || !folder.enabled || !client) continue
       const lock = await client.getMailboxLock(folder.path)
       try {
         const byUid = new Map(list.map((item) => [item.uid, item.id]))
@@ -351,6 +552,48 @@ export class SyncEngine {
     if (candidates.length < 500) {
       run("INSERT OR REPLACE INTO setting (key, value) VALUES ('attachFlagsV6', 'true')")
     }
+  }
+
+  /**
+   * 一次性修正历史邮件的收件人/抄送姓名：旧数据直接取 ENVELOPE，QQ 会把 personal name
+   * 填成地址本地部分（zhang.wei / 1036902640）。这里逐文件夹重读 To/Cc 原始头覆盖。
+   */
+  private async refreshRecipientNames(): Promise<void> {
+    const marker = get<{ value: string }>("SELECT value FROM setting WHERE key = 'recipientNamesV1'")
+    if (marker) return
+    const client = this.client
+    if (!client) return
+    let updated = 0
+    for (const folder of listFolders(this.account.id)) {
+      if (this.stopped) return
+      if (!folder.enabled) continue
+      // 新文件夹的 UID 体系还没建立，交给随后的同步
+      if (folder.uidValidity === null) continue
+      const lock = await client.getMailboxLock(folder.path)
+      try {
+        const index = folderUidIndex(folder.id)
+        const updates: { id: string; to: Address[]; cc: Address[] }[] = []
+        for await (const message of client.fetch("1:*", { uid: true, headers: ["to", "cc"] }, { uid: true })) {
+          if (typeof message.uid !== "number" || !message.headers) continue
+          const row = index.get(message.uid)
+          if (!row) continue
+          const to = parseAddressHeader(headerField(message.headers, "to"))
+          const cc = parseAddressHeader(headerField(message.headers, "cc"))
+          if (to.length === 0 && cc.length === 0) continue
+          updates.push({ id: row.id, to, cc })
+        }
+        for (const update of updates) setRecipients(update.id, update.to, update.cc)
+        updated += updates.length
+      } catch (error) {
+        console.error("[sync] recipient names failed", folder.path, String(error))
+      } finally {
+        lock.release()
+      }
+    }
+    run("INSERT OR REPLACE INTO setting (key, value) VALUES ('recipientNamesV1', 'true')")
+    console.log("[sync] recipient names refreshed", this.account.email, updated)
+    // 界面可能在修正前就已经把列表读进内存了，补一个刷新信号
+    if (updated > 0) this.hooks.emit({ type: "recipients", updated })
   }
 
   private startReconcileTimer(): void {
@@ -393,20 +636,19 @@ export class SyncEngine {
       this.fail("auth", "账户缺少授权码，请重新在账户设置里填写")
       throw new Error("auth: missing password")
     }
-    const client = new ImapFlow({
-      host: this.account.imapHost,
-      port: this.account.imapPort,
-      secure: this.account.security === "tls",
-      auth: { user: this.account.username, pass: password },
-      clientInfo: { name: "MailDesk", version: app.getVersion(), vendor: "local" },
-      logger: false,
-      connectionTimeout: 15_000,
-      greetingTimeout: 15_000,
-      socketTimeout: 120_000,
-      // imapflow 默认空闲 15s 才进 IDLE，缩短到 5s 让推送型服务商更及时
-      autoIdleDelay: 5_000,
-      tls: { rejectUnauthorized: this.account.security !== "none", servername: this.account.imapHost }
-    })
+    const client = new ImapFlow(
+      buildImapOptions(
+        {
+          host: this.account.imapHost,
+          port: this.account.imapPort,
+          security: this.account.security,
+          username: this.account.username
+        },
+        password,
+        // imapflow 默认空闲 15s 才进 IDLE，缩短到 5s 让推送型服务商更及时
+        { autoIdleDelay: 5_000 }
+      )
+    )
 
     client.on("error", (error) => {
       if (this.stopped) return
@@ -456,6 +698,15 @@ export class SyncEngine {
     return listFolders(this.account.id).find((folder) => folder.role === "inbox")
   }
 
+  /** 「选择文件夹」：真实连服务器刷新清单后返回全部文件夹（含 hidden）。 */
+  scanFolders(): Promise<Folder[]> {
+    return this.schedule(async () => {
+      await this.ensureConnected()
+      await this.refreshFolders()
+      return listFolders(this.account.id)
+    })
+  }
+
   /** 拉文件夹清单与计数。UIDVALIDITY / 游标保留本地值，等同步时再核对。 */
   private async refreshFolders(): Promise<number> {
     const client = this.client
@@ -463,20 +714,23 @@ export class SyncEngine {
     const listed = await client.list({ statusQuery: { messages: true, unseen: true } })
     for (const item of listed) {
       const existing = findFolderByPath(this.account.id, item.path)
+      const role = roleOf(item.specialUse) ?? existing?.role ?? null
       const folder: Folder = {
         id: existing?.id ?? crypto.randomUUID(),
         accountId: this.account.id,
         path: item.path,
         name: item.name || item.path,
         delimiter: item.delimiter || null,
-        role: roleOf(item.specialUse) ?? existing?.role ?? null,
+        role,
         uidValidity: existing?.uidValidity ?? null,
         uidNext: existing?.uidNext ?? null,
         lastSyncedUid: existing?.lastSyncedUid ?? 0,
         totalCount: item.status?.messages ?? existing?.totalCount ?? 0,
         unreadCount: item.status?.unseen ?? existing?.unreadCount ?? 0,
         sortOrder: existing?.sortOrder ?? 0,
-        backfillUid: existing?.backfillUid ?? null
+        backfillUid: existing?.backfillUid ?? null,
+        // 新发现的文件夹：系统箱子默认显示；自建目录默认隐藏，由用户「选择文件夹」勾选
+        enabled: existing?.enabled ?? role !== null
       }
       upsertFolder(folder)
     }
@@ -493,7 +747,7 @@ export class SyncEngine {
   }
 
   private async syncAll(): Promise<void> {
-    const folders = listFolders(this.account.id)
+    const folders = listFolders(this.account.id).filter((folder) => folder.enabled)
     for (const folder of folders) {
       if (this.stopped) return
       const limit =
@@ -513,11 +767,27 @@ export class SyncEngine {
     // 连上账户就无条件把邮箱里的邮件全部下载到本地（不做策略截断、不做渐进式）
     console.log("[sync] backfill start", this.account.email)
     this.backfilling = true
-    void this.backfillLoop()
+    this.repairSnippets()
+    // 先把旧版本懒加载留下的正文补齐，再往前翻历史邮件（历史批次的正文在拉取时一并落库）
+    void this.bodyBackfillLoop()
+      .then(() => this.backfillLoop())
       .catch((error) => console.error("[sync] backfill failed", String(error)))
       .finally(() => {
         this.backfilling = false
       })
+  }
+
+  /** 正文已在库里但摘要为空的记录，本地补一次（老数据无需联网）。 */
+  private repairSnippets(): void {
+    for (let round = 0; round < 20; round += 1) {
+      const rows = messagesMissingSnippet(500)
+      if (rows.length === 0) return
+      for (const row of rows) {
+        const snippet = toSnippet(row.bodyText || row.bodyHtml || "")
+        setSnippet(row.id, snippet || " ")
+      }
+      if (rows.length < 500) return
+    }
   }
 
   private async backfillLoop(): Promise<void> {
@@ -550,7 +820,7 @@ export class SyncEngine {
 
   /** 挑下一个还能往前翻的文件夹：收件箱优先，其次按侧栏顺序。 */
   private nextBackfillFolder(): Folder | undefined {
-    const folders = listFolders(this.account.id)
+    const folders = listFolders(this.account.id).filter((folder) => folder.enabled)
     for (const folder of folders) {
       // 游标为 0 表示已经翻到最底；null 表示还没开始，用当前最小 UID 当起点
       if (folder.backfillUid !== null && folder.backfillUid < 1) continue
@@ -603,6 +873,7 @@ export class SyncEngine {
         return false
       }
       let batch: IncomingMessage[] = []
+      const bodyItems: { uid: number; structure?: MessageStructureObject }[] = []
       const flush = () => {
         if (batch.length === 0) return
         saveIncoming(folder.id, batch)
@@ -611,9 +882,12 @@ export class SyncEngine {
       for await (const message of client.fetch(from + ":" + to, HEADER_QUERY, { uid: true })) {
         if (this.stopped) break
         batch.push(toIncoming(message))
+        bodyItems.push({ uid: Number(message.uid), structure: message.bodyStructure })
         if (batch.length >= BATCH_SIZE) flush()
       }
       flush()
+      // 正文随邮件一起落库：点开时不再回服务器（附件仍按需）
+      await this.fetchBodies(folder.id, bodyItems)
       // 不管这批有没有命中（UID 空洞），游标都要往前推，否则会卡在同一段死循环
       updateBackfillUid(folder.id, from - 1)
       const done = countFolder(folder.id)
@@ -656,17 +930,23 @@ export class SyncEngine {
 
       const highest = Math.max(uidNext - 1, 0)
       const from = lastSyncedUid > 0 ? lastSyncedUid + 1 : Math.max(1, highest - limit + 1)
+      // 本轮要取的封数：首次同步是首屏窗口（limit），增量就是新增的 UID 段
+      const expected = highest >= from ? highest - from + 1 : 0
       let added = 0
       let fetched = 0
       let maxUid = lastSyncedUid
 
       if (highest >= from) {
         if (!quiet) this.setState("fetching", { folder: folder.path })
+        this.progress = { folder: folder.path, fetched: 0, total: expected }
+        this.hooks.emit({ type: "progress", folder: folder.path, fetched: 0, total: expected })
         let batch: IncomingMessage[] = []
+        const bodyItems: { uid: number; structure?: MessageStructureObject }[] = []
         const flush = () => {
           if (batch.length === 0) return
           added += saveIncoming(folder.id, batch)
-          this.hooks.emit({ type: "progress", folder: folder.path, fetched })
+          this.progress = { folder: folder.path, fetched, total: expected }
+          this.hooks.emit({ type: "progress", folder: folder.path, fetched, total: expected })
           batch = []
         }
         for await (const message of client.fetch(from + ":*", FETCH_QUERY, { uid: true })) {
@@ -674,10 +954,13 @@ export class SyncEngine {
           const incoming = toIncoming(message)
           maxUid = Math.max(maxUid, incoming.uid)
           batch.push(incoming)
+          bodyItems.push({ uid: Number(message.uid), structure: message.bodyStructure })
           fetched += 1
           if (batch.length >= BATCH_SIZE) flush()
         }
         flush()
+        // 新邮件的正文在同一把 mailbox lock 里取回，列表摘要同批发给界面
+        await this.fetchBodies(folder.id, bodyItems)
       }
 
       updateFolderCursor(folder.id, {
@@ -909,7 +1192,9 @@ export class SyncEngine {
       const foldersRemoved = await this.refreshFolders()
       await this.flushFlags()
       // 只对已经同步过的文件夹对账；全新文件夹交给 syncFolder 建立游标
-      const folders = listFolders(this.account.id).filter((folder) => folder.uidValidity !== null)
+      const folders = listFolders(this.account.id).filter(
+        (folder) => folder.enabled && folder.uidValidity !== null
+      )
       if (folders.length === 0) return
       const serverIndex = new Map<string, Map<number, boolean>>()
       const serverMeta = new Map<string, { uidValidity: number; uidNext: number; maxUid: number }>()
@@ -985,6 +1270,7 @@ export class SyncEngine {
           for (let offset = 0; offset < arrival.uids.length; offset += RECONCILE_FETCH) {
             const chunk = arrival.uids.slice(offset, offset + RECONCILE_FETCH)
             let batch: IncomingMessage[] = []
+            const bodyItems: { uid: number; structure?: MessageStructureObject }[] = []
             const flush = () => {
               if (batch.length === 0) return
               added += saveIncoming(arrival.folder.id, batch)
@@ -1006,13 +1292,16 @@ export class SyncEngine {
                 } catch (error) {
                   console.error("[sync] claim moved message failed", String(error))
                   batch.push(incoming)
+                  bodyItems.push({ uid: incoming.uid, structure: message.bodyStructure })
                 }
               } else {
                 batch.push(incoming)
+                bodyItems.push({ uid: incoming.uid, structure: message.bodyStructure })
               }
               if (batch.length >= BATCH_SIZE) flush()
             }
             flush()
+            await this.fetchBodies(arrival.folder.id, bodyItems)
           }
         } finally {
           lock.release()

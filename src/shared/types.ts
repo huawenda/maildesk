@@ -153,6 +153,8 @@ export interface Settings {
   pageSize: number
   /** 是否默认放行邮件里的远程图片 */
   remoteImages: boolean
+  /** 正文适配方式：reflow = 重排进阅读区；zoom = 保留邮件原版式，按阅读区宽度等比缩放 */
+  bodyFit: "reflow" | "zoom"
   /** 标准密度是否显示第三行摘要（宽松始终三行） */
   standardThreeLines: boolean
   /** 非紧凑密度是否显示日期分组组头 */

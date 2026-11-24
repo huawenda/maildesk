@@ -137,6 +137,8 @@ export default function App() {
   const dragRef = useRef<{ x: number; width: number } | null>(null)
   const [backfill, setBackfill] = useState<{ done: number; total: number } | null>(null)
   const [remoteImages, setRemoteImages] = useState<boolean>(true)
+  // 正文适配：reflow = 重排进阅读区；zoom = 保留原版式等比缩放
+  const [bodyFit, setBodyFit] = useState<"reflow" | "zoom">("reflow")
   const [standardThreeLines, setStandardThreeLines] = useState<boolean>(false)
   const [groupHeadersNonCompact, setGroupHeadersNonCompact] = useState<boolean>(true)
   const [stickyGroupHeaders, setStickyGroupHeaders] = useState<boolean>(true)
@@ -173,6 +175,7 @@ export default function App() {
         setCollapsed(settings.sidebarCollapsed)
         setFontSize(settings.fontSize)
         setRemoteImages(settings.remoteImages)
+        setBodyFit(settings.bodyFit ?? "reflow")
         setStandardThreeLines(settings.standardThreeLines)
         setGroupHeadersNonCompact(settings.groupHeadersNonCompact)
         setStickyGroupHeaders(settings.stickyGroupHeaders)
@@ -220,6 +223,11 @@ export default function App() {
     if (!settingsReady.current) return
     void mail.settings.set({ remoteImages }).catch(() => undefined)
   }, [remoteImages])
+
+  useEffect(() => {
+    if (!settingsReady.current) return
+    void mail.settings.set({ bodyFit }).catch(() => undefined)
+  }, [bodyFit])
 
   useEffect(() => {
     if (!settingsReady.current) return
@@ -990,8 +998,8 @@ export default function App() {
           syncLabel={syncLabel}
           onSync={runSync}
         />
-        {/* 画布区（列表 + 阅读器）：左、上各一条 1px 框线，左上角随 8px 圆角收边 */}
-        <div className="flex min-w-0 flex-1 overflow-hidden rounded-tl-lg border-t border-l border-border">
+        {/* 画布区（列表 + 阅读器）：整块抠成一张悬浮卡片，四周留出背景色（2026-11-24 用户要求） */}
+        <div className="mt-2 mb-0 ml-2 mr-2 flex min-w-0 flex-1 overflow-hidden rounded-t-lg bg-card">
           <MessageList
             folderId={folderId}
             messages={visible}
@@ -1055,6 +1063,7 @@ export default function App() {
             message={selected}
             fontSize={fontSize}
             remoteImages={remoteImages}
+            bodyFit={bodyFit}
             onToggleStar={() => selectedId && toggleStar(selectedId)}
             onToggleUnread={() => selectedId && markRead(selectedId, false)}
             onSetRead={markRead}
@@ -1103,6 +1112,8 @@ export default function App() {
         onUiScaleChange={setUiScale}
         remoteImages={remoteImages}
         onRemoteImagesChange={setRemoteImages}
+        bodyFit={bodyFit}
+        onBodyFitChange={setBodyFit}
         accounts={accounts}
         version={version}
         onManageAccounts={() => {

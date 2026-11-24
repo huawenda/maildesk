@@ -65,6 +65,8 @@ interface ReaderProps {
   fontSize: number
   /** 是否默认放行远程图片，来自设置 */
   remoteImages: boolean
+  /** 正文适配方式 */
+  bodyFit: "reflow" | "zoom"
   onToggleStar: () => void
   onToggleUnread: () => void
   /** 右键菜单里「标为已读 / 未读」「全部标为已读」 */
@@ -90,6 +92,7 @@ export function Reader({
   message,
   fontSize,
   remoteImages,
+  bodyFit,
   onToggleStar,
   onToggleUnread,
   onSetRead,
@@ -314,8 +317,8 @@ export function Reader({
 
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto">
-            <article className="w-full select-text px-8 pb-16 pt-5">
+          <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-auto">
+            <article className="flex min-h-full w-full select-text flex-col px-8 pb-4 pt-5">
               <h2 className="text-[22px] font-semibold leading-[30px] tracking-[-0.01em]">
                 {message.subject || "（无主题）"}
               </h2>
@@ -458,12 +461,14 @@ export function Reader({
               {message.bodyHtml ? (
                 // 文本优先：正文直接落在画布上，不再套「印刷品」白纸卡片，也不整页缩放。
                 // 邮件自己的浅色底/底图仍然保留，深色主题下由 HtmlBody 做一次对比度兜底。
-                <div className="mt-6 w-full">
+                // 直角矩形卡片标出正文容器范围：只包正文，主题/发件人/收件人留卡片外（用户 2026-11-24）
+                <div className="mt-6 w-full max-w-[900px] flex-1 border border-border bg-card px-5 py-5">
                   <HtmlBody
                     key={message.id}
                     html={message.bodyHtml}
                     fontSize={fontSize}
                     remoteImages={remoteImages}
+                    fitMode={bodyFit}
                     onContextMenu={(x, y) => {
                       // 转成合成事件打到 trigger 上，让 Radix 在鼠标位置打开同一套菜单
                       bodyRef.current?.dispatchEvent(
@@ -481,10 +486,12 @@ export function Reader({
               ) : (
                 // 纯文本没有自带底色，直接落在阅读画布上：卡片在邮件语义里是附件/附属块，
                 // 正文套卡片会造成双重内边距，浅色下还会灰叠灰（用户 2026-11-22 反馈）
-                <div className="mt-6 max-w-[76ch] space-y-4 leading-[1.75] text-foreground/90" style={{ fontSize }}>
-                  {message.body.map((paragraph, index) => (
-                    <PlainBodyBlock key={index} text={paragraph} />
-                  ))}
+                <div className="mt-6 w-full max-w-[900px] flex-1 border border-border bg-card px-5 py-5">
+                  <div className="max-w-[76ch] space-y-4 leading-[1.75] text-foreground/90" style={{ fontSize }}>
+                    {message.body.map((paragraph, index) => (
+                      <PlainBodyBlock key={index} text={paragraph} />
+                    ))}
+                  </div>
                 </div>
               )}
             </article>

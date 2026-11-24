@@ -47,6 +47,8 @@ interface SettingsDialogProps {
   onUiScaleChange: (value: number) => void
   remoteImages: boolean
   onRemoteImagesChange: (value: boolean) => void
+  bodyFit: "reflow" | "zoom"
+  onBodyFitChange: (value: "reflow" | "zoom") => void
   accounts: Account[]
   version?: string
   onManageAccounts: () => void
@@ -140,6 +142,8 @@ export function SettingsDialog({
   onUiScaleChange,
   remoteImages,
   onRemoteImagesChange,
+  bodyFit,
+  onBodyFitChange,
   accounts,
   version,
   onManageAccounts
@@ -256,6 +260,19 @@ export function SettingsDialog({
                 </Row>
                 <Row label="关闭窗口时最小化到托盘" hint="关闭后点窗口的 × 会退出应用；开启后只隐藏窗口，从托盘菜单「退出」才真正退出">
                   <Switch checked={closeToTray} onChange={onCloseToTrayChange} />
+                </Row>
+                <Row
+                  label="正文适配方式"
+                  hint="重排：把邮件版式压进阅读区，表格会换行；等比缩放：保留邮件原版式，整封按阅读区宽度缩放（窄窗口字会变小）"
+                >
+                  <Segmented
+                    value={bodyFit}
+                    options={[
+                      { value: "reflow", label: "重排" },
+                      { value: "zoom", label: "等比缩放" }
+                    ]}
+                    onChange={onBodyFitChange}
+                  />
                 </Row>
                 <Row label="默认显示远程图片" hint="关闭后，邮件里的外链图片先拦截，阅读时可手动放行">
                   <Switch checked={remoteImages} onChange={onRemoteImagesChange} />

@@ -7,6 +7,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fontSize: 14,
   pageSize: 200,
   remoteImages: true,
+  bodyFit: "reflow",
   standardThreeLines: false,
   groupHeadersNonCompact: true,
   stickyGroupHeaders: true,

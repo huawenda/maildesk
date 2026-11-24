@@ -1,28 +1,36 @@
 import { useEffect, useRef, type RefObject } from "react"
 import { createPortal } from "react-dom"
 
-const THUMB_WIDTH = 6
+const THUMB_SIZE = 6
 const THUMB_INSET = 3
-const MIN_THUMB_HEIGHT = 24
+const MIN_THUMB_LENGTH = 24
 const HIDE_DELAY = 700
 
 /**
- * 浮层滚动条：原生滚动条被 `scrollbar-overlay` 隐藏后，用一条 fixed 定位的细条画在容器右缘上方，
- * 不占内容宽度（滚动条不再把列表挤窄，列头也不需要为它让位）。
+ * 浮层滚动条：原生滚动条被 `scrollbar-overlay` 隐藏后，用 fixed 定位的细条画在容器右缘 / 下缘上方，
+ * 不占内容宽高（滚动条不再把内容挤窄，列头也不需要为它让位）。纵向与横向各一条，按需出现。
  *
  * 用 portal + 直接改 style，避免滚动时触发 React 重渲染（列表是虚拟滚动的）。
  */
 export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | null> }) {
-  const barRef = useRef<HTMLDivElement>(null)
+  const vRef = useRef<HTMLDivElement>(null)
+  const hRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const element = target.current
-    const bar = barRef.current
-    if (!element || !bar) return
+    const vBar = vRef.current
+    const hBar = hRef.current
+    if (!element || !vBar || !hBar) return
 
     let hideTimer: number | null = null
     let rafId: number | null = null
-    let dragging: { startY: number; startScroll: number; track: number; range: number } | null = null
+    let dragging: {
+      axis: "x" | "y"
+      start: number
+      startScroll: number
+      track: number
+      range: number
+    } | null = null
 
     // 细条可见时每帧重算一次位置。窗口最大化/改尺寸、拖动列表宽度都可能只改布局
     // 而不触发我们挂的那几个事件（实测读屏栏会停在旧窗口宽度的位置），一帧一读
@@ -30,9 +38,10 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
     const tick = () => {
       rafId = null
       update()
-      // update 可能因为内容不再溢出而把细条隐藏，此时停表，别空转
-      if (bar.style.opacity === "1") rafId = window.requestAnimationFrame(tick)
+      if (isVisible()) rafId = window.requestAnimationFrame(tick)
     }
+
+    const isVisible = () => vBar.style.opacity === "1" || hBar.style.opacity === "1"
 
     const startLoop = () => {
       if (rafId === null) rafId = window.requestAnimationFrame(tick)
@@ -50,7 +59,8 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
         window.clearTimeout(hideTimer)
         hideTimer = null
       }
-      bar.style.opacity = "1"
+      vBar.style.opacity = "1"
+      hBar.style.opacity = "1"
       startLoop()
     }
 
@@ -59,28 +69,52 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
       if (hideTimer !== null) window.clearTimeout(hideTimer)
       hideTimer = window.setTimeout(() => {
         hideTimer = null
-        bar.style.opacity = "0"
+        vBar.style.opacity = "0"
+        hBar.style.opacity = "0"
         stopLoop()
       }, HIDE_DELAY)
     }
 
+    const hideBar = (bar: HTMLDivElement) => {
+      bar.style.opacity = "0"
+      bar.style.pointerEvents = "none"
+    }
+
     const update = () => {
       const rect = element.getBoundingClientRect()
-      const viewport = element.clientHeight
-      const range = element.scrollHeight - viewport
-      if (rect.height <= 0 || rect.width <= 0 || range <= 1) {
-        bar.style.opacity = "0"
-        bar.style.pointerEvents = "none"
+      if (rect.height <= 0 || rect.width <= 0) {
+        hideBar(vBar)
+        hideBar(hBar)
         stopLoop()
         return
       }
-      const height = Math.max(MIN_THUMB_HEIGHT, Math.round((viewport * viewport) / element.scrollHeight))
-      const maxTop = viewport - height
-      const top = rect.top + (element.scrollTop / range) * maxTop
-      bar.style.pointerEvents = "auto"
-      bar.style.left = `${Math.round(rect.right - THUMB_WIDTH - THUMB_INSET)}px`
-      bar.style.top = `${Math.round(top)}px`
-      bar.style.height = `${height}px`
+
+      const viewportH = element.clientHeight
+      const rangeY = element.scrollHeight - viewportH
+      if (rangeY > 1) {
+        const length = Math.max(MIN_THUMB_LENGTH, Math.round((viewportH * viewportH) / element.scrollHeight))
+        const top = rect.top + (element.scrollTop / rangeY) * (viewportH - length)
+        vBar.style.pointerEvents = "auto"
+        vBar.style.left = `${Math.round(rect.right - THUMB_SIZE - THUMB_INSET)}px`
+        vBar.style.top = `${Math.round(top)}px`
+        vBar.style.height = `${length}px`
+      } else {
+        hideBar(vBar)
+      }
+
+      const viewportW = element.clientWidth
+      const rangeX = element.scrollWidth - viewportW
+      if (rangeX > 1) {
+        const length = Math.max(MIN_THUMB_LENGTH, Math.round((viewportW * viewportW) / element.scrollWidth))
+        // 横向细条贴在容器下缘，右侧让出纵向细条的位置，避免两条在拐角叠在一起
+        const left = rect.left + (element.scrollLeft / rangeX) * (viewportW - length)
+        hBar.style.pointerEvents = "auto"
+        hBar.style.left = `${Math.round(left)}px`
+        hBar.style.top = `${Math.round(rect.bottom - THUMB_SIZE - THUMB_INSET)}px`
+        hBar.style.width = `${Math.min(length, viewportW - THUMB_SIZE - THUMB_INSET)}px`
+      } else {
+        hideBar(hBar)
+      }
     }
 
     const onScroll = () => {
@@ -91,30 +125,38 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
 
     const onPointerMove = (event: PointerEvent) => {
       if (!dragging) return
-      const delta = event.clientY - dragging.startY
-      element.scrollTop = dragging.startScroll + (delta / Math.max(1, dragging.track)) * dragging.range
+      const delta = dragging.axis === "y" ? event.clientY - dragging.start : event.clientX - dragging.start
+      const next = dragging.startScroll + (delta / Math.max(1, dragging.track)) * dragging.range
+      if (dragging.axis === "y") element.scrollTop = next
+      else element.scrollLeft = next
       update()
     }
 
     const stopDrag = () => {
       if (!dragging) return
       dragging = null
-      bar.removeAttribute("data-dragging")
+      vBar.removeAttribute("data-dragging")
+      hBar.removeAttribute("data-dragging")
       window.removeEventListener("pointermove", onPointerMove)
       window.removeEventListener("pointerup", stopDrag)
       window.removeEventListener("pointercancel", stopDrag)
       scheduleHide()
     }
 
-    const startDrag = (event: PointerEvent) => {
+    const startDrag = (axis: "x" | "y") => (event: PointerEvent) => {
       if (event.button !== 0) return
       event.preventDefault()
-      const track = element.clientHeight - (Number.parseFloat(bar.style.height) || MIN_THUMB_HEIGHT)
+      const bar = axis === "y" ? vBar : hBar
+      const track =
+        axis === "y"
+          ? element.clientHeight - (Number.parseFloat(vBar.style.height) || MIN_THUMB_LENGTH)
+          : element.clientWidth - (Number.parseFloat(hBar.style.width) || MIN_THUMB_LENGTH)
       dragging = {
-        startY: event.clientY,
-        startScroll: element.scrollTop,
+        axis,
+        start: axis === "y" ? event.clientY : event.clientX,
+        startScroll: axis === "y" ? element.scrollTop : element.scrollLeft,
         track,
-        range: element.scrollHeight - element.clientHeight
+        range: axis === "y" ? element.scrollHeight - element.clientHeight : element.scrollWidth - element.clientWidth
       }
       bar.dataset.dragging = "true"
       show()
@@ -128,10 +170,14 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
       show()
     }
 
+    const onVPointerDown = startDrag("y")
+    const onHPointerDown = startDrag("x")
+
     element.addEventListener("scroll", onScroll, { passive: true })
     element.addEventListener("pointerenter", onEnter)
     element.addEventListener("pointerleave", scheduleHide)
-    bar.addEventListener("pointerdown", startDrag)
+    vBar.addEventListener("pointerdown", onVPointerDown)
+    hBar.addEventListener("pointerdown", onHPointerDown)
     window.addEventListener("resize", update)
 
     const observer = new ResizeObserver(update)
@@ -146,19 +192,31 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
       element.removeEventListener("scroll", onScroll)
       element.removeEventListener("pointerenter", onEnter)
       element.removeEventListener("pointerleave", scheduleHide)
-      bar.removeEventListener("pointerdown", startDrag)
+      vBar.removeEventListener("pointerdown", onVPointerDown)
+      hBar.removeEventListener("pointerdown", onHPointerDown)
       window.removeEventListener("resize", update)
       observer.disconnect()
     }
   }, [target])
 
+  const baseClass =
+    "pointer-events-none fixed z-[60] rounded-full bg-foreground/25 opacity-0 transition-opacity duration-150 hover:bg-foreground/40 data-[dragging=true]:bg-foreground/40"
+
   return createPortal(
-    <div
-      ref={barRef}
-      aria-hidden
-      className="pointer-events-none fixed z-[60] w-1.5 rounded-full bg-foreground/25 opacity-0 transition-opacity duration-150 hover:bg-foreground/40 data-[dragging=true]:bg-foreground/40"
-      style={{ left: -100, top: 0, height: 0 }}
-    />,
+    <>
+      <div
+        ref={vRef}
+        aria-hidden
+        className={`${baseClass} w-1.5`}
+        style={{ left: -100, top: 0, height: 0 }}
+      />
+      <div
+        ref={hRef}
+        aria-hidden
+        className={`${baseClass} h-1.5`}
+        style={{ left: -100, top: 0, width: 0 }}
+      />
+    </>,
     document.body
   )
 }

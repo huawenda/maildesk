@@ -37,6 +37,8 @@ const ROW_HEIGHT: Record<Density, number> = {
 
 /** 日期分组条高度（紧凑视图全宽表格） */
 const GROUP_HEIGHT = 24
+/** 紧凑视图里组与组之间留 8px（组头条顶部空出来，2026-11-24 用户要求） */
+const GROUP_TOP_GAP = 8
 /** 标准/宽松视图里组头条下方留 6px（与组内第一封 / 下一个组头）；
  *  上方不再额外加上边距——上一项自己的 6px 下间距就是组与组之间的呼吸 */
 const GROUP_BOTTOM_GAP = 6
@@ -431,7 +433,7 @@ export function MessageList({
   const rowHeight = density === "standard" ? (standardThreeLines ? 72 : 60) : ROW_HEIGHT[density]
   const showSnippet = !compact && (density === "comfortable" || standardThreeLines)
   const grouped = compact || groupHeadersNonCompact
-  const groupRowHeight = compact ? GROUP_HEIGHT : GROUP_HEIGHT + GROUP_BOTTOM_GAP
+  const groupRowHeight = compact ? GROUP_HEIGHT + GROUP_TOP_GAP : GROUP_HEIGHT + GROUP_BOTTOM_GAP
   // 行高是内容高度，槽位再额外加行间距；紧凑视图是表格，不加
   const rowSlot = compact ? rowHeight : rowHeight + ROW_GAP
 
@@ -540,20 +542,20 @@ export function MessageList({
           className="flex h-7 shrink-0 items-stretch border-y border-table-line bg-foreground/[0.05] text-[11.5px] text-muted-foreground"
           style={{ paddingRight: gutter }}
         >
-          <span className={cn("flex shrink-0 items-center justify-center border-r border-table-line", COL_STATUS)}>
+          <span className={cn("col-sep flex shrink-0 items-center justify-center", COL_STATUS)}>
             <span className="size-[9px] rounded-full bg-muted-foreground/45" />
           </span>
-          <span className={cn("flex shrink-0 items-center justify-center border-r border-table-line", COL_ATTACH)}>
+          <span className={cn("col-sep flex shrink-0 items-center justify-center", COL_ATTACH)}>
             <Paperclip className="size-3 opacity-70" />
           </span>
           <span
-            className="flex shrink-0 items-center border-r border-table-line pl-2"
+            className="col-sep flex shrink-0 items-center pl-2"
             style={{ width: cols.sender }}
           >
             发件人
           </span>
           {/* 发件人列左边界挨着固定的 18px 附件列，动不了；发件人的宽度用它与主题之间的分隔线调（向右拖变宽） */}
-          <span className="relative flex min-w-0 flex-1 items-center border-r border-table-line pl-2">
+          <span className="col-sep relative flex min-w-0 flex-1 items-center pl-2">
             <ColHandle
               label="发件人"
               active={resizingCol === "sender"}
@@ -563,7 +565,7 @@ export function MessageList({
             <span className="truncate">主题</span>
           </span>
           <span
-            className="relative flex shrink-0 items-center justify-end gap-0.5 whitespace-nowrap border-r border-table-line pr-1.5"
+            className="col-sep relative flex shrink-0 items-center justify-end gap-0.5 whitespace-nowrap pr-1.5"
             style={{ width: cols.date }}
           >
             <ColHandle
@@ -589,7 +591,7 @@ export function MessageList({
             </button>
           </span>
           <span
-            className="relative flex shrink-0 items-center justify-end whitespace-nowrap border-r border-table-line pr-2"
+            className="col-sep relative flex shrink-0 items-center justify-end whitespace-nowrap pr-2"
             style={{ width: cols.size }}
           >
             <ColHandle
@@ -619,7 +621,7 @@ export function MessageList({
           </span>
           {showFolder ? (
             <span
-              className="relative flex shrink-0 items-center justify-end border-l border-table-line px-2"
+              className="col-sep-l relative flex shrink-0 items-center justify-end px-2"
               style={{ width: cols.folder }}
             >
               <ColHandle
@@ -673,7 +675,7 @@ export function MessageList({
               return item.kind === "group" ? (
                   <div
                     key={item.key}
-                    className={cn("absolute inset-x-0 top-0", !compact && "pb-1.5")}
+                    className={cn("absolute inset-x-0 top-0", compact ? "pt-2" : "pb-1.5")}
                     style={{ height, transform: `translateY(${row.start}px)` }}
                   >
                     <GroupHeader
@@ -763,19 +765,18 @@ function GroupHeader({
       aria-expanded={!collapsed}
       title={collapsed ? "展开本组" : "收起本组"}
       className={cn(
-        "flex h-full w-full items-center gap-1.5 px-2 text-left text-[11.5px] font-medium text-foreground/80 transition-colors",
-        floating ? "bg-muted shadow-sm" : "bg-muted/70 hover:bg-muted/60",
-        // 紧凑视图是全宽表格，组头条跟着表格横线走；标准/宽松是圆角卡片，组头条也收圆角
-        compact ? "border-b border-table-line" : "rounded-lg"
+        "flex h-full w-full items-center px-2 text-left text-[11.5px] font-semibold text-foreground/80 transition-colors",
+        // 无底色的纯文字组头条（QQ 邮箱口径，2026-11-24 用户指定）；吸顶时必须实底，否则下方行会透上来
+        floating ? "bg-card" : "bg-transparent hover:bg-row-hover",
+        // 折叠状态用左侧的小箭头提示，展开时不画
+        collapsed ? "gap-1" : "gap-0"
       )}
     >
-      {collapsed ? (
-        <ChevronRight className="size-3 shrink-0 opacity-70" />
-      ) : (
-        <ChevronDown className="size-3 shrink-0 opacity-70" />
-      )}
-      <span>{label}</span>
-      <span className="tabular-nums text-muted-foreground/80">({count} 封)</span>
+      {collapsed ? <ChevronRight className="size-3 shrink-0 opacity-70" /> : null}
+      <span>
+        {label}
+        <span className="tabular-nums text-muted-foreground/80">（{count} 封）</span>
+      </span>
     </button>
   )
 }
@@ -839,7 +840,7 @@ const Highlighted = memo(function Highlighted({
             className={cn(
               "rounded-[2px] text-inherit",
               // 深色下 primary/25 几乎和底色融在一起，换暖色高亮（amber）才看得出来
-              selected ? "bg-white/30" : "bg-primary/25"
+              "bg-primary/25"
             )}
           >
             {part}
@@ -893,10 +894,8 @@ const MessageRow = memo(function MessageRow({
   const comfortable = density === "comfortable"
   // 已读行整体降一档明度（头像、发件人、主题、摘要、时间一起变淡），未读行保持原亮度
   const read = !message.unread
-  const mutedText = selected
-    ? "text-primary-foreground/85"
-    : read
-      ? "text-muted-foreground/65"
+  const mutedText = read
+    ? "text-muted-foreground/65"
       : "text-muted-foreground"
   const sender = message.fromName || message.fromEmail
   // 只在搜索态高亮：范围决定标哪个字段（收件人不在列表展示，所以 to 不高亮）
@@ -908,7 +907,7 @@ const MessageRow = memo(function MessageRow({
     return false
   }
   // 主题列的文字层次：日期、大小两列与它完全一致（字号 12.5、同样的已读/未读/选中明度）
-  const subjectText = selected ? "text-primary-foreground" : read ? "text-foreground/65" : "text-foreground"
+  const subjectText = read ? "text-foreground/65" : "text-foreground"
 
   // 紧凑视图：Foxmail 式表格式单行，不再显示头像与摘要
   if (compact) {
@@ -919,8 +918,10 @@ const MessageRow = memo(function MessageRow({
         aria-selected={selected}
         onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey, event.shiftKey)}
         className={cn(
-          "group flex h-full w-full cursor-default select-none items-center border-b border-table-line text-left",
-          selected ? "bg-primary" : "hover:bg-foreground/[0.06]"
+          // 行分隔线用伪元素并左右各内缩 8px：两端不碰卡片左缘和右侧分隔线（2026-11-24 用户要求）；
+          // hover / 选中底色也是内缩 + 圆角的伪元素，不再铺满整行（2026-11-24 用户要求）
+          "group isolate relative flex h-full w-full cursor-default select-none items-center text-left before:pointer-events-none before:absolute before:-z-10 before:inset-x-2 before:inset-y-[2px] before:rounded-md after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-table-line",
+          selected ? "before:bg-row-selected" : "hover:before:bg-row-hover"
         )}
       >
         {/* 读取状态与附件各占一列（Foxmail 口径），未读点与回形针不再挤在一个槽里。
@@ -939,13 +940,7 @@ const MessageRow = memo(function MessageRow({
             <span
               className={cn(
                 "size-[9px] rounded-full transition-colors duration-100",
-                selected
-                  ? message.unread
-                    ? "bg-white"
-                    : "bg-white/45"
-                  : message.unread
-                    ? "bg-primary"
-                    : "bg-muted-foreground/35 hover:bg-muted-foreground/65"
+                message.unread ? "bg-primary" : "bg-muted-foreground/35 hover:bg-muted-foreground/65"
               )}
             />
           </button>
@@ -957,7 +952,7 @@ const MessageRow = memo(function MessageRow({
           title={sender}
           className={cn(
             "shrink-0 truncate pl-2 text-[12.5px]",
-            selected ? "text-primary-foreground" : read ? "text-foreground/70" : "text-foreground",
+            read ? "text-foreground/70" : "text-foreground",
             message.unread && !selected && "font-medium"
           )}
           style={{ width: cols.sender }}
@@ -1013,11 +1008,7 @@ const MessageRow = memo(function MessageRow({
             <Star
               className={cn(
                 "size-3 transition-colors",
-                selected
-                  ? "text-primary-foreground/80"
-                  : message.starred
-                    ? "text-star"
-                    : "text-muted-foreground/40 hover:text-muted-foreground"
+                message.starred ? "text-star" : "text-muted-foreground/40 hover:text-muted-foreground"
               )}
               fill={message.starred ? "currentColor" : "none"}
               strokeWidth={message.starred ? 0 : 1.5}
@@ -1044,7 +1035,7 @@ const MessageRow = memo(function MessageRow({
       {message.hasAttachments ? <Paperclip className={cn("size-3.5", mutedText)} /> : null}
       {message.starred ? (
         <Star
-          className={cn("size-3.5", selected ? "text-primary-foreground" : "text-star")}
+          className={cn("size-3.5", "text-star")}
           fill="currentColor"
           strokeWidth={0}
         />
@@ -1059,15 +1050,15 @@ const MessageRow = memo(function MessageRow({
       aria-selected={selected}
       onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey, event.shiftKey)}
       className={cn(
-        "group flex h-full w-full cursor-default select-none items-center gap-3 rounded-lg pl-2 pr-3 text-left",
-        selected ? "bg-primary" : "hover:bg-foreground/[0.06]"
+        "group isolate relative flex h-full w-full cursor-default select-none items-center gap-3 pl-2 pr-3 text-left before:pointer-events-none before:absolute before:-z-10 before:inset-x-1 before:inset-y-[2px] before:rounded-lg",
+        selected ? "before:bg-row-selected" : "hover:before:bg-row-hover"
       )}
     >
       <span
         className={cn(
           "flex shrink-0 items-center justify-center rounded-full font-semibold text-white",
           compact ? "size-6 text-[10.5px]" : comfortable ? "size-8 text-[12px]" : "size-7 text-[11.5px]",
-          read && !selected && "opacity-60"
+          read && "opacity-60"
         )}
         style={{ backgroundColor: avatarColor(sender) }}
       >
@@ -1084,17 +1075,14 @@ const MessageRow = memo(function MessageRow({
           {/* 未读点占据行首槽位：有标记时由标记对齐文字列，名字随之后移 */}
           {message.unread ? (
             <span
-              className={cn(
-                "size-1.5 shrink-0 rounded-full",
-                selected ? "bg-white" : "bg-primary"
-              )}
+              className="size-1.5 shrink-0 rounded-full bg-primary"
             />
           ) : null}
           <span
             className={cn(
               "truncate font-medium",
               compact ? "text-[12.5px]" : "text-[13px]",
-              selected ? "text-primary-foreground" : read ? "text-foreground/70" : "text-foreground"
+              read ? "text-foreground/70" : "text-foreground"
             )}
           >
             {highlightIn("sender") ? (
@@ -1114,7 +1102,7 @@ const MessageRow = memo(function MessageRow({
               "truncate",
               compact ? "text-[13px] leading-[18px]" : "text-[14px] leading-5",
               message.unread ? "font-semibold" : "font-normal",
-              selected ? "text-primary-foreground" : read ? "text-foreground/65" : "text-foreground"
+              read ? "text-foreground/65" : "text-foreground"
             )}
           >
             {highlightIn("subject") ? (

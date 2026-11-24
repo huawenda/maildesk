@@ -22,6 +22,10 @@
   --color-border: var(--border);
   /* 列表内部的表格线（列头、列分隔、组头、行分隔）统一用这一个 token，不再用 border 的透明度分档 */
   --color-table-line: var(--table-line);
+  --color-row-hover: var(--row-hover);
+  --color-row-selected: var(--row-selected);
+  --color-nav-hover: var(--nav-hover);
+  --color-nav-selected: var(--nav-selected);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-star: var(--star);
@@ -37,8 +41,8 @@
 
 :root {
   color-scheme: light;
-  /* 浅色对齐 Windows 文件资源管理器：标题栏/侧栏 #E8E8E8、画布纯白 #FFFFFF */
-  --background: #e8e8e8;
+  /* 标题栏 / 侧栏取 QQ 邮箱的浅蓝灰 #E6EDF5（2026-11-24 用户指定），画布纯白 #FFFFFF */
+  --background: #e6edf5;
   --foreground: #242424;
   --card: #ffffff;
   --card-foreground: #242424;
@@ -55,10 +59,38 @@
   --destructive: #c03030;
   --destructive-foreground: #ffffff;
   --border: #cdcdcd;
-  --table-line: #cfcfcf;
+  --table-line: #d9d9d9;
+  /* 列表行交互色（取自 QQ 邮箱）：hover 中性浅灰、选中浅蓝，选中行文字仍用正常深浅 */
+  --row-hover: #f3f4f6;
+  --row-selected: #dbebfd;
+  /* 侧栏文件夹项（QQ 邮箱口径）：hover 浅灰、选中浅蓝 */
+  --nav-hover: #dbe3ed;
+  --nav-selected: #c6dcf4;
   --input: #cdcdcd;
   --ring: #2659cc;
   --star: #a96f12;
+
+/* 紧凑列头的竖向分隔线：上下各让出 6px，不和横向表线相交（2026-11-24 用户要求） */
+.col-sep {
+  position: relative;
+}
+.col-sep::after,
+.col-sep-l::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--table-line);
+  pointer-events: none;
+}
+.col-sep::after {
+  right: 0;
+}
+.col-sep-l::before {
+  left: 0;
+}
+
   --radius: 10px;
 }
 

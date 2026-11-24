@@ -91,7 +91,7 @@ export function TitleBarSearch({ query, onQueryChange, scope, onScopeChange, foc
               onQueryChange("")
               inputRef.current?.focus()
             }}
-            className="flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground"
+            className="flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
           >
             <X className="size-2.5" />
           </button>

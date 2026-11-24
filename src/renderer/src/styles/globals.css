@@ -22,6 +22,8 @@
   --color-border: var(--border);
   /* 列表内部的表格线（列头、列分隔、组头、行分隔）统一用这一个 token，不再用 border 的透明度分档 */
   --color-table-line: var(--table-line);
+  /* 列表行的横向分割线：比列头/列分隔再浅一档，避免行间线条太抢眼 */
+  --color-row-line: var(--row-line);
   --color-row-hover: var(--row-hover);
   --color-row-selected: var(--row-selected);
   --color-nav-hover: var(--nav-hover);
@@ -54,16 +56,18 @@
   --secondary-foreground: #242424;
   --muted: #e3e3e3;
   --muted-foreground: #5f5f5f;
-  --accent: #d4d4d4;
+  /* 全应用的 hover 底色统一取列表 hover 色（菜单项、按钮、行），见下方 row-hover */
+  --accent: #f3f4f6;
   --accent-foreground: #242424;
   --destructive: #c03030;
   --destructive-foreground: #ffffff;
   --border: #cdcdcd;
   --table-line: #d9d9d9;
+  --row-line: #e2e2e2;
   /* 列表行交互色（取自 QQ 邮箱）：hover 中性浅灰、选中浅蓝，选中行文字仍用正常深浅 */
   --row-hover: #f3f4f6;
   --row-selected: #dbebfd;
-  /* 侧栏文件夹项（QQ 邮箱口径）：hover 浅灰、选中浅蓝 */
+  /* 侧栏文件夹项（QQ 邮箱口径）：hover 浅灰、选中浅蓝，不跟随列表的两色（用户要求保留这一套） */
   --nav-hover: #dbe3ed;
   --nav-selected: #c6dcf4;
   --input: #cdcdcd;

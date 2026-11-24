@@ -999,7 +999,7 @@ export default function App() {
           onSync={runSync}
         />
         {/* 画布区（列表 + 阅读器）：整块抠成一张悬浮卡片，四周留出背景色（2026-11-24 用户要求） */}
-        <div className="mt-2 mb-0 ml-2 mr-2 flex min-w-0 flex-1 overflow-hidden rounded-t-lg bg-card">
+        <div className="mt-0 mb-0 ml-2 mr-3 flex min-w-0 flex-1 overflow-hidden rounded-t-lg bg-card">
           <MessageList
             folderId={folderId}
             messages={visible}
@@ -1055,7 +1055,7 @@ export default function App() {
             <span
               className={cn(
                 "absolute inset-y-0 left-[2px] w-px transition-colors",
-                resizing ? "bg-primary" : "bg-border group-hover:bg-primary/70"
+                resizing ? "bg-primary" : "bg-table-line group-hover:bg-primary/70"
               )}
             />
           </div>

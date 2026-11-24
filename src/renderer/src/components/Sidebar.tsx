@@ -140,7 +140,7 @@ export function Sidebar({
                 "flex h-7 shrink-0 items-center gap-2.5 rounded-md text-[12px] transition-colors",
                 collapsed ? "justify-center px-0" : "px-2",
                 active
-                  ? "bg-nav-selected font-medium text-foreground"
+                  ? "bg-nav-selected font-semibold text-foreground"
                   : "text-[#111111] hover:bg-nav-hover"
               )}
               style={indent ? { paddingLeft: 8 + indent } : undefined}

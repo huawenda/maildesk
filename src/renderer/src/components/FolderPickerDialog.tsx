@@ -199,8 +199,8 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
                   style={{ paddingLeft: 8 + depth * 16 }}
                   className={cn(
                     "flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left text-[12.5px] transition-colors",
-                    container ? "cursor-default text-muted-foreground" : "hover:bg-foreground/[0.05]",
-                    checked && !container && "text-foreground"
+                    container ? "cursor-default text-muted-foreground" : "hover:bg-row-hover",
+                    checked && !container && "bg-row-selected text-foreground"
                   )}
                 >
                   <span

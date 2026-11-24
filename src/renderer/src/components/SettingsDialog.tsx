@@ -86,7 +86,7 @@ function Segmented<T extends string | number>({
           className={cn(
             "h-7 rounded-[5px] px-3 text-[12.5px] transition-colors duration-100",
             value === option.value
-              ? "bg-foreground/[0.10] text-foreground"
+              ? "bg-row-selected text-foreground"
               : "text-muted-foreground hover:text-foreground"
           )}
         >
@@ -170,8 +170,8 @@ export function SettingsDialog({
               className={cn(
                 "flex h-8 items-center rounded-md px-2.5 text-left text-[13px] transition-colors duration-100",
                 section === item.id
-                  ? "bg-foreground/[0.08] text-foreground"
-                  : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
+                  ? "bg-row-selected text-foreground"
+                  : "text-muted-foreground hover:bg-row-hover hover:text-foreground"
               )}
             >
               {item.label}
@@ -188,7 +188,7 @@ export function SettingsDialog({
               type="button"
               aria-label="关闭"
               onClick={onClose}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+              className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
             >
               <X className="size-4" />
             </button>

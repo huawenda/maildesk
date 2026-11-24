@@ -318,7 +318,7 @@ export function Reader({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-auto">
-            <article className="flex min-h-full w-full select-text flex-col px-8 pb-4 pt-5">
+            <article className="flex min-h-full w-full select-text flex-col px-6 pb-4 pt-5">
               <h2 className="text-[22px] font-semibold leading-[30px] tracking-[-0.01em]">
                 {message.subject || "（无主题）"}
               </h2>
@@ -342,7 +342,7 @@ export function Reader({
                         title={message.starred ? "取消星标 (S)" : "星标 (S)"}
                         onClick={onToggleStar}
                         className={cn(
-                          "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-foreground/[0.05]",
+                          "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-row-hover",
                           message.starred ? "text-star" : "text-muted-foreground hover:text-foreground"
                         )}
                       >
@@ -355,7 +355,7 @@ export function Reader({
                       <button
                         title="标记未读 (U)"
                         onClick={onToggleUnread}
-                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
                       >
                         {message.unread ? <Mail className="size-4" /> : <MailOpen className="size-4" />}
                       </button>
@@ -363,7 +363,7 @@ export function Reader({
                         title="保存全部附件"
                         onClick={saveAllAttachments}
                         disabled={message.attachments.length === 0 || saveAllState === "saving"}
-                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                       >
                         {saveAllState === "saving" ? (
                           <Loader2 className="size-4 animate-spin" />
@@ -377,7 +377,7 @@ export function Reader({
                         <DropdownMenuTrigger asChild>
                           <button
                             title="移动到文件夹"
-                            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-foreground"
+                            className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
                           >
                             <FolderInput className="size-4" />
                           </button>
@@ -400,7 +400,7 @@ export function Reader({
                       <button
                         title={permanentDelete ? "永久删除 (Delete)" : "移到垃圾箱 (Delete)"}
                         onClick={onDelete}
-                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.05] hover:text-destructive"
+                        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-row-hover hover:text-destructive"
                       >
                         <Trash2 className="size-4" />
                       </button>
@@ -408,7 +408,7 @@ export function Reader({
                         title="查看该发件人的全部邮件"
                         onClick={() => void openSenderDrawer()}
                         className={cn(
-                          "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-foreground/[0.05]",
+                          "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-row-hover",
                           senderOpen ? "text-primary" : "text-muted-foreground hover:text-foreground"
                         )}
                       >
@@ -458,11 +458,16 @@ export function Reader({
                 </div>
               ) : null}
 
+              {/* 页头（主题/发件人/收件人/附件）与正文之间的分隔线：只包正文，头保持在容器外 */}
+              {message.bodyHtml || message.body.length > 0 ? (
+                <div className="mt-4 w-full shrink-0 border-t border-table-line" />
+              ) : null}
+
               {message.bodyHtml ? (
                 // 文本优先：正文直接落在画布上，不再套「印刷品」白纸卡片，也不整页缩放。
                 // 邮件自己的浅色底/底图仍然保留，深色主题下由 HtmlBody 做一次对比度兜底。
-                // 直角矩形卡片标出正文容器范围：只包正文，主题/发件人/收件人留卡片外（用户 2026-11-24）
-                <div className="mt-6 w-full max-w-[900px] flex-1 border border-border bg-card px-5 py-5">
+                // 直角矩形容器标出正文范围（用户 2026-11-24，无边框、左右边距由 article 的 px-6 控制）
+                <div className="w-full max-w-[900px] flex-1 pb-5 pt-4">
                   <HtmlBody
                     key={message.id}
                     html={message.bodyHtml}
@@ -486,7 +491,7 @@ export function Reader({
               ) : (
                 // 纯文本没有自带底色，直接落在阅读画布上：卡片在邮件语义里是附件/附属块，
                 // 正文套卡片会造成双重内边距，浅色下还会灰叠灰（用户 2026-11-22 反馈）
-                <div className="mt-6 w-full max-w-[900px] flex-1 border border-border bg-card px-5 py-5">
+                <div className="w-full max-w-[900px] flex-1 pb-5 pt-4">
                   <div className="max-w-[76ch] space-y-4 leading-[1.75] text-foreground/90" style={{ fontSize }}>
                     {message.body.map((paragraph, index) => (
                       <PlainBodyBlock key={index} text={paragraph} />
@@ -559,7 +564,7 @@ export function Reader({
                     onClick={() => onNavigate(item)}
                     className={cn(
                       "flex w-full flex-col gap-1 rounded-lg px-3 py-2 text-left transition-colors",
-                      item.id === message.id ? "bg-accent" : "hover:bg-accent/60"
+                      item.id === message.id ? "bg-row-selected" : "hover:bg-row-hover"
                     )}
                   >
                     <div className="flex items-center gap-2">

@@ -21,13 +21,13 @@ const densityOptions: { id: Density; label: string }[] = [
 
 const CONTROL =
   "flex items-center justify-center text-muted-foreground transition-colors duration-100 " +
-  "hover:bg-foreground/[0.06] hover:text-foreground [-webkit-app-region:no-drag]"
+  "hover:bg-foreground/10 hover:text-foreground [-webkit-app-region:no-drag]"
 
 const ICON_BUTTON = cn(CONTROL, "size-7 rounded-md")
-const WINDOW_BUTTON = cn(CONTROL, "h-9 w-[46px]")
+const WINDOW_BUTTON = cn(CONTROL, "h-11 w-[46px]")
 // 关闭键单独写，不能复用带 hover:bg 的基类，否则两个 hover 背景会按 CSS 顺序打架。
 const CLOSE_BUTTON = cn(
-  "flex h-9 w-[46px] items-center justify-center text-muted-foreground transition-colors duration-100",
+  "flex h-11 w-[46px] items-center justify-center text-muted-foreground transition-colors duration-100",
   "hover:bg-[#c42b1c] hover:text-white [-webkit-app-region:no-drag]"
 )
 
@@ -96,7 +96,7 @@ export function TitleBar({
   useEffect(() => mail.app.onMaximizeChange(setMaximized), [])
 
   return (
-    <div className="flex h-9 shrink-0 [-webkit-app-region:drag]">
+    <div className="flex h-11 shrink-0 [-webkit-app-region:drag]">
       <div
         className={cn(
           "flex shrink-0 items-center transition-[width] duration-150 ease-out",

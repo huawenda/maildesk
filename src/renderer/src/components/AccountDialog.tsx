@@ -189,7 +189,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                     <button
                       onClick={() => startEdit(account)}
                       title="编辑账户"
-                      className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground"
+                      className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
                     >
                       <Pencil className="size-3.5" />
                     </button>

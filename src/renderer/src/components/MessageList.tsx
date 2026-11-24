@@ -523,7 +523,9 @@ export function MessageList({
             onClick={() => onFilterChange(item.id)}
             className={cn(
               "h-7 rounded px-2.5 text-[12.5px] transition-colors",
-              filter === item.id ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"
+              filter === item.id
+                ? "bg-row-selected text-foreground"
+                : "text-muted-foreground hover:bg-row-hover hover:text-foreground"
             )}
           >
             {item.label}
@@ -920,7 +922,7 @@ const MessageRow = memo(function MessageRow({
         className={cn(
           // 行分隔线用伪元素并左右各内缩 8px：两端不碰卡片左缘和右侧分隔线（2026-11-24 用户要求）；
           // hover / 选中底色也是内缩 + 圆角的伪元素，不再铺满整行（2026-11-24 用户要求）
-          "group isolate relative flex h-full w-full cursor-default select-none items-center text-left before:pointer-events-none before:absolute before:-z-10 before:inset-x-2 before:inset-y-[2px] before:rounded-md after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-table-line",
+          "group isolate relative flex h-full w-full cursor-default select-none items-center text-left before:pointer-events-none before:absolute before:-z-10 before:inset-x-2 before:inset-y-[2px] before:rounded-md after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-row-line",
           selected ? "before:bg-row-selected" : "hover:before:bg-row-hover"
         )}
       >

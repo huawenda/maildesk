@@ -14,7 +14,7 @@ import { useHotkeys } from "@/lib/hotkeys"
 import { mail } from "@/lib/ipc"
 import { detailToMessage, navFolders, summaryToMessage, type NavFolder } from "@/lib/live"
 import { folders as demoFolders, messages as seedMessages, type Message } from "@/lib/mock"
-import { useThemeMode } from "@/lib/theme"
+import { applyChrome } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
 export type Density = "compact" | "standard" | "comfortable"
@@ -71,23 +71,36 @@ const timeAgo = (timestamp: number): string => {
   return hours < 24 ? `${hours} 小时前` : `${Math.round(hours / 24)} 天前`
 }
 
-/** 侧栏可见文件夹：启用项 + 它们的祖先容器（容器本身不参与同步，只是分组标题）。 */
-function visibleFolderList(folders: Folder[]): Folder[] {
-  const enabled = folders.filter((folder) => folder.enabled)
-  const keep = new Set(enabled.map((folder) => folder.path))
-  for (const folder of enabled) {
-    const delimiter = folder.delimiter || "/"
-    const parts = folder.path.split(delimiter)
-    for (let index = 1; index < parts.length; index += 1) {
-      keep.add(parts.slice(0, index).join(delimiter))
+/**
+ * 侧栏可见项：先用**完整**文件夹清单算出层级（否则只剩容器时会被误判成可选中文件夹，
+ * 从而多出一个「其他文件夹 > 其他文件夹」），再丢掉未启用项，并保留启用项的祖先容器。
+ */
+function visibleNavList(folders: Folder[]): NavFolder[] {
+  const all = navFolders(folders)
+  const enabledIds = new Set(folders.filter((folder) => folder.enabled).map((folder) => folder.id))
+  const keep = new Set(enabledIds)
+  const byId = new Map(all.map((item) => [item.id, item]))
+  for (const item of all) {
+    if (!item.selectable || !enabledIds.has(item.id)) continue
+    let parentId = item.parentId
+    while (parentId) {
+      keep.add(parentId)
+      parentId = byId.get(parentId)?.parentId ?? null
     }
   }
-  return folders.filter((folder) => keep.has(folder.path))
+  const filtered = all.filter((item) => keep.has(item.id))
+  // 容器本身不可选中：没有可见子项时连同空分组一起收掉，避免只剩一个空的「其他文件夹」
+  const parents = new Set(filtered.map((item) => item.parentId).filter(Boolean))
+  return filtered.filter((item) => item.selectable || parents.has(item.id))
 }
 
 export default function App() {
-  const { mode, setMode } = useThemeMode()
   const [version, setVersion] = useState<string>()
+
+  // 只有浅色主题：启动时同步一次窗口底色
+  useEffect(() => {
+    applyChrome()
+  }, [])
 
   const [accounts, setAccounts] = useState<Account[]>([])
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null)
@@ -271,8 +284,7 @@ export default function App() {
         setLiveFolders(list)
         // 容器目录（\Noselect）不可选中：旧选中项若落在容器上，落回收件箱
         const selectable = new Set(
-          navFolders(visibleFolderList(list))
-            .filter((folder) => folder.selectable)
+          visibleNavList(list).filter((folder) => folder.selectable)
             .map((folder) => folder.id)
         )
         setFolderId((current) =>
@@ -416,7 +428,7 @@ export default function App() {
   }, [live, selectedId])
 
   // 侧栏只展示用户勾选过的文件夹；hidden 的仍在库里，可以在「选择文件夹」里重新勾上
-  const navList = live ? navFolders(visibleFolderList(liveFolders)) : DEMO_NAV
+  const navList = live ? visibleNavList(liveFolders) : DEMO_NAV
 
   const searchActive = searchQuery.trim().length > 0
 
@@ -945,8 +957,6 @@ export default function App() {
         searchFocusToken={searchFocusToken}
         density={density}
         onDensityChange={setDensity}
-        mode={mode}
-        onModeChange={setMode}
       />
       <div className="flex min-h-0 flex-1">
         <Sidebar
@@ -1073,8 +1083,6 @@ export default function App() {
       <SettingsDialog
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        theme={mode}
-        onThemeChange={setMode}
         density={density}
         onDensityChange={setDensity}
         fontSize={fontSize}

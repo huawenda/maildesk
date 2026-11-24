@@ -18,8 +18,8 @@ function resourcePath(name: string): string {
 }
 
 /**
- * 托盘图标跟着任务栏底色走：深色任务栏用白 M，浅色任务栏用深 M。
- * 只加载 tray.png 会在浅色任务栏上变成一朵看不见的白影（用户实测）。
+ * 托盘图标看的是 **Windows 任务栏底色**（与 app 主题无关）：深色任务栏用白 M、浅色用深 M。
+ * 固定深灰 M 会在深色任务栏上变成看不见的影子。
  */
 function trayImage(): NativeImage {
   const name = nativeTheme.shouldUseDarkColors ? "tray.png" : "tray-dark.png"
@@ -65,7 +65,6 @@ export function createTray(): Tray {
   tray = new Tray(trayImage())
   tray.setToolTip(unreadLabel())
 
-  // 系统深浅色切换时（Windows 设置里改「应用模式」）同步换图标
   const onThemeUpdated = () => {
     if (tray && !tray.isDestroyed()) tray.setImage(trayImage())
   }

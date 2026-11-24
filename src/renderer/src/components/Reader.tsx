@@ -34,7 +34,7 @@ import { MessageContextMenu } from "@/components/MessageContextMenu"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { ipcErrorMessage, mail } from "@/lib/ipc"
 import { summaryToMessage } from "@/lib/live"
-import { avatarColor, formatFullTime, formatListTime, formatSize, initials } from "@/lib/format"
+import { avatarColor, formatFullTime, formatSize, initials } from "@/lib/format"
 import type { Attachment, Message } from "@/lib/mock"
 import { cn } from "@/lib/utils"
 
@@ -536,7 +536,7 @@ export function Reader({
                 {senderBusy ? "…" : `${senderMessages.length} 封`}
               </span>
             </div>
-            <div ref={senderListRef} className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto p-1.5">
+            <div ref={senderListRef} className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1.5">
               {senderBusy ? (
                 <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-muted-foreground">
                   <Loader2 className="size-3.5 animate-spin" /> 正在查找…
@@ -560,11 +560,11 @@ export function Reader({
                       <span className={cn("truncate text-[12.5px]", item.unread ? "font-semibold" : "font-medium")}>
                         {item.subject || "（无主题）"}
                       </span>
-                      <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                        {formatListTime(item.date)}
-                      </span>
                     </div>
-                    <div className="truncate text-[11.5px] text-muted-foreground">{item.snippet}</div>
+                    {/* 抽屉里不再显示正文摘要，改为完整时间（yyyy年M月d日 周X HH:mm） */}
+                    <div className="text-[11px] tabular-nums text-muted-foreground">
+                      {formatFullTime(item.date)}
+                    </div>
                   </button>
                 ))
               )}
@@ -722,19 +722,33 @@ function ContactSection({ label, contacts }: { label: string; contacts: Contact[
         <span className="text-[10.5px] tabular-nums text-muted-foreground/70">{contacts.length}</span>
       </div>
       <div ref={listRef} className="scrollbar-overlay max-h-[260px] overflow-y-auto">
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-x-3 gap-y-1 pb-0.5">
+        {/* 每行只放一位收件人：姓名与地址同一行，长文本各自省略（title 里给完整值） */}
+        <div className="flex flex-col gap-0.5 pb-0.5">
           {contacts.map((contact, index) => (
-            <div key={`${contact.full}-${index}`} title={contact.full} className="min-w-0 py-0.5">
-              {/* 公司邮箱的显示名常常是「姓名/职位/部门」这样的长文本：整段同色、允许换行，
-                  不要拆段加粗或改色（用户要求统一观感） */}
-              <div className="break-words text-[11.5px] leading-[1.4] text-foreground/90">
-                {contactLabel(contact)}
-              </div>
+            <div
+              key={`${contact.full}-${index}`}
+              title={contact.full}
+              className="flex min-w-0 items-baseline gap-2 py-0.5"
+            >
               {contact.name ? (
-                <div className="truncate text-[10.5px] leading-[1.4] text-muted-foreground">
-                  {contact.address}
-                </div>
-              ) : null}
+                <>
+                  {/* 姓名保持完整、不省略；地址带尖括号，只有超长地址会在括号内省略 */}
+                  <span className="shrink-0 whitespace-nowrap text-[11.5px] leading-[1.4] text-foreground/90">
+                    {contact.name}
+                  </span>
+                  <span className="flex min-w-0 flex-1 items-baseline text-[10.5px] leading-[1.4] text-muted-foreground">
+                    <span className="shrink-0">&lt;</span>
+                    <span className="truncate">{contact.address}</span>
+                    <span className="shrink-0">&gt;</span>
+                  </span>
+                </>
+              ) : (
+                <span className="flex min-w-0 items-baseline text-[11.5px] leading-[1.4] text-foreground/90">
+                  <span className="shrink-0">&lt;</span>
+                  <span className="truncate">{contact.address}</span>
+                  <span className="shrink-0">&gt;</span>
+                </span>
+              )}
             </div>
           ))}
         </div>

@@ -839,7 +839,7 @@ const Highlighted = memo(function Highlighted({
             className={cn(
               "rounded-[2px] text-inherit",
               // 深色下 primary/25 几乎和底色融在一起，换暖色高亮（amber）才看得出来
-              selected ? "bg-white/30" : "bg-primary/25 dark:bg-star/35"
+              selected ? "bg-white/30" : "bg-primary/25"
             )}
           >
             {part}

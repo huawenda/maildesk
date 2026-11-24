@@ -9,10 +9,11 @@ const DialogPortal = DialogPrimitive.Portal
 const DialogClose = DialogPrimitive.Close
 
 function DialogOverlay({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
+  // 不吃背景、不做模糊：只保留一层透明命中区，用来接「点弹层外关闭」。
   return (
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
-      className={cn("fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]", className)}
+      className={cn("fixed inset-0 z-40", className)}
       {...props}
     />
   )

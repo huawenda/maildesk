@@ -5,7 +5,6 @@ export interface AppInfo {
 }
 
 export type Density = "compact" | "standard" | "comfortable"
-export type ThemeMode = "dark" | "light" | "system"
 export type Security = "tls" | "starttls" | "tls-insecure" | "none"
 export type FolderRole = "inbox" | "sent" | "drafts" | "trash" | "junk" | "archive" | null
 
@@ -148,7 +147,6 @@ export interface SearchOptions {
 export interface Settings {
   density: Density
   sidebarCollapsed: boolean
-  theme: ThemeMode
   /** 正文字号（px），13–16 */
   fontSize: number
   /** 首次同步每个文件夹拉取的封数（首屏窗口，不对外暴露） */

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeTheme, screen, session, shell } from "electron"
+import { app, BrowserWindow, Menu, screen, session, shell } from "electron"
 import { join } from "node:path"
 import { writeFile } from "node:fs/promises"
 import { readFileSync, writeFileSync } from "node:fs"
@@ -103,7 +103,7 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     // 首帧底色跟系统主题走：浅色用户不该在启动瞬间被闪一块深灰
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#1B1B1B" : "#E6E6E6",
+    backgroundColor: "#E8E8E8",
     // 完全自绘标题栏：不要系统标题栏，也不要系统绘制的窗口按钮。
     // 保留 thickFrame（默认 true）才能继续用原生的缩放边框、Aero Snap 与阴影。
     frame: false,
@@ -179,13 +179,7 @@ function createWindow(): BrowserWindow {
     win.webContents.once("did-finish-load", () => {
       setTimeout(async () => {
         try {
-          const shoot = async (theme: "dark" | "light", target: string) => {
-            await win.webContents
-              .executeJavaScript(
-                "localStorage.setItem('maildesk.theme','" + theme + "'); location.reload()"
-              )
-              .catch(() => undefined)
-            await new Promise<void>((resolve) => win.webContents.once("did-finish-load", () => resolve()))
+          const shoot = async (target: string) => {
             // 允许等待首轮同步完成（验证批量删除时需要真实数据先落库）
             await new Promise((resolve) =>
               setTimeout(resolve, Number(process.env.MAILDESK_CAPTURE_WAIT ?? 900))
@@ -486,11 +480,8 @@ function createWindow(): BrowserWindow {
             console.log("captured", target)
           }
 
-          await shoot("dark", CAPTURE_PATH)
-          if (lightPath) await shoot("light", lightPath)
-          await win.webContents
-            .executeJavaScript("localStorage.setItem('maildesk.theme','dark')")
-            .catch(() => undefined)
+          await shoot(CAPTURE_PATH)
+          if (lightPath) await shoot(lightPath)
         } catch (error) {
           console.log("capture failed", String(error))
         } finally {

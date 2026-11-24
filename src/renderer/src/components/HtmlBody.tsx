@@ -55,11 +55,11 @@ const cspFor = (allowRemote: boolean) =>
  * 正文按阅读器宽度回流，字号有下限；图片与表格最多铺满阅读区，
  * 仍然超宽的定宽表格交给 iframe 自身横向滚动，而不是把整封邮件缩成一张小图。
  */
-const baseCss = (fontSize: number, dark: boolean) => `
-  html, body { margin: 0; padding: 0; height: auto !important; background: transparent; color-scheme: ${dark ? "dark" : "light"}; }
-  body { font: ${fontSize}px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color: ${dark ? "#E8E8E8" : "#242424"}; word-break: break-word; }
+const baseCss = (fontSize: number) => `
+  html, body { margin: 0; padding: 0; height: auto !important; background: transparent; color-scheme: light; }
+  body { font: ${fontSize}px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color: #242424; word-break: break-word; }
   img { max-width: 100% !important; height: auto; }
-  a { color: ${dark ? "#8AB4F8" : "#1a5fd0"}; text-decoration: none; }
+  a { color: #1a5fd0; text-decoration: none; }
   a:hover { text-decoration: underline; }
   table { max-width: 100%; }
   /* Excel/Outlook 粘贴的数据表：按浅色「纸」渲染，保留 Excel 的边框、底纹、
@@ -70,7 +70,7 @@ const baseCss = (fontSize: number, dark: boolean) => `
     color: #202020;
   }
   td, th { overflow-wrap: break-word; }
-  blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid ${dark ? "#3a3a3a" : "#d8d8d8"}; color: ${dark ? "#a6a6a6" : "#6b6b6b"}; }
+  blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid #d8d8d8; color: #6b6b6b; }
   pre { white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; }
 `
 
@@ -162,17 +162,8 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
   contextMenuRef.current = onContextMenu
   const [allowed, setAllowed] = useState(remoteImages ?? true)
   const [height, setHeight] = useState(160)
-  // 主题类挂在 <html> 上：邮件正文要跟着换底色/字色，否则深色下深字直接消失
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"))
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
-
-  useEffect(() => {
-    const root = document.documentElement
-    const observer = new MutationObserver(() => setDark(root.classList.contains("dark")))
-    observer.observe(root, { attributes: true, attributeFilter: ["class"] })
-    return () => observer.disconnect()
-  }, [])
 
   // 设置变化即时生效：关掉开关后当前这封也会立刻拦截图片
   useEffect(() => {
@@ -183,8 +174,8 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
 
   const document_ = useMemo(
     () =>
-      `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(allowed)}"><style>${baseCss(fontSize, dark)}</style></head><body>${prepared.html}</body></html>`,
-    [prepared.html, fontSize, dark, allowed]
+      `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(allowed)}"><style>${baseCss(fontSize)}</style></head><body>${prepared.html}</body></html>`,
+    [prepared.html, fontSize, allowed]
   )
 
   useEffect(() => {
@@ -210,7 +201,7 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
     // 字体与源邮件一致：不改字号、字重、字体族，只处理「深字压深底 / 白字压白底」这种
     // 看不清的极端情况（见下方对比度兜底）
     const canvas = parseColor(getComputedStyle(document.documentElement).getPropertyValue("--card") || "")
-    const fallbackCanvas: Rgba = dark ? [18, 18, 18, 1] : [240, 240, 240, 1]
+    const fallbackCanvas: Rgba = [255, 255, 255, 1]
     const page: Rgba = canvas[3] > 0 ? canvas : fallbackCanvas
 
     const normalize = () => {
@@ -270,7 +261,7 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
       box.style.cssText =
         `display:flex;align-items:center;justify-content:center;` +
         `width:${w}px;height:${h}px;max-width:100%;box-sizing:border-box;` +
-        `background:${dark ? "#242424" : "#f2f2f2"};border-radius:6px;color:${dark ? "#8a8a8a" : "#8a8a8a"};font-size:12px;`
+        "background:#f2f2f2;border-radius:6px;color:#8a8a8a;font-size:12px;"
       img.replaceWith(box)
     }
     doc.querySelectorAll("img").forEach((img) => {
@@ -296,11 +287,11 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
         toggle.textContent = label
         toggle.style.cssText =
           "margin:12px 0;padding:6px 10px;border:1px solid " +
-          (dark ? "#3a3a3a" : "#d8d8d8") +
+          "#d8d8d8" +
           ";border-radius:8px;background:" +
-          (dark ? "#1f1f1f" : "#f7f7f7") +
+          "#f7f7f7" +
           ";color:" +
-          (dark ? "#a6a6a6" : "#5f5f5f") +
+          "#5f5f5f" +
           ";font:12px/1.5 -apple-system,'Segoe UI','Microsoft YaHei',sans-serif;cursor:pointer;user-select:none;"
         node.style.display = "none"
         toggle.addEventListener("click", () => {

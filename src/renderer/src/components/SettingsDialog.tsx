@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { Check, Minus, Plus, X } from "lucide-react"
-import type { Account, ThemeMode } from "@shared/types"
+import type { Account } from "@shared/types"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import type { Density } from "@/App"
 import { cn } from "@/lib/utils"
 
@@ -20,19 +21,11 @@ const DENSITIES: { id: Density; label: string; hint: string }[] = [
   { id: "comfortable", label: "宽松", hint: "88px" }
 ]
 
-const THEMES: { id: ThemeMode; label: string }[] = [
-  { id: "system", label: "跟随系统" },
-  { id: "light", label: "浅色" },
-  { id: "dark", label: "深色" }
-]
-
 const FONT_SIZES = [13, 14, 15, 16]
 
 interface SettingsDialogProps {
   open: boolean
   onClose: () => void
-  theme: ThemeMode
-  onThemeChange: (mode: ThemeMode) => void
   density: Density
   onDensityChange: (density: Density) => void
   fontSize: number
@@ -127,8 +120,6 @@ function Switch({ checked, onChange }: { checked: boolean; onChange: (value: boo
 export function SettingsDialog({
   open,
   onClose,
-  theme,
-  onThemeChange,
   density,
   onDensityChange,
   fontSize,
@@ -156,32 +147,15 @@ export function SettingsDialog({
   const bodyRef = useRef<HTMLDivElement>(null)
   const [section, setSection] = useState<Section>("appearance")
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [open, onClose])
-
-  if (!open) return null
-
   const fontIndex = Math.max(0, FONT_SIZES.indexOf(fontSize))
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-8 backdrop-blur-[2px]"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="设置"
-        className="flex h-[540px] w-[720px] max-w-full overflow-hidden rounded-xl bg-popover ring-1 ring-border shadow-2xl"
+    <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)}>
+      <DialogContent
+        aria-describedby={undefined}
+        className="h-[540px] w-[720px] max-w-full overflow-hidden p-0"
       >
+        <div className="flex min-h-0 flex-1">
         <div className="flex w-44 shrink-0 flex-col border-r border-border p-2">
           <div className="px-2.5 pb-2 pt-1.5 text-[12px] font-medium text-muted-foreground">设置</div>
           {SECTIONS.map((item) => (
@@ -203,7 +177,9 @@ export function SettingsDialog({
 
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-5">
-            <span className="text-[13px] font-medium">{SECTIONS.find((s) => s.id === section)?.label}</span>
+            <DialogTitle className="text-[13px] font-medium">
+              {SECTIONS.find((s) => s.id === section)?.label}
+            </DialogTitle>
             <button
               type="button"
               aria-label="关闭"
@@ -217,13 +193,6 @@ export function SettingsDialog({
           <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto px-5 pb-4">
             {section === "appearance" ? (
               <>
-                <Row label="主题" hint="深色为默认设计态">
-                  <Segmented
-                    value={theme}
-                    options={THEMES.map((item) => ({ value: item.id, label: item.label }))}
-                    onChange={onThemeChange}
-                  />
-                </Row>
                 <Row label="列表密度" hint="每行高度，影响一屏能看多少封">
                   <Segmented value={density} options={DENSITIES.map((d) => ({ value: d.id, label: d.label }))} onChange={onDensityChange} />
                 </Row>
@@ -356,7 +325,8 @@ export function SettingsDialog({
           </div>
           <OverlayScrollbar target={bodyRef} />
         </div>
-      </div>
-    </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

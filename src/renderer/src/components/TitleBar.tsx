@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { Monitor, Moon, PanelLeftClose, PanelLeftOpen, Rows3, Sun } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Rows3 } from "lucide-react"
 import type { Density } from "@/App"
-import type { ThemeMode } from "@/lib/theme"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,12 +17,6 @@ const densityOptions: { id: Density; label: string }[] = [
   { id: "compact", label: "紧凑" },
   { id: "standard", label: "标准" },
   { id: "comfortable", label: "宽松" }
-]
-
-const themeOptions: { mode: ThemeMode; icon: typeof Moon; label: string }[] = [
-  { mode: "light", icon: Sun, label: "浅色" },
-  { mode: "dark", icon: Moon, label: "深色" },
-  { mode: "system", icon: Monitor, label: "跟随系统" }
 ]
 
 const CONTROL =
@@ -83,8 +76,6 @@ interface TitleBarProps {
   searchFocusToken: number
   density: Density
   onDensityChange: (density: Density) => void
-  mode: ThemeMode
-  onModeChange: (mode: ThemeMode) => void
 }
 
 export function TitleBar({
@@ -98,9 +89,7 @@ export function TitleBar({
   onSearchScopeChange,
   searchFocusToken,
   density,
-  onDensityChange,
-  mode,
-  onModeChange
+  onDensityChange
 }: TitleBarProps) {
   const [maximized, setMaximized] = useState(false)
 
@@ -157,26 +146,6 @@ export function TitleBar({
         </div>
 
         <DownloadsPopover triggerClassName={ICON_BUTTON} />
-
-        <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5 [-webkit-app-region:no-drag]">
-          {themeOptions.map(({ mode: option, icon: Icon, label }) => (
-            <button
-              key={option}
-              type="button"
-              title={label}
-              onClick={() => onModeChange(option)}
-              className={cn(
-                "flex size-6 items-center justify-center rounded transition-colors",
-                mode === option
-                  ? "bg-card text-foreground shadow-sm ring-1 ring-foreground/[0.06]"
-                  : "text-muted-foreground/80 hover:text-foreground"
-              )}
-            >
-              <Icon className="size-3.5" />
-            </button>
-          ))}
-        </div>
-
 
         <div className="mx-1 h-4 w-px bg-border" />
 

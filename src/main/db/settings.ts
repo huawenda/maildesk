@@ -4,7 +4,6 @@ import { all, run } from "./index"
 export const DEFAULT_SETTINGS: Settings = {
   density: "standard",
   sidebarCollapsed: false,
-  theme: "dark",
   fontSize: 14,
   pageSize: 200,
   remoteImages: true,

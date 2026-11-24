@@ -2,7 +2,6 @@ import { z } from "zod"
 
 export const securitySchema = z.enum(["tls", "starttls", "tls-insecure", "none"])
 export const densitySchema = z.enum(["compact", "standard", "comfortable"])
-export const themeModeSchema = z.enum(["dark", "light", "system"])
 
 export const accountInputSchema = z.object({
   email: z.string().trim().email(),
@@ -24,7 +23,6 @@ export const idSchema = z.string().min(1).max(64)
 export const settingsSchema = z.object({
   density: densitySchema,
   sidebarCollapsed: z.boolean(),
-  theme: themeModeSchema,
   fontSize: z.number().int().min(12).max(18),
   pageSize: z.number().int().min(20).max(5000),
   remoteImages: z.boolean(),

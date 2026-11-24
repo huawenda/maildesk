@@ -112,7 +112,7 @@ export function Sidebar({
                 aria-expanded={expanded}
                 onClick={() => toggleGroup(folder.id)}
                 className={cn(
-                  "flex h-8 shrink-0 items-center gap-2.5 rounded-md text-[13.5px] text-foreground/92 transition-colors hover:bg-foreground/[0.06]",
+                  "flex h-7 shrink-0 items-center gap-2.5 rounded-md text-[12px] font-medium text-[#111111] transition-colors hover:bg-foreground/[0.06]",
                   collapsed ? "justify-center px-0" : "px-2"
                 )}
                 style={indent ? { paddingLeft: 8 + indent } : undefined}
@@ -137,16 +137,25 @@ export function Sidebar({
               aria-current={active ? "true" : undefined}
               onClick={() => onSelectFolder(folder.id)}
               className={cn(
-                "flex h-8 shrink-0 items-center gap-2.5 rounded-md text-[13.5px] transition-colors",
+                "flex h-7 shrink-0 items-center gap-2.5 rounded-md text-[12px] transition-colors",
                 collapsed ? "justify-center px-0" : "px-2",
-                active ? "bg-accent font-medium text-foreground" : "text-foreground/92 hover:bg-foreground/[0.06]"
+                active
+                  ? "bg-accent font-medium text-foreground"
+                  : "text-[#111111] hover:bg-foreground/[0.06]"
               )}
               style={indent ? { paddingLeft: 8 + indent } : undefined}
             >
               <Icon className={cn("size-[15px] shrink-0", active ? "text-primary" : "text-muted-foreground")} />
               {collapsed ? null : <span className="truncate">{folder.label}</span>}
               {!collapsed && count ? (
-                <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">{count}</span>
+                <span
+                  className={cn(
+                    "ml-auto text-[11px] tabular-nums",
+                    countMode === "unread" ? "text-star" : "text-muted-foreground"
+                  )}
+                >
+                  {count}
+                </span>
               ) : null}
             </button>
           )

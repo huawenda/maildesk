@@ -1,4 +1,4 @@
-import { FolderInput, Mail, MailCheck, MailOpen, ShieldAlert, Star, Trash2, Undo2 } from "lucide-react"
+import { FolderInput, Mail, MailCheck, MailOpen, Pin, ShieldAlert, Trash2, Undo2 } from "lucide-react"
 import {
   ContextMenuContent,
   ContextMenuItem,
@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/context-menu"
 import type { Message } from "@/lib/mock"
 
-/** 邮件行右键菜单：对齐 Foxmail 的「标为未读 / 星标置顶 / 标为垃圾邮件 / 移动到… / 删除」 */
+/** 邮件行右键菜单：标为未读 / 置顶 / 标为垃圾邮件 / 移动到… / 删除（置顶复用 starred 标记） */
 export function MessageContextMenu({
   message,
   moveTargets,
@@ -50,8 +50,8 @@ export function MessageContextMenu({
         </ContextMenuItem>
       ) : null}
       <ContextMenuItem onSelect={() => onToggleStar?.(message.id)}>
-        <Star className="size-4" fill={message.starred ? "currentColor" : "none"} />
-        {message.starred ? "取消星标" : "星标置顶"}
+        <Pin className="size-4" fill={message.starred ? "currentColor" : "none"} />
+        {message.starred ? "取消置顶" : "置顶"}
         <ContextMenuShortcut>S</ContextMenuShortcut>
       </ContextMenuItem>
       {junkFolderId ? (

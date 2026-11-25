@@ -8,7 +8,6 @@ import {
   Inbox,
   Loader2,
   Paperclip,
-  Star
 } from "lucide-react"
 import { avatarColor, formatCompactTime, formatListTime, initials } from "@/lib/format"
 import type { Message } from "@/lib/mock"
@@ -19,13 +18,12 @@ import { cn } from "@/lib/utils"
 import type { Density } from "@/App"
 import type { SearchScope } from "@/components/TitleBarSearch"
 
-export type ListFilter = "all" | "unread" | "attachments" | "starred"
+export type ListFilter = "all" | "unread" | "attachments"
 
 const filters: { id: ListFilter; label: string }[] = [
   { id: "all", label: "全部" },
   { id: "unread", label: "未读" },
-  { id: "attachments", label: "有附件" },
-  { id: "starred", label: "星标" }
+  { id: "attachments", label: "有附件" }
 ]
 
 const ROW_HEIGHT: Record<Density, number> = {
@@ -45,12 +43,10 @@ const GROUP_BOTTOM_GAP = 6
 /** 标准/宽松视图里邮件行之间的间距，必须和组头条到第一封邮件的 6px 一致 */
 const ROW_GAP = 6
 
-/* 紧凑视图的列宽：状态 / 附件 / 星标固定，发件人 / 日期 / 大小可拖动列分隔线调整（持久化到 localStorage） */
+/* 紧凑视图的列宽：状态 / 附件固定，发件人 / 日期 / 大小可拖动列分隔线调整（持久化到 localStorage） */
 /** 状态列 26px = 行首留白 8px + 18px 槽位；圆点居中后落在列表左缘到回形针列之间的正中 */
 const COL_STATUS = "w-[26px]"
 const COL_ATTACH = "w-[18px]"
-/** 星标列自带左右留白（w-7 = 12px 图标 + 两侧 8px），所以它之后不再补右内边距，图标才是真居中 */
-const COL_STAR = "w-7"
 
 /** 没有折叠分组时的空数组：保持引用稳定，避免每次渲染都新建 Set */
 const EMPTY_GROUPS: string[] = []
@@ -67,8 +63,8 @@ const COLS_KEY = "maildesk.compactCols"
 const DEFAULT_COLS: CompactCols = { sender: 140, date: 72, size: 52, folder: 92 }
 // 日期最长是「11-21 23:20」，低于 72px 会折行；大小列同理（「568 KB」）
 const COL_MIN: CompactCols = { sender: 56, date: 72, size: 48, folder: 64 }
-/** 状态 + 附件 + 星标 + 左右内边距的固定占位，剩下的才分给可调列 */
-const COL_FIXED = 18 + 18 + 16 + 16
+/** 状态列 + 附件列的固定占位，剩下的才分给可调列 */
+const COL_FIXED = 26 + 18
 const SUBJECT_MIN = 96
 
 const DATE_FONT = '12.5px "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif'
@@ -439,15 +435,22 @@ export function MessageList({
 
   // 分组：紧凑始终分组；标准/宽松由设置决定
   const collapsedSet = useMemo(() => new Set(collapsedGroups), [collapsedGroups])
-  const rows = useMemo<ListRow[]>(
-    () =>
-      grouped
-        ? groupBy === "size"
-          ? groupBySize(messages, collapsedSet, groupDir)
-          : groupByDay(messages, collapsedSet, groupDir)
-        : messages.map((message) => ({ kind: "message", key: message.id, message })),
-    [grouped, groupBy, groupDir, messages, collapsedSet]
-  )
+  const rows = useMemo<ListRow[]>(() => {
+    // 置顶：带 starred 标记的邮件单独成组排在最前，组头固定叫「置顶」，不再混进日期/大小分组
+    const pinned = grouped ? messages.filter((message) => message.starred) : []
+    const rest = pinned.length ? messages.filter((message) => !message.starred) : messages
+    const base: ListRow[] = grouped
+      ? groupBy === "size"
+        ? groupBySize(rest, collapsedSet, groupDir)
+        : groupByDay(rest, collapsedSet, groupDir)
+      : rest.map((message) => ({ kind: "message", key: message.id, message }))
+    if (pinned.length === 0) return base
+    const head: ListRow[] = [{ kind: "group", key: "group-pinned", label: "置顶", count: pinned.length }]
+    if (!collapsedSet.has("group-pinned")) {
+      for (const message of pinned) head.push({ kind: "message", key: message.id, message })
+    }
+    return [...head, ...base]
+  }, [grouped, groupBy, groupDir, messages, collapsedSet])
 
   // 每个组头条在滚动内容里的起点，用于吸顶时判断「当前是哪一组」
   const groupAnchors = useMemo(() => {
@@ -617,9 +620,6 @@ export function MessageList({
                 )
               ) : null}
             </button>
-          </span>
-          <span className={cn("flex shrink-0 items-center justify-center", COL_STAR)}>
-            <Star className="size-3 opacity-70" />
           </span>
           {showFolder ? (
             <span
@@ -1019,28 +1019,6 @@ const MessageRow = memo(function MessageRow({
         >
           {formatSize(message.size)}
         </span>
-        {/* 星标列每行都显示：未加星的用描边弱化，加星的填色；点击只切星标不选中 */}
-        <span className={cn("flex shrink-0 justify-center", COL_STAR)}>
-          <button
-            type="button"
-            tabIndex={-1}
-            title={message.starred ? "取消星标 (S)" : "加星标 (S)"}
-            onClick={(event) => {
-              event.stopPropagation()
-              onToggleStar?.(message.id)
-            }}
-            className="flex size-4 items-center justify-center"
-          >
-            <Star
-              className={cn(
-                "size-3 transition-colors",
-                message.starred ? "text-star" : "text-muted-foreground/40 hover:text-muted-foreground"
-              )}
-              fill={message.starred ? "currentColor" : "none"}
-              strokeWidth={message.starred ? 0 : 1.5}
-            />
-          </button>
-        </span>
         {folderName === undefined ? null : (
           <span
             title={folderName}
@@ -1054,18 +1032,10 @@ const MessageRow = memo(function MessageRow({
     )
   }
 
-  // 标准视图只展示「发件人 + 主题」，附件/星标挤在主题行右侧；
-  // 宽松视图才是完整三行（含摘要），附件/星标回到摘要行
+  // 标准视图只展示「发件人 + 主题」，附件挤在主题行右侧；宽松视图才是完整三行（含摘要）
   const indicators = (
     <span className="ml-auto flex shrink-0 items-center gap-1.5">
       {message.hasAttachments ? <Paperclip className={cn("size-3.5", mutedText)} /> : null}
-      {message.starred ? (
-        <Star
-          className={cn("size-3.5", "text-star")}
-          fill="currentColor"
-          strokeWidth={0}
-        />
-      ) : null}
     </span>
   )
 
@@ -1233,7 +1203,7 @@ function EmptyList({
       <span className="text-[13px]">
         {searching
           ? "没有匹配的邮件"
-          : filter === "all" ? "这个文件夹还是空的" : filter === "unread" ? "没有未读邮件" : filter === "starred" ? "还没有星标邮件" : "没有带附件的邮件"}
+          : filter === "all" ? "这个文件夹还是空的" : filter === "unread" ? "没有未读邮件" : "没有带附件的邮件"}
       </span>
       {filter !== "all" ? (
         <span className="flex items-center gap-1 text-[12px] opacity-70">

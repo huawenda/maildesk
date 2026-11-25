@@ -175,7 +175,7 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
           </button>
         </div>
 
-        <div ref={listRef} className="scrollbar-overlay min-h-[260px] flex-1 overflow-y-auto px-2 py-2">
+        <div ref={listRef} className="scrollbar-overlay min-h-[260px] flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
           {loading ? (
             <div className="flex h-[260px] items-center justify-center gap-2 text-[12.5px] text-muted-foreground">
               <Loader2 className="size-4 animate-spin" /> 正在读取服务器文件夹…
@@ -199,8 +199,8 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
                   style={{ paddingLeft: 8 + depth * 16 }}
                   className={cn(
                     "flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left text-[12.5px] transition-colors",
-                    container ? "cursor-default text-muted-foreground" : "hover:bg-row-hover",
-                    checked && !container && "bg-row-selected text-foreground"
+                    // 选中态只靠左侧勾选框表示，行上不铺任何底色（用户 2026-11-25 要求）
+                    container ? "cursor-default text-muted-foreground" : "hover:bg-row-hover"
                   )}
                 >
                   <span

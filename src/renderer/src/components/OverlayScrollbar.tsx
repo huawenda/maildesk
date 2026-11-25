@@ -24,6 +24,10 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
 
     let hideTimer: number | null = null
     let rafId: number | null = null
+    /** 正在拖动的那根指针，松开时用它 releasePointerCapture */
+    let dragPointerId: number | null = null
+    /** 纵向是否真的有溢出：横向滚动时不能把纵向条闪出来 */
+    let vOverflow = false
     let dragging: {
       axis: "x" | "y"
       start: number
@@ -41,7 +45,9 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
       if (isVisible()) rafId = window.requestAnimationFrame(tick)
     }
 
-    const isVisible = () => vBar.style.opacity === "1" || hBar.style.opacity === "1"
+    // 循环只跟纵向条与拖拽绑定：横向条是常驻的，如果也把它算进可见条件，
+    // rAF 会在横向溢出期间一直空转。
+    const isVisible = () => vBar.style.opacity === "1" || dragging !== null
 
     const startLoop = () => {
       if (rafId === null) rafId = window.requestAnimationFrame(tick)
@@ -59,8 +65,8 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
         window.clearTimeout(hideTimer)
         hideTimer = null
       }
+      if (!vOverflow) return
       vBar.style.opacity = "1"
-      hBar.style.opacity = "1"
       startLoop()
     }
 
@@ -69,8 +75,8 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
       if (hideTimer !== null) window.clearTimeout(hideTimer)
       hideTimer = window.setTimeout(() => {
         hideTimer = null
+        // 横向条只在「没有横向溢出」时才由 update() 收掉，这里不碰它
         vBar.style.opacity = "0"
-        hBar.style.opacity = "0"
         stopLoop()
       }, HIDE_DELAY)
     }
@@ -91,7 +97,8 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
 
       const viewportH = element.clientHeight
       const rangeY = element.scrollHeight - viewportH
-      if (rangeY > 1) {
+      vOverflow = rangeY > 1
+      if (vOverflow) {
         const length = Math.max(MIN_THUMB_LENGTH, Math.round((viewportH * viewportH) / element.scrollHeight))
         const top = rect.top + (element.scrollTop / rangeY) * (viewportH - length)
         vBar.style.pointerEvents = "auto"
@@ -108,7 +115,9 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
         const length = Math.max(MIN_THUMB_LENGTH, Math.round((viewportW * viewportW) / element.scrollWidth))
         // 横向细条贴在容器下缘，右侧让出纵向细条的位置，避免两条在拐角叠在一起
         const left = rect.left + (element.scrollLeft / rangeX) * (viewportW - length)
+        // 有横向溢出时常驻：不参与 hover / 自动隐藏，宽度变化由 update 跟着重算
         hBar.style.pointerEvents = "auto"
+        hBar.style.opacity = "1"
         hBar.style.left = `${Math.round(left)}px`
         hBar.style.top = `${Math.round(rect.bottom - THUMB_SIZE - THUMB_INSET)}px`
         hBar.style.width = `${Math.min(length, viewportW - THUMB_SIZE - THUMB_INSET)}px`
@@ -125,6 +134,12 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
 
     const onPointerMove = (event: PointerEvent) => {
       if (!dragging) return
+      // 指针在 iframe（邮件正文）/窗口外松开时，父文档收不到那个 pointerup，会一直卡在按下态；
+      // 移动事件里 buttons 已经是 0 就当成松开处理，作为兜底
+      if (event.buttons === 0) {
+        stopDrag()
+        return
+      }
       const delta = dragging.axis === "y" ? event.clientY - dragging.start : event.clientX - dragging.start
       const next = dragging.startScroll + (delta / Math.max(1, dragging.track)) * dragging.range
       if (dragging.axis === "y") element.scrollTop = next
@@ -134,18 +149,29 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
 
     const stopDrag = () => {
       if (!dragging) return
+      const bar = dragging.axis === "y" ? vBar : hBar
       dragging = null
+      const released = dragPointerId
+      dragPointerId = null
       vBar.removeAttribute("data-dragging")
       hBar.removeAttribute("data-dragging")
       window.removeEventListener("pointermove", onPointerMove)
       window.removeEventListener("pointerup", stopDrag)
       window.removeEventListener("pointercancel", stopDrag)
+      window.removeEventListener("blur", stopDrag)
+      element.removeEventListener("pointerup", stopDrag)
+      try {
+        if (released !== null && bar.hasPointerCapture(released)) bar.releasePointerCapture(released)
+      } catch {
+        /* 指针已经失效时 release 会抛，忽略 */
+      }
       scheduleHide()
     }
 
     const startDrag = (axis: "x" | "y") => (event: PointerEvent) => {
       if (event.button !== 0) return
       event.preventDefault()
+      if (dragging) stopDrag()
       const bar = axis === "y" ? vBar : hBar
       const track =
         axis === "y"
@@ -159,10 +185,20 @@ export function OverlayScrollbar({ target }: { target: RefObject<HTMLElement | n
         range: axis === "y" ? element.scrollHeight - element.clientHeight : element.scrollWidth - element.clientWidth
       }
       bar.dataset.dragging = "true"
+      // 捕获指针：拖动过程中划过邮件 iframe 或移出窗口，事件仍然回到这根细条上，
+      // 否则父文档收不到 pointerup，细条会一直停在按下态（用户实测）
+      dragPointerId = event.pointerId
+      try {
+        bar.setPointerCapture(event.pointerId)
+      } catch {
+        /* 不支持捕获时不致命，下面的 buttons===0 兜底仍然生效 */
+      }
       show()
       window.addEventListener("pointermove", onPointerMove)
       window.addEventListener("pointerup", stopDrag)
       window.addEventListener("pointercancel", stopDrag)
+      window.addEventListener("blur", stopDrag)
+      element.addEventListener("pointerup", stopDrag)
     }
 
     const onEnter = () => {

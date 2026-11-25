@@ -12,7 +12,7 @@ import {
   MailOpen,
   PanelRight,
   SquareArrowOutUpRight,
-  Star,
+  Pin,
   Trash2
 } from "lucide-react"
 import { Check, Loader2, X } from "lucide-react"
@@ -317,7 +317,7 @@ export function Reader({
 
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-auto">
+          <div ref={bodyRef} className="scrollbar-native min-h-0 flex-1 overflow-auto">
             <article className="flex min-h-full w-full select-text flex-col px-6 pb-4 pt-5">
               <h2 className="text-[22px] font-semibold leading-[30px] tracking-[-0.01em]">
                 {message.subject || "（无主题）"}
@@ -339,14 +339,14 @@ export function Reader({
                     </span>
                     <div className="ml-auto flex shrink-0 items-center gap-0.5">
                       <button
-                        title={message.starred ? "取消星标 (S)" : "星标 (S)"}
+                        title={message.starred ? "取消置顶 (S)" : "置顶 (S)"}
                         onClick={onToggleStar}
                         className={cn(
                           "flex size-7 items-center justify-center rounded-md transition-colors hover:bg-row-hover",
-                          message.starred ? "text-star" : "text-muted-foreground hover:text-foreground"
+                          message.starred ? "text-primary" : "text-muted-foreground hover:text-foreground"
                         )}
                       >
-                        <Star
+                        <Pin
                           className="size-4"
                           fill={message.starred ? "currentColor" : "none"}
                           strokeWidth={message.starred ? 0 : 1.8}
@@ -515,7 +515,6 @@ export function Reader({
           onRestore={onRestore}
         />
       </ContextMenu>
-      <OverlayScrollbar target={bodyRef} />
 
       {senderOpen ? (
         <>

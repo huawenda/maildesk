@@ -504,8 +504,6 @@ export default function App() {
         return baseMessages.filter((message) => message.unread)
       case "attachments":
         return baseMessages.filter((message) => message.hasAttachments)
-      case "starred":
-        return baseMessages.filter((message) => message.starred)
       default:
         return baseMessages
     }

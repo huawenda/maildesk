@@ -153,8 +153,6 @@ export interface Settings {
   pageSize: number
   /** 是否默认放行邮件里的远程图片 */
   remoteImages: boolean
-  /** 正文适配方式：reflow = 重排进阅读区；original = 保留邮件原版式不缩放，超出阅读区的部分横向滚动 */
-  bodyFit: "reflow" | "original"
   /** 标准密度是否显示第三行摘要（宽松始终三行） */
   standardThreeLines: boolean
   /** 非紧凑密度是否显示日期分组组头 */
@@ -197,11 +195,73 @@ export interface SyncStatus {
   bodies?: { done: number; total: number }
 }
 
+/** 「同步状态」面板里单个文件夹的一行（只读快照，打开面板不会触发 IMAP 请求）。 */
+export interface FolderSyncSnapshot {
+  id: string
+  path: string
+  name: string
+  role: FolderRole
+  enabled: boolean
+  /** 本地已落库封数 */
+  localCount: number
+  unreadCount: number
+  /** 最近一次 STATUS / SELECT 看到的服务端封数；拿不到为 null */
+  serverCount: number | null
+  lastSyncedUid: number
+  uidNext: number | null
+  /** null = 还没开始回溯；< 1 = 已翻到底 */
+  backfillUid: number | null
+  /** 正在补齐这个文件夹时的进度 */
+  backfill: { done: number; total: number } | null
+  /** 当前正在这个文件夹上做的事 */
+  busy: "fetching" | "backfilling" | null
+  /** 会话内最后一次同步完成时刻 */
+  lastSyncAt: number | null
+}
+
+/** 「同步状态」面板里单个账户的快照。 */
+export interface AccountSyncSnapshot {
+  accountId: string
+  email: string
+  displayName: string | null
+  host: string
+  port: number
+  security: Security
+  state: SyncState
+  folder?: string
+  error?: string
+  startedAt?: number
+  lastSyncAt?: number
+  progress?: { folder: string; fetched: number; total: number }
+  bodies?: { done: number; total: number }
+  backfilling: boolean
+  reconciling: boolean
+  /** 还没有跑完的队列任务数（入队 +1，结束 -1） */
+  pendingTasks: number
+  /** 待推送到服务器的已读/未读条数 */
+  pendingFlags: number
+  nextPollAt?: number
+  nextReconcileAt?: number
+  nextRetryAt?: number
+  totals: {
+    enabledFolders: number
+    localMessages: number
+    unread: number
+    missingBody: number
+  }
+  folders: FolderSyncSnapshot[]
+}
+
+export interface SyncOverview {
+  generatedAt: number
+  accounts: AccountSyncSnapshot[]
+}
+
 export type SyncEvent =
   | { type: "state"; status: SyncStatus }
   | { type: "progress"; accountId?: string; folder: string; fetched: number; total?: number }
   /** 同步时预下载正文的进度（历史邮件的正文补齐）。 */
-  | { type: "bodies"; done: number; total: number; finished?: boolean }
+  | { type: "bodies"; accountId?: string; done: number; total: number; finished?: boolean }
   | {
       type: "backfill"
       accountId?: string
@@ -212,11 +272,11 @@ export type SyncEvent =
       /** 该文件夹的历史已经补完（或没得补） */
       finished?: boolean
     }
-  | { type: "messages"; folderId: string; added: number; bodiesDone?: boolean }
+  | { type: "messages"; accountId?: string; folderId: string; added: number; bodiesDone?: boolean }
   /** 双向对账的结果：本地库被服务器状态修正了多少条（界面据此重拉列表）。 */
-  | { type: "reconcile"; added: number; removed: number; moved: number; flags: number; folders?: number }
+  | { type: "reconcile"; accountId?: string; added: number; removed: number; moved: number; flags: number; folders?: number }
   /** 历史邮件的收件人/抄送姓名按原始头修正过（界面据此重拉列表，不弹新邮件提示）。 */
-  | { type: "recipients"; updated: number }
+  | { type: "recipients"; accountId?: string; updated: number }
 
 export interface MailApi {
   accounts: {
@@ -272,6 +332,10 @@ export interface MailApi {
   sync: {
     now(accountId?: string): Promise<void>
     status(): Promise<SyncStatus>
+    /** 全量只读快照：账户 + 文件夹 + 定时器，供「同步状态」面板使用 */
+    overview(): Promise<SyncOverview>
+    /** 重连某个账户（error / disconnected 时用） */
+    reconnect(accountId: string): Promise<boolean>
     /** 订阅同步事件，返回取消订阅函数。 */
     onEvent(cb: (event: SyncEvent) => void): () => void
   }
@@ -292,5 +356,9 @@ export interface MailApi {
     closeWindow(): Promise<void>
     /** 订阅最大化状态变化，返回取消订阅函数。 */
     onMaximizeChange(cb: (maximized: boolean) => void): () => void
+    /** 主进程日志文件路径（同步状态面板展示用） */
+    logPath(): Promise<string>
+    /** 在资源管理器里定位日志文件 */
+    openLogFolder(): Promise<boolean>
   }
 }

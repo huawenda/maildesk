@@ -1,11 +1,21 @@
 import { ImapFlow } from "imapflow"
 import type { MessageStructureObject } from "imapflow"
-import type { Account, Address, Folder, FolderRole, SyncEvent, SyncState, SyncStatus } from "@shared/types"
+import type {
+  Account,
+  AccountSyncSnapshot,
+  Address,
+  Folder,
+  FolderRole,
+  SyncEvent,
+  SyncState,
+  SyncStatus
+} from "@shared/types"
 import {
   findFolderByPath,
   deleteFolder,
   getFolder,
   listFolders,
+  setFolderEnabled,
   updateFolderCounts,
   resetBackfillUid,
   updateBackfillUid,
@@ -79,6 +89,8 @@ const DEBUG = Boolean(process.env.MAILDESK_SYNC_DEBUG)
  * QQ 不推 VANISHED 也没有 CONDSTORE，所以定时做一次全账户比对。
  */
 const RECONCILE_INTERVAL = 3 * 60_000
+/** 文件夹树（LIST + STATUS + 增删）多久刷一次；对账的其余轮次只问收件箱。 */
+const FOLDER_REFRESH_INTERVAL = 15 * 60_000
 /** 对账多久做一次全量扫描（按轮数算，5 轮 × 3 分钟 = 15 分钟）。其余轮次只看 STATUS 快照。 */
 const DEEP_RECONCILE_EVERY = 5
 /** 单个文件夹参与对账的封数上限：再大就只做增量，避免每次拖回几十万个 UID。 */
@@ -155,6 +167,8 @@ export class SyncEngine {
   private pollTimer: NodeJS.Timeout | null = null
   private reconcileTimer: NodeJS.Timeout | null = null
   private reconciling = false
+  /** 上次成功刷新文件夹树（LIST + STATUS）的时刻；0 表示本进程还没刷过。 */
+  private lastFolderRefreshAt = 0
   /** 本轮 LIST 拿到的 STATUS 快照（messages:unseen:uidNext），未变化就不必全量扫 UID。 */
   private folderStatus = new Map<string, string>()
   /** 上一次对账真正扫描过的快照，用来判断「这 3 分钟有没有变化」。 */
@@ -163,6 +177,17 @@ export class SyncEngine {
   private backfilling = false
   /** 本地已读/未读待推送到服务器，key 为 "folderId:uid"。 */
   private readonly pendingFlags = new Map<string, boolean>()
+  /** 队列里还没跑完的任务数（同步状态面板展示用）。 */
+  private pendingTasks = 0
+  /** 最近一次 STATUS / SELECT 看到的服务端封数（只读快照，不发起请求）。 */
+  private readonly serverCounts = new Map<string, number>()
+  /** 会话内每个文件夹最后一次同步完成的时刻。 */
+  private readonly lastFolderSyncAt = new Map<string, number>()
+  /** 当前正在回溯的文件夹与进度。 */
+  private backfillProgress: { folderId: string; done: number; total: number } | null = null
+  private nextPollAt?: number
+  private nextReconcileAt?: number
+  private nextRetryAt?: number
 
   constructor(
     private readonly account: Account,
@@ -187,6 +212,73 @@ export class SyncEngine {
     return this.schedule(() => this.bootstrap())
   }
 
+  /**
+   * 「同步状态」面板用的只读快照：只读内存与本地库，**不发起任何 IMAP 请求**，
+   * 所以打开面板不会打断正在跑的同步。
+   */
+  snapshot(): AccountSyncSnapshot {
+    const folders = listFolders(this.account.id)
+    const enabled = folders.filter((folder) => folder.enabled)
+    let localMessages = 0
+    let unread = 0
+    for (const folder of enabled) {
+      localMessages += folder.totalCount
+      unread += folder.unreadCount
+    }
+    return {
+      accountId: this.account.id,
+      email: this.account.email,
+      displayName: this.account.displayName,
+      host: this.account.imapHost,
+      port: this.account.imapPort,
+      security: this.account.security,
+      state: this.state,
+      folder: this.folderPath,
+      error: this.error,
+      startedAt: this.startedAt,
+      lastSyncAt: this.lastSyncAt,
+      progress: this.progress,
+      bodies: this.bodyProgress,
+      backfilling: this.backfilling,
+      reconciling: this.reconciling,
+      pendingTasks: this.pendingTasks,
+      pendingFlags: this.pendingFlags.size,
+      nextPollAt: this.nextPollAt,
+      nextReconcileAt: this.nextReconcileAt,
+      nextRetryAt: this.nextRetryAt,
+      totals: {
+        enabledFolders: enabled.length,
+        localMessages,
+        unread,
+        missingBody: countMessagesNeedingBody(this.account.id)
+      },
+      folders: folders.map((folder) => ({
+        id: folder.id,
+        path: folder.path,
+        name: folder.name,
+        role: folder.role,
+        enabled: folder.enabled,
+        localCount: folder.totalCount,
+        unreadCount: folder.unreadCount,
+        serverCount: this.serverCounts.get(folder.id) ?? null,
+        lastSyncedUid: folder.lastSyncedUid,
+        uidNext: folder.uidNext,
+        backfillUid: folder.backfillUid,
+        backfill:
+          this.backfillProgress?.folderId === folder.id
+            ? { done: this.backfillProgress.done, total: this.backfillProgress.total }
+            : null,
+        busy:
+          this.state === "fetching" && this.folderPath === folder.path
+            ? "fetching"
+            : this.backfillProgress?.folderId === folder.id
+              ? "backfilling"
+              : null,
+        lastSyncAt: this.lastFolderSyncAt.get(folder.id) ?? null
+      }))
+    }
+  }
+
   stop(): void {
     this.stopped = true
     if (this.retryTimer) clearTimeout(this.retryTimer)
@@ -195,6 +287,9 @@ export class SyncEngine {
     this.pollTimer = null
     if (this.reconcileTimer) clearInterval(this.reconcileTimer)
     this.reconcileTimer = null
+    this.nextPollAt = undefined
+    this.nextReconcileAt = undefined
+    this.nextRetryAt = undefined
     const client = this.client
     this.client = null
     if (client) void client.logout().catch(() => undefined)
@@ -321,13 +416,13 @@ export class SyncEngine {
     if (total === 0) return
     let done = 0
     this.bodyProgress = { done, total }
-    this.hooks.emit({ type: "bodies", done, total })
+    this.hooks.emit({ type: "bodies", accountId: this.account.id, done, total })
     while (!this.stopped) {
       const candidates = messagesNeedingBody(this.account.id, 200)
       if (candidates.length === 0) {
         console.log("[sync] body backfill done", this.account.email)
         this.bodyProgress = undefined
-        this.hooks.emit({ type: "bodies", done: total, total, finished: true })
+        this.hooks.emit({ type: "bodies", accountId: this.account.id, done: total, total, finished: true })
         return
       }
       const byFolder = new Map<string, { id: string; uid: number }[]>()
@@ -358,7 +453,7 @@ export class SyncEngine {
             processed += items.length
             done += items.length
             this.bodyProgress = { done: Math.min(done, total), total }
-            this.hooks.emit({ type: "bodies", done: Math.min(done, total), total })
+            this.hooks.emit({ type: "bodies", accountId: this.account.id, done: Math.min(done, total), total })
           } finally {
             lock.release()
           }
@@ -369,13 +464,13 @@ export class SyncEngine {
       // 一封也没处理（网络/服务器拒绝）就停下，别在启动时空转
       if (processed === 0) {
         this.bodyProgress = undefined
-        this.hooks.emit({ type: "bodies", done, total, finished: true })
+        this.hooks.emit({ type: "bodies", accountId: this.account.id, done, total, finished: true })
         return
       }
       await sleep(120)
     }
     this.bodyProgress = undefined
-    this.hooks.emit({ type: "bodies", done, total, finished: true })
+    this.hooks.emit({ type: "bodies", accountId: this.account.id, done, total, finished: true })
   }
 
   /** 点开邮件时才拉全文：返回是否拿到了正文。 */
@@ -487,16 +582,22 @@ export class SyncEngine {
   }
 
   private schedule<T>(task: () => Promise<T>): Promise<T> {
+    this.pendingTasks += 1
     const run = this.queue.then(task, task)
-    this.queue = run.catch(() => undefined)
-    return run
+    const settled = run.finally(() => {
+      this.pendingTasks = Math.max(0, this.pendingTasks - 1)
+    })
+    this.queue = settled.catch(() => undefined)
+    return settled
   }
 
   private setState(state: SyncState, patch: { folder?: string; error?: string } = {}): void {
     this.state = state
     if (patch.folder !== undefined) this.folderPath = patch.folder
     if (patch.error !== undefined) this.error = patch.error
-    if (state === "disconnected") this.folderPath = undefined
+    // 「已同步 / 未连接」时没有当前文件夹，清掉上一次同步留下的箱子名，
+    // 否则状态事件会带着「已同步（QQ邮件订阅）」这种误导性的后缀。
+    if (state === "disconnected" || state === "idling") this.folderPath = undefined
     if (state === "idling" || state === "error" || state === "disconnected") {
       // 一轮同步结束：耗时与文件夹进度都收掉（正文补齐有自己的进度条）
       this.startedAt = undefined
@@ -641,12 +742,14 @@ export class SyncEngine {
     }
     console.log("[sync] recipient names refreshed", this.account.email, updated)
     // 界面可能在修正前就已经把列表读进内存了，补一个刷新信号
-    if (updated > 0) this.hooks.emit({ type: "recipients", updated })
+    if (updated > 0) this.hooks.emit({ type: "recipients", accountId: this.account.id, updated })
   }
 
   private startReconcileTimer(): void {
     if (this.reconcileTimer) return
+    this.nextReconcileAt = Date.now() + RECONCILE_INTERVAL
     this.reconcileTimer = setInterval(() => {
+      this.nextReconcileAt = Date.now() + RECONCILE_INTERVAL
       if (this.stopped || !this.client) return
       // 对账会逐个文件夹取 UID+FLAGS，排在同步队列里，别和正文拉取抢锁
       void this.schedule(() => this.reconcileAccount("timer")).catch(() => undefined)
@@ -655,7 +758,9 @@ export class SyncEngine {
 
   private startPolling(): void {
     if (this.pollTimer) return
+    this.nextPollAt = Date.now() + POLL_INTERVAL
     this.pollTimer = setInterval(() => {
+      this.nextPollAt = Date.now() + POLL_INTERVAL
       if (this.stopped || !this.client) return
       // 轮询走同步队列，永远排在手动同步与正文拉取之后；失败只记日志，不打断连接
       void this.schedule(() => this.pollInbox()).catch(() => undefined)
@@ -731,8 +836,10 @@ export class SyncEngine {
     this.failures += 1
     const delay = Math.min(1000 * 2 ** Math.min(this.failures, 6), BACKOFF_MAX)
     if (this.failures >= 3) this.setState("error", { error: "连接中断，正在重试" })
+    this.nextRetryAt = Date.now() + delay
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
+      this.nextRetryAt = undefined
       void this.schedule(() => this.bootstrap()).catch(() => undefined)
     }, delay)
   }
@@ -781,6 +888,9 @@ export class SyncEngine {
     for (const item of listed) {
       const existing = findFolderByPath(this.account.id, item.path)
       const role = roleOf(item.specialUse) ?? existing?.role ?? null
+      // \Noselect 容器没有自己的邮件：SELECT 拿不到 uidValidity/uidNext，
+      // 旧版本会把它当普通箱子同步，往游标里写 NaN。
+      const noSelect = [...(item.flags ?? [])].some((flag) => flag.toLowerCase() === "\\noselect")
       const folder: Folder = {
         id: existing?.id ?? crypto.randomUUID(),
         accountId: this.account.id,
@@ -796,13 +906,16 @@ export class SyncEngine {
         sortOrder: existing?.sortOrder ?? 0,
         backfillUid: existing?.backfillUid ?? null,
         // 新发现的文件夹：系统箱子默认显示；自建目录默认隐藏，由用户「选择文件夹」勾选
-        enabled: existing?.enabled ?? role !== null
+        enabled: noSelect ? false : (existing?.enabled ?? role !== null)
       }
       upsertFolder(folder)
+      // upsertFolder 不覆盖 enabled（那是用户选择），容器文件夹要在刷新时显式关掉旧值
+      if (noSelect && existing?.enabled) setFolderEnabled(folder.id, false)
       this.folderStatus.set(
         folder.id,
         `${item.status?.messages ?? -1}:${item.status?.unseen ?? -1}:${item.status?.uidNext ?? -1}`
       )
+      if (typeof item.status?.messages === "number") this.serverCounts.set(folder.id, item.status.messages)
     }
     // 服务器上删掉的文件夹（网页版/手机端）要跟着删，否则侧栏会永远留着空壳
     const seen = new Set(listed.map((item) => item.path))
@@ -813,7 +926,28 @@ export class SyncEngine {
       removed += 1
       console.log("[sync] folder removed", this.account.email, folder.path)
     }
+    this.lastFolderRefreshAt = Date.now()
     return removed
+  }
+
+  /**
+   * 两次文件夹树刷新之间只问收件箱的 STATUS：新邮件改 uidNext、手机端读信改 unseen，
+   * 对账据此决定要不要扫收件箱；其余文件夹等下一次整树刷新或深度扫描。
+   */
+  private async refreshInboxStatus(): Promise<void> {
+    const client = this.client
+    const inbox = this.inboxFolder()
+    if (!client || !inbox) return
+    try {
+      const status = await client.status(inbox.path, { messages: true, unseen: true, uidNext: true })
+      if (!status) return
+      this.folderStatus.set(
+        inbox.id,
+        `${status.messages ?? -1}:${status.unseen ?? -1}:${status.uidNext ?? -1}`
+      )
+    } catch (error) {
+      console.error("[sync] inbox status failed", this.account.email, String(error))
+    }
   }
 
   private async syncAll(): Promise<void> {
@@ -939,9 +1073,12 @@ export class SyncEngine {
       // folder.total_count 存的是本地行数（updateFolderCounts 会覆盖），不能当服务端总数用；
       // 服务端的真实封数要 SELECT 之后从 EXISTS 拿。
       const serverTotal = Number(mailbox.exists ?? 0)
+      this.serverCounts.set(folder.id, serverTotal)
       // 本地已经一封不差，直接把这箱标成翻完，不必再走一遍 UID 空间
       if (serverTotal > 0 && local >= serverTotal) {
         updateBackfillUid(folder.id, 0)
+        this.backfillProgress = null
+        this.lastFolderSyncAt.set(folder.id, Date.now())
         this.hooks.emit({
           type: "backfill",
           accountId: this.account.id,
@@ -952,6 +1089,12 @@ export class SyncEngine {
           finished: true
         })
         return true
+      }
+      // 正在补这箱：即使中途快照也能显示进度
+      this.backfillProgress = {
+        folderId: folder.id,
+        done: local,
+        total: Math.max(serverTotal, local)
       }
       if (folder.uidValidity !== null && Number(mailbox.uidValidity) !== folder.uidValidity) {
         // UID 体系变了，交给常规同步去清空重拉，回溯先让路
@@ -977,6 +1120,11 @@ export class SyncEngine {
       updateBackfillUid(folder.id, from - 1)
       const done = countFolder(folder.id)
       updateFolderCounts(folder.id, done)
+      const finished = from <= 1 || (serverTotal > 0 && done.total >= serverTotal)
+      this.backfillProgress = finished
+        ? null
+        : { folderId: folder.id, done: done.total, total: Math.max(serverTotal, done.total) }
+      this.lastFolderSyncAt.set(folder.id, Date.now())
       this.hooks.emit({
         type: "backfill",
         accountId: this.account.id,
@@ -984,7 +1132,7 @@ export class SyncEngine {
         folder: folder.path,
         done: done.total,
         total: Math.max(serverTotal, done.total),
-        finished: from <= 1 || (serverTotal > 0 && done.total >= serverTotal)
+        finished
       })
       return true
     } finally {
@@ -1004,6 +1152,13 @@ export class SyncEngine {
       // imapflow 的 uidValidity / uidNext 可能是 bigint，node:sqlite 不接受 bigint 绑定
       const uidValidity = Number(mailbox.uidValidity)
       const uidNext = Number(mailbox.uidNext)
+      // \Noselect 容器（或异常 SELECT）没有 UID 体系：不要再往下算，否则会把 NaN 写进游标
+      if (!Number.isFinite(uidValidity) || !Number.isFinite(uidNext)) {
+        if (DEBUG) console.log("[sync] skip folder without uid space", folder.path)
+        return
+      }
+      this.serverCounts.set(folder.id, Number(mailbox.exists ?? 0))
+      const exists = Number(mailbox.exists ?? 0)
       let lastSyncedUid = folder.lastSyncedUid
       if (folder.uidValidity !== null && folder.uidValidity !== uidValidity) {
         // PRD FR-05.4：UIDVALIDITY 变了就意味着 UID 全部失效，整箱重来
@@ -1015,14 +1170,17 @@ export class SyncEngine {
 
       const highest = Math.max(uidNext - 1, 0)
       const from = lastSyncedUid > 0 ? lastSyncedUid + 1 : Math.max(1, highest - limit + 1)
-      // 本轮要取的封数：首次同步是首屏窗口（limit），增量就是新增的 UID 段
-      const expected = highest >= from ? highest - from + 1 : 0
+      // 本轮要取的封数：首次同步是首屏窗口（limit），增量就是新增的 UID 段。
+      // 再用服务端真实封数夹一次，避免窗口比整箱还大时进度一开始就虚高。
+      const expected = highest >= from ? Math.min(highest - from + 1, Math.max(exists, 1)) : 0
       let added = 0
       let fetched = 0
       let maxUid = lastSyncedUid
       const bodyItems: { uid: number; structure?: MessageStructureObject }[] = []
 
-      if (highest >= from) {
+      // 空箱子（服务端 0 封）不要走 fetch，也不要发「0 / 1」这种进度：
+      // UID 空间可能有空洞（uidNext 不等于封数），只看 highest 会误判。
+      if (highest >= from && exists > 0) {
         if (!quiet) this.setState("fetching", { folder: folder.path })
         this.progress = { folder: folder.path, fetched: 0, total: expected }
         this.hooks.emit({ type: "progress", folder: folder.path, fetched: 0, total: expected })
@@ -1044,6 +1202,13 @@ export class SyncEngine {
           if (batch.length >= BATCH_SIZE) flush()
         }
         flush()
+        // UID 有空洞时「UID 跨度」永远大于实际封数，停在 183/200 会让人以为没下完；
+        // fetch 结束就把进度补满，下一步直接进正文/下一个箱子。
+        // 一封都没取到（全是空洞）就不再发 0 / 0 这种没有信息量的进度。
+        if (fetched > 0) {
+          this.progress = { folder: folder.path, fetched, total: fetched }
+          this.hooks.emit({ type: "progress", folder: folder.path, fetched, total: fetched })
+        }
       }
 
       // 光标先推进再取正文：头部落库后即使正文失败，下一轮 bodyBackfillLoop 也会按
@@ -1057,13 +1222,20 @@ export class SyncEngine {
       if (DEBUG) console.log("[sync] folder", folder.path, { from, highest, fetched, added, maxUid, uidValidity })
       // 头部落库后先让列表出现：主题 / 发件人 / 时间立刻可见，摘要等正文下完再补。
       // 一个文件夹只多发一次整箱读取，比白等十几秒划算。
-      if (added > 0) this.hooks.emit({ type: "messages", folderId: folder.id, added })
+      if (added > 0) this.hooks.emit({ type: "messages", accountId: this.account.id, folderId: folder.id, added })
       if (bodyItems.length > 0) {
         // 新邮件的正文在同一把 mailbox lock 里取回，点开时不再请求服务器（附件仍按需）
         await this.fetchBodies(folder.id, bodyItems)
         // 摘要已经写进库，补一个刷新信号（added 为 0，不触发通知气泡）
-        this.hooks.emit({ type: "messages", folderId: folder.id, added: 0, bodiesDone: true })
+        this.hooks.emit({
+          type: "messages",
+          accountId: this.account.id,
+          folderId: folder.id,
+          added: 0,
+          bodiesDone: true
+        })
       }
+      this.lastFolderSyncAt.set(folder.id, Date.now())
     } finally {
       lock.release()
     }
@@ -1224,7 +1396,7 @@ export class SyncEngine {
       if (!folder) continue
       updateFolderCounts(folder.id, countFolder(folder.id))
     }
-    this.hooks.emit({ type: "messages", folderId: "", added: 0 })
+    this.hooks.emit({ type: "messages", accountId: this.account.id, folderId: "", added: 0 })
   }
 
   /** 把待推送的已读态发给服务器。必须在拿锁之前调用，内部自己加锁。 */
@@ -1285,8 +1457,14 @@ export class SyncEngine {
     try {
       // 先推本地待发的已读态，再拿 STATUS：否则刚推上去的已读会把快照立刻弄脏
       await this.flushFlags()
-      // 文件夹清单跟着每次对账刷新：网页版删掉的文件夹会在这里连本地邮件一起删掉
-      const foldersRemoved = await this.refreshFolders()
+      // 文件夹树（LIST + STATUS + 增删）每 15 分钟、手动同步或进程首轮才刷新；
+      // 其余轮次只问收件箱 STATUS，避免每 3 分钟给每个箱子都发一遍 STATUS。
+      const treeDue =
+        reason === "manual" ||
+        this.lastFolderRefreshAt === 0 ||
+        Date.now() - this.lastFolderRefreshAt >= FOLDER_REFRESH_INTERVAL
+      const foldersRemoved = treeDue ? await this.refreshFolders() : 0
+      if (!treeDue) await this.refreshInboxStatus()
       // 只有 STATUS（messages / unseen / uidNext）变了才值得全量扫 UID+FLAGS：
       // 新邮件会改 uidNext，删除会改 messages，手机端读信会改 unseen。
       // \Flagged 这类不进 STATUS 的变化靠每 DEEP_RECONCILE_EVERY 轮一次的深度扫描兜底。
@@ -1313,6 +1491,7 @@ export class SyncEngine {
           console.log("[sync] reconcile " + reason, this.account.email, "folders removed", foldersRemoved)
           this.hooks.emit({
             type: "reconcile",
+            accountId: this.account.id,
             added: 0,
             removed: 0,
             moved: 0,
@@ -1432,7 +1611,7 @@ export class SyncEngine {
         } finally {
           lock.release()
         }
-        if (added > 0) this.hooks.emit({ type: "messages", folderId: arrival.folder.id, added })
+        if (added > 0) this.hooks.emit({ type: "messages", accountId: this.account.id, folderId: arrival.folder.id, added })
       }
       const expired = vanished.filter((row) => !claimed.has(row.id)).map((row) => row.id)
       if (expired.length > 0) deleteMessageRows(expired)
@@ -1477,6 +1656,7 @@ export class SyncEngine {
         )
         this.hooks.emit({
           type: "reconcile",
+          accountId: this.account.id,
           added,
           removed: expired.length,
           moved,

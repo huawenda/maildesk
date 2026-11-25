@@ -91,8 +91,12 @@ export function resetBackfillUid(id: string): void {
   run("UPDATE folder SET backfill_uid = NULL WHERE id = ?", id)
 }
 
-/** 供 M3 同步写入；role 为 null 的普通文件夹排在系统文件夹之后。 */
-export function upsertFolder(folder: Folder): void {
+/** 单个文件夹的启用状态：\Noselect 容器由同步层强制关闭，不参与侧栏与同步。 */
+export function setFolderEnabled(id: string, enabled: boolean): void {
+  run("UPDATE folder SET enabled = ? WHERE id = ?", enabled ? 1 : 0, id)
+}
+
+/** 供 M3 同步写入；role 为 null 的普通文件夹排在系统文件夹之后。 */export function upsertFolder(folder: Folder): void {
   const sortOrder = folder.role ? (ROLE_ORDER[folder.role] ?? 10) : 50 + folder.sortOrder
   run(
     `INSERT INTO folder (id, account_id, path, name, delimiter, role, uid_validity, uid_next,

@@ -1,7 +1,7 @@
 # MailDesk
 
 Windows 单平台的桌面邮件客户端：**只收信（IMAP，不发信、不碰 SMTP）**，核心目标是可自由重构的 UI。
-产品与设计规格见 [docs/PRD.md](docs/PRD.md)，UI 参考图见 [docs/ui-refs/gallery.html](docs/ui-refs/gallery.html)。
+产品与设计规格见 [docs/PRD.md](docs/PRD.md)，同步链路细节见 [docs/sync.md](docs/sync.md)，UI 参考图见 [docs/ui-refs/gallery.html](docs/ui-refs/gallery.html)。
 
 ## 已具备的功能
 

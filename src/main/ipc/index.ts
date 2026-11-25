@@ -41,9 +41,12 @@ import {
   scanFolders,
   startAccountSync,
   stopAccountSync,
+  reconnectAccount,
   syncNow,
+  syncOverview,
   syncStatus
 } from "../sync/manager"
+import { logger } from "../log"
 
 function windowOf(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
   const win = BrowserWindow.fromWebContents(event.sender)
@@ -126,6 +129,15 @@ export function registerIpc(): void {
   ipcMain.handle(CH.appZoom, (event, raw: unknown) => {
     const factor = parse(z.number().min(0.5).max(2), raw)
     windowOf(event)?.webContents.setZoomFactor(factor)
+  })
+
+  // 同步状态面板：展示日志位置、在资源管理器里定位日志文件
+  ipcMain.handle(CH.appLogPath, () => logger.transports.file.getFile().path)
+  ipcMain.handle(CH.appOpenLogFolder, () => {
+    const path = logger.transports.file.getFile().path
+    if (!path) return false
+    shell.showItemInFolder(path)
+    return true
   })
 
   ipcMain.handle(CH.windowMinimize, (event) => windowOf(event)?.minimize())
@@ -332,6 +344,8 @@ export function registerIpc(): void {
     await syncNow(parse(idSchema.optional(), raw))
   })
   ipcMain.handle(CH.syncStatus, () => syncStatus())
+  ipcMain.handle(CH.syncOverview, () => syncOverview())
+  ipcMain.handle(CH.syncReconnect, (_event, raw: unknown) => reconnectAccount(parse(idSchema, raw)))
 
   ipcMain.handle(CH.settingsGet, () => getSettings())
   ipcMain.handle(CH.settingsSet, (_event, raw: unknown) => setSettings(parse(settingsPatchSchema, raw)))

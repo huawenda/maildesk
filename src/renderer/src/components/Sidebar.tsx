@@ -1,5 +1,6 @@
 import { useRef, useState } from "react"
 import {
+  Activity,
   Archive,
   ChevronDown,
   ChevronRight,
@@ -46,6 +47,8 @@ interface SidebarProps {
   syncing: boolean
   syncLabel: string
   onSync: () => void
+  /** 打开「同步状态」详情面板 */
+  onOpenSyncStatus: () => void
 }
 
 export function Sidebar({
@@ -63,7 +66,8 @@ export function Sidebar({
   showLabels,
   syncing,
   syncLabel,
-  onSync
+  onSync,
+  onOpenSyncStatus
 }: SidebarProps) {
   // 容器目录默认展开，点右侧箭头（或整行）收起子项
   const navRef = useRef<HTMLElement>(null)
@@ -199,17 +203,35 @@ export function Sidebar({
           <FolderCog className="size-3.5 shrink-0" />
           {collapsed ? null : <span className="truncate">选择文件夹</span>}
         </button>
-        <button
-          onClick={onSync}
-          title="手动同步 (Ctrl R)"
-          className={cn(
-            "flex h-7 items-center gap-1.5 rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover",
-            collapsed ? "justify-center px-0" : "px-2"
-          )}
-        >
-          <RefreshCw className={cn("size-3 shrink-0", syncing && "animate-spin text-primary")} />
-          {collapsed ? null : <span className="truncate">{syncLabel}</span>}
-        </button>
+        {collapsed ? (
+          <button
+            onClick={onOpenSyncStatus}
+            title="同步详情"
+            aria-label="同步详情"
+            className="flex h-7 items-center justify-center rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover"
+          >
+            <RefreshCw className={cn("size-3 shrink-0", syncing && "animate-spin text-primary")} />
+          </button>
+        ) : (
+          <div className="flex h-7 items-center rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover">
+            <button
+              onClick={onSync}
+              title="手动同步 (Ctrl R)"
+              className="flex h-7 min-w-0 flex-1 items-center gap-1.5 px-2"
+            >
+              <RefreshCw className={cn("size-3 shrink-0", syncing && "animate-spin text-primary")} />
+              <span className="truncate">{syncLabel}</span>
+            </button>
+            <button
+              onClick={onOpenSyncStatus}
+              title="同步详情"
+              aria-label="同步详情"
+              className="mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
+            >
+              <Activity className="size-3" />
+            </button>
+          </div>
+        )}
 
         {/* 设置入口只在侧栏底部，标题栏不再重复 */}
         <button

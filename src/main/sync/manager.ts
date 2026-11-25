@@ -1,7 +1,7 @@
 import { BrowserWindow, shell } from "electron"
 import { CH } from "@shared/channels"
 import { existsSync } from "node:fs"
-import type { DownloadTask, Folder, SyncEvent, SyncState, SyncStatus } from "@shared/types"
+import type { DownloadTask, Folder, SyncEvent, SyncOverview, SyncState, SyncStatus } from "@shared/types"
 import { listAccounts } from "../db/accounts"
 import { getFolder, listFolders } from "../db/folders"
 import { getMessageLocator } from "../db/messages"
@@ -56,6 +56,21 @@ export function stopAccountSync(accountId: string): void {
   if (!engine) return
   engine.stop()
   engines.delete(accountId)
+}
+
+/** 「同步状态」面板：重连某个账户（error / disconnected 时用）。 */
+export function reconnectAccount(accountId: string): boolean {
+  stopAccountSync(accountId)
+  startAccountSync(accountId)
+  return true
+}
+
+/** 「同步状态」面板：全量只读快照。只读内存与本地库，不发起 IMAP 请求。 */
+export function syncOverview(): SyncOverview {
+  return {
+    generatedAt: Date.now(),
+    accounts: [...engines.values()].map((engine) => engine.snapshot())
+  }
 }
 
 export function stopSync(): void {

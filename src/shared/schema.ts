@@ -26,7 +26,6 @@ export const settingsSchema = z.object({
   fontSize: z.number().int().min(12).max(18),
   pageSize: z.number().int().min(20).max(5000),
   remoteImages: z.boolean(),
-  bodyFit: z.enum(["reflow", "original"]),
   standardThreeLines: z.boolean(),
   groupHeadersNonCompact: z.boolean(),
   stickyGroupHeaders: z.boolean(),

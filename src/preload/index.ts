@@ -57,6 +57,8 @@ const api: MailApi = {
   sync: {
     now: (accountId) => ipcRenderer.invoke(CH.syncNow, accountId),
     status: () => ipcRenderer.invoke(CH.syncStatus),
+    overview: () => ipcRenderer.invoke(CH.syncOverview),
+    reconnect: (accountId) => ipcRenderer.invoke(CH.syncReconnect, accountId),
     onEvent: (cb) => {
       const listener = (_event: unknown, payload: SyncEvent) => cb(payload)
       ipcRenderer.on(CH.syncEvent, listener)
@@ -84,7 +86,9 @@ const api: MailApi = {
       return () => {
         ipcRenderer.removeListener(CH.windowStateEvent, listener)
       }
-    }
+    },
+    logPath: () => ipcRenderer.invoke(CH.appLogPath),
+    openLogFolder: () => ipcRenderer.invoke(CH.appOpenLogFolder)
   }
 }
 

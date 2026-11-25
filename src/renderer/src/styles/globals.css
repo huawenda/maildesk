@@ -19,6 +19,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  /* 成功/空闲完成态（同步状态面板的「已同步」） */
+  --color-success: var(--success);
   --color-border: var(--border);
   /* 列表内部的表格线（列头、列分隔、组头、行分隔）统一用这一个 token，不再用 border 的透明度分档 */
   --color-table-line: var(--table-line);
@@ -63,6 +65,8 @@
   --accent-foreground: #242424;
   --destructive: #c03030;
   --destructive-foreground: #ffffff;
+  /* 「已同步」状态用绿色；只给同步状态面板，不当通用成功色到处用 */
+  --success: #15803d;
   --border: #cdcdcd;
   --table-line: #d9d9d9;
   --row-line: #e2e2e2;
@@ -215,6 +219,22 @@
   width: 0;
 }
 
+/* 正文纵向滚动条：静止时透明隐藏，滚动中或悬停时出现（用户 2026-11-25 要求）；
+   横向条不受影响，仍然常显 */
+.scrollbar-native::-webkit-scrollbar-thumb:vertical {
+  background-color: transparent;
+}
+
+.scrollbar-native:hover::-webkit-scrollbar-thumb:vertical,
+.scrollbar-native[data-scrolling="true"]::-webkit-scrollbar-thumb:vertical {
+  background-color: color-mix(in oklab, var(--color-foreground) 25%, transparent);
+}
+
+.scrollbar-native:hover::-webkit-scrollbar-thumb:vertical:hover,
+.scrollbar-native[data-scrolling="true"]::-webkit-scrollbar-thumb:vertical:hover {
+  background-color: color-mix(in oklab, var(--color-foreground) 40%, transparent);
+}
+
 /* 右侧抽屉（发件人邮件列表）的出入场：只动 transform / opacity，120–160ms */
 @keyframes maildesk-drawer-in {
   from {
@@ -252,3 +272,4 @@
     animation: none;
   }
 }
+

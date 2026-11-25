@@ -306,6 +306,16 @@ function createWindow(): BrowserWindow {
               console.log("capture-settings", JSON.stringify(opened))
               await new Promise((resolve) => setTimeout(resolve, 600))
             }
+            // 同步状态面板（侧栏底部状态行右侧的详情图标）
+            if (process.env.MAILDESK_CAPTURE_SYNC) {
+              const opened = await win.webContents
+                .executeJavaScript(
+                  "(() => { const el = document.querySelector('button[aria-label=\"同步详情\"]'); if (!el) return 'no-sync-status'; el.click(); return true })()"
+                )
+                .catch(() => undefined)
+              console.log("capture-sync", JSON.stringify(opened))
+              await new Promise((resolve) => setTimeout(resolve, 1200))
+            }
             // 列表密度：先打开标题栏密度下拉，再按文字选「紧凑 / 标准 / 宽松」
             const density = process.env.MAILDESK_CAPTURE_DENSITY
             if (density) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { Account, Folder, SyncState } from "@shared/types"
+import type { Account, Folder, SyncEvent, SyncState } from "@shared/types"
 import { AccountCapsule } from "@/components/AccountCapsule"
 import { AccountDialog } from "@/components/AccountDialog"
 import { MessageList, type ListFilter } from "@/components/MessageList"
@@ -7,6 +7,7 @@ import { Notice } from "@/components/Notice"
 import { Reader } from "@/components/Reader"
 import { FolderPickerDialog } from "@/components/FolderPickerDialog"
 import { SettingsDialog } from "@/components/SettingsDialog"
+import { SyncStatusDialog, type SyncEventLogEntry } from "@/components/SyncStatusDialog"
 import type { SearchScope } from "@/components/TitleBarSearch"
 import { Sidebar } from "@/components/Sidebar"
 import { TitleBar } from "@/components/TitleBar"
@@ -69,6 +70,18 @@ const timeAgo = (timestamp: number): string => {
   if (minutes < 60) return `${minutes} 分钟前`
   const hours = Math.round(minutes / 60)
   return hours < 24 ? `${hours} 小时前` : `${Math.round(hours / 24)} 天前`
+}
+
+/** 时间线里的同类进度可以合并成一行（只保留最新的值）。 */
+const sameProgress = (a: SyncEvent, b: SyncEvent): boolean => {
+  if (a.type === "progress" && b.type === "progress") {
+    return a.folder === b.folder && a.accountId === b.accountId
+  }
+  if (a.type === "bodies" && b.type === "bodies") return a.accountId === b.accountId
+  if (a.type === "backfill" && b.type === "backfill") {
+    return a.folderId === b.folderId && a.accountId === b.accountId
+  }
+  return false
 }
 
 /**
@@ -137,8 +150,6 @@ export default function App() {
   const dragRef = useRef<{ x: number; width: number } | null>(null)
   const [backfill, setBackfill] = useState<{ done: number; total: number } | null>(null)
   const [remoteImages, setRemoteImages] = useState<boolean>(true)
-  // 正文适配：reflow = 重排进阅读区；original = 保留原版式、不缩放，超宽交给阅读区横滚
-  const [bodyFit, setBodyFit] = useState<"reflow" | "original">("reflow")
   const [standardThreeLines, setStandardThreeLines] = useState<boolean>(false)
   const [groupHeadersNonCompact, setGroupHeadersNonCompact] = useState<boolean>(true)
   const [stickyGroupHeaders, setStickyGroupHeaders] = useState<boolean>(true)
@@ -148,6 +159,9 @@ export default function App() {
   // 界面整体缩放：0 = 自动（1080p 这类小屏默认 90%），避免公司电脑上元素显大
   const [uiScale, setUiScale] = useState<number>(() => readStored("maildesk.uiScale", 0))
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [syncStatusOpen, setSyncStatusOpen] = useState(false)
+  // 「同步状态」面板的事件时间线：只保留本次会话最近 200 条
+  const [syncEventLog, setSyncEventLog] = useState<SyncEventLogEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
   const [syncState, setSyncState] = useState<SyncState>("disconnected")
@@ -175,8 +189,6 @@ export default function App() {
         setCollapsed(settings.sidebarCollapsed)
         setFontSize(settings.fontSize)
         setRemoteImages(settings.remoteImages)
-        // 旧库里的 "zoom"（旧的等比缩放）没有对应项了：读进来一律回落到默认的重排
-        setBodyFit(settings.bodyFit === "original" ? "original" : "reflow")
         setStandardThreeLines(settings.standardThreeLines)
         setGroupHeadersNonCompact(settings.groupHeadersNonCompact)
         setStickyGroupHeaders(settings.stickyGroupHeaders)
@@ -224,11 +236,6 @@ export default function App() {
     if (!settingsReady.current) return
     void mail.settings.set({ remoteImages }).catch(() => undefined)
   }, [remoteImages])
-
-  useEffect(() => {
-    if (!settingsReady.current) return
-    void mail.settings.set({ bodyFit }).catch(() => undefined)
-  }, [bodyFit])
 
   useEffect(() => {
     if (!settingsReady.current) return
@@ -361,6 +368,29 @@ export default function App() {
   useEffect(() => {
     if (!live) return
     const off = mail.sync.onEvent((event) => {
+      setSyncEventLog((log) => {
+        // 0 / N 的开始进度没有信息量，不进时间线
+        if (event.type === "progress" && event.fetched === 0) return log
+        const last = log[log.length - 1]
+        // 同一状态连续重复（例如逐个文件夹「正在打开」）不刷屏
+        if (
+          event.type === "state" &&
+          last?.event.type === "state" &&
+          last.event.status.state === event.status.state &&
+          last.event.status.folder === event.status.folder &&
+          last.event.status.error === event.status.error
+        ) {
+          return log
+        }
+        const entry = { at: Date.now(), event }
+        // 同类进度只保留最新一条：进度每 50 封发一次，全部记下来会刷屏
+        if (last && sameProgress(last.event, event)) {
+          const next = log.slice(0, -1)
+          next.push(entry)
+          return next
+        }
+        return log.length >= 200 ? [...log.slice(1), entry] : [...log, entry]
+      })
       if (event.type === "state") {
         setSyncState(event.status.state)
         setSyncError(event.status.error)
@@ -996,6 +1026,7 @@ export default function App() {
           syncing={syncing}
           syncLabel={syncLabel}
           onSync={runSync}
+          onOpenSyncStatus={() => setSyncStatusOpen(true)}
         />
         {/* 画布区（列表 + 阅读器）：整块抠成一张悬浮卡片，四周留出背景色（2026-11-24 用户要求） */}
         <div className="mt-0 mb-0 ml-0 mr-3 flex min-w-0 flex-1 overflow-hidden rounded-t-lg bg-card">
@@ -1062,7 +1093,6 @@ export default function App() {
             message={selected}
             fontSize={fontSize}
             remoteImages={remoteImages}
-            bodyFit={bodyFit}
             onToggleStar={() => selectedId && toggleStar(selectedId)}
             onToggleUnread={() => selectedId && markRead(selectedId, false)}
             onSetRead={markRead}
@@ -1111,8 +1141,6 @@ export default function App() {
         onUiScaleChange={setUiScale}
         remoteImages={remoteImages}
         onRemoteImagesChange={setRemoteImages}
-        bodyFit={bodyFit}
-        onBodyFitChange={setBodyFit}
         accounts={accounts}
         version={version}
         onManageAccounts={() => {
@@ -1132,6 +1160,13 @@ export default function App() {
           setSelectedId(null)
           setFolderTick((tick) => tick + 1)
         }}
+      />
+
+      <SyncStatusDialog
+        open={syncStatusOpen}
+        onOpenChange={setSyncStatusOpen}
+        events={syncEventLog}
+        folderLabel={folderLabelOfPath}
       />
 
       <FolderPickerDialog

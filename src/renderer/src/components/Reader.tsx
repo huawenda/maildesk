@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type UIEvent } from "react"
 import {
   ChevronDown,
   Download,
@@ -65,8 +65,6 @@ interface ReaderProps {
   fontSize: number
   /** 是否默认放行远程图片，来自设置 */
   remoteImages: boolean
-  /** 正文适配方式 */
-  bodyFit: "reflow" | "original"
   onToggleStar: () => void
   onToggleUnread: () => void
   /** 右键菜单里「标为已读 / 未读」「全部标为已读」 */
@@ -92,7 +90,6 @@ export function Reader({
   message,
   fontSize,
   remoteImages,
-  bodyFit,
   onToggleStar,
   onToggleUnread,
   onSetRead,
@@ -106,6 +103,27 @@ export function Reader({
   permanentDelete
 }: ReaderProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
+  // 正文纵向滚动条：静止时隐藏，滚动后 700ms 内显示（样式见 globals.css 的 scrollbar-native）
+  const bodyScrollTimer = useRef<number | null>(null)
+  const bodyScrollTop = useRef(0)
+  const handleBodyScroll = (event: UIEvent<HTMLDivElement>) => {
+    const element = event.currentTarget
+    // 精确比较：高精度触控板/平滑滚动单次位移可能不到 1px，用阈值会漏掉
+    if (element.scrollTop === bodyScrollTop.current) return
+    bodyScrollTop.current = element.scrollTop
+    element.dataset.scrolling = "true"
+    if (bodyScrollTimer.current) window.clearTimeout(bodyScrollTimer.current)
+    bodyScrollTimer.current = window.setTimeout(() => {
+      bodyScrollTimer.current = null
+      delete element.dataset.scrolling
+    }, 700)
+  }
+  useEffect(
+    () => () => {
+      if (bodyScrollTimer.current) window.clearTimeout(bodyScrollTimer.current)
+    },
+    []
+  )
   const [showAllAttachments, setShowAllAttachments] = useState(false)
   // 附件不落库，按附件 id 记录本次会话内的保存状态（已保存的会显示对勾）
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({})
@@ -317,7 +335,11 @@ export function Reader({
 
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div ref={bodyRef} className="scrollbar-native min-h-0 flex-1 overflow-auto">
+          <div
+            ref={bodyRef}
+            onScroll={handleBodyScroll}
+            className="scrollbar-native min-h-0 flex-1 overflow-auto"
+          >
             <article className="flex min-h-full w-full select-text flex-col px-6 pb-4 pt-5">
               <h2 className="text-[22px] font-semibold leading-[30px] tracking-[-0.01em]">
                 {message.subject || "（无主题）"}
@@ -473,7 +495,6 @@ export function Reader({
                     html={message.bodyHtml}
                     fontSize={fontSize}
                     remoteImages={remoteImages}
-                    fitMode={bodyFit}
                     onContextMenu={(x, y) => {
                       // 转成合成事件打到 trigger 上，让 Radix 在鼠标位置打开同一套菜单
                       bodyRef.current?.dispatchEvent(

@@ -51,33 +51,14 @@ const cspFor = (allowRemote: boolean) =>
   ].join("; ")
 
 /**
- * 文本优先的正文样式：不还原「印刷品」原版式，也不再整页缩放。
- * 正文按阅读器宽度回流，字号有下限；图片与表格最多铺满阅读区，
- * 仍然超宽的定宽表格交给 iframe 自身横向滚动，而不是把整封邮件缩成一张小图。
+ * 正文样式：保留邮件原版式，不缩放、不压宽。
+ * 页面底色、定宽、字体、图片尺寸全按源邮件；超出阅读区的部分由阅读区横向滚动条接手。
  */
-const baseCss = (fontSize: number, adapt: boolean) => `
+const baseCss = (fontSize: number) => `
   html, body { margin: 0; padding: 0; height: auto !important; color-scheme: light; overflow: hidden !important; }
   body { font: ${fontSize}px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; color: #242424; word-break: break-word; }
   a { color: #1a5fd0; text-decoration: none; }
   a:hover { text-decoration: underline; }
-  ${
-    adapt
-      ? `
-  /* 统一容器（重排模式）：阅读区就是容器，邮件自带的页面底色不显示，内容压进 900px 版心 */
-  html, body { background: transparent !important; }
-  body { max-width: min(100%, 900px) !important; }
-  /* 图片同时带上 900px 上限：float / shrink-to-fit 容器里按原始像素算固有宽度会撑破版心 */
-  img { max-width: min(100%, 900px) !important; height: auto; }
-  table { max-width: 100%; }
-  /* Excel/Outlook 粘贴的数据表：铺白底 + 折叠边框，保留 Excel 的边框、底纹、对齐与字体 */
-  table[data-maildesk-table] { border-collapse: collapse; background-color: #ffffff; color: #202020; }
-  td, th { overflow-wrap: break-word; }
-`
-      : `
-  /* 原版式模式：页面底色、定宽、字体、图片尺寸全按源邮件，不改宽高、不缩放；
-     超出阅读区的部分由阅读区横向滚动条接手 */
-`
-  }
   blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid #d8d8d8; color: #6b6b6b; }
   pre { white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; }
 `
@@ -107,89 +88,6 @@ const attrsOf = (element: Element | null, names: string[]): string =>
     })
     .join(" ")
 
-/**
- * 「统一容器」：把邮件自带的页面级外观拆掉，让内容直接落在阅读区里（用户 2026-11-24 定稿）。
- * 只动三类东西——页面底色（body / html / 直接子元素上的 bgcolor、background、background-*）、
- * 页面级定宽（≥480px 的 width / max-width / min-width，MJML 邮件常见 900px 卡片）、
- * 以及靠 `width="900"` 这种呈现性属性写死的宽度。内部排版（分栏、表格、图片、字体）不动。
- */
-const FLUID_MIN = 480
-
-/** 邮件里的页面级定宽：≥480px 一律按 100% 处理（MJML 的 900px 卡片、600px 版心） */
-const FLUID_WIDTH = /((?:max-|min-)?width\s*:\s*)(\d+(?:\.\d+)?)px/gi
-
-const fluidWidths = (css: string): string =>
-  css.replace(FLUID_WIDTH, (match, prefix: string, value: string) =>
-    Number(value) >= FLUID_MIN ? `${prefix}100%` : match
-  )
-
-function unifyContainer(doc: Document): void {
-  const clearBackground = (element: Element | null) => {
-    if (!element) return
-    element.removeAttribute("bgcolor")
-    element.removeAttribute("background")
-    if (!(element instanceof HTMLElement)) return
-    element.style.removeProperty("background")
-    element.style.removeProperty("background-color")
-    element.style.removeProperty("background-image")
-  }
-  clearBackground(doc.documentElement)
-  clearBackground(doc.body)
-  doc.body?.querySelectorAll(":scope > *").forEach(clearBackground)
-
-  doc.querySelectorAll<HTMLElement>("*").forEach((element) => {
-    // 单元格与列宽不在这里改成 100%（多列表格会全挤成整行），交给 scaleTableColumns 按比例换算
-    if (["TD", "TH", "TR", "COL"].includes(element.tagName)) return
-    // 用 !important 写回：MJML 这类邮件把宽度放在 <style> 的 @media 里且带 !important
-    //（.mj-column-px-640 { width: 640px !important }），内联的普通声明盖不住它。
-    for (const [property, cssName] of [["width", "width"], ["maxWidth", "max-width"], ["minWidth", "min-width"]] as const) {
-      const value = element.style[property]
-      const px = /^(\d+(?:\.\d+)?)px$/.exec(value)
-      if (!px || Number(px[1]) < FLUID_MIN) continue
-      // setProperty 只认 kebab-case，写 camelCase 会被静默忽略
-      element.style.setProperty(cssName, property === "minWidth" ? "0" : "100%", "important")
-      // 只改 max-width 不够：没有 width 的表格是 shrink-to-fit，在宽窗口里仍然只有内容宽度那么多
-      //（Google 的验证邮件卡片就只有 340px）。补一条 width:100% 让它跟着版心走。
-      if (property === "maxWidth") element.style.setProperty("width", "100%", "important")
-    }
-    // 呈现性属性经常带单位或小数（招商银行那封写的是 width="660px" / width="585.0"），
-    // HTML 会按前导数字解析成 660px，所以这里也按前导数字判断，不能要求纯整数。
-    const width = element.getAttribute("width")
-    const leading = width ? /^(\d+(?:\.\d+)?)/.exec(width.trim()) : null
-    if (width && leading && Number(leading[1]) >= FLUID_MIN) {
-      element.setAttribute("width", "100%")
-      element.style.setProperty("width", "100%", "important")
-    }
-  })
-  scaleTableColumns(doc)
-}
-
-/**
- * 表格列宽按比例换算成百分比。招行/猎聘这类邮件把列宽写成 px（`<col width="159">` 或
- * `table-layout: fixed; width: 1031px`），总和超过阅读区时整张表会撑破容器（fixed 布局尤其如此）。
- * 列宽之和 ≥480px 的表：每列按 宽/总和 换成百分比，等于「等比缩到阅读区宽度」，版式比例不变。
- */
-function scaleTableColumns(doc: Document): void {
-  doc.querySelectorAll<HTMLTableElement>("table").forEach((table) => {
-    const cols = Array.from(table.querySelectorAll<HTMLElement>(":scope > colgroup > col"))
-    const cells = table.rows.length ? (Array.from(table.rows[0].cells) as HTMLElement[]) : []
-    const targets = cols.length ? cols : cells
-    if (!targets.length) return
-    const widths = targets.map((element) => {
-      const style = /^(\d+(?:\.\d+)?)px$/.exec(element.style.width)
-      const attr = /^(\d+(?:\.\d+)?)/.exec((element.getAttribute("width") ?? "").trim())
-      return Number(style ? style[1] : attr ? attr[1] : 0)
-    })
-    const sum = widths.reduce((total, width) => total + width, 0)
-    if (sum < FLUID_MIN) return
-    targets.forEach((element, index) => {
-      if (!widths[index]) return
-      element.style.setProperty("width", `${((widths[index] / sum) * 100).toFixed(2)}%`, "important")
-      element.removeAttribute("width")
-    })
-  })
-}
-
 /** 固定高度 + overflow 的容器会被邮件当成「内嵌小窗」：正文明明有空间，却只能在 250px 里滚。 */
 const FIXED_LENGTH = /^\d+(?:\.\d+)?(?:px|vh|vw|em|rem|%)?$/
 /** 太小的定高多半是「隐藏 preheader 预览文字 / 1px 占位条」的惯用写法，放开会把隐藏文字顶出来 */
@@ -217,38 +115,22 @@ function unclipScrollBoxes(root: ParentNode): void {
 }
 
 /** 清洗 + 拦截外链资源：DOMPurify 去脚本，再把 http(s) 图片换成透明占位并计数 */
-function prepare(raw: string, allowRemote: boolean, adapt: boolean): Prepared {
+function prepare(raw: string, allowRemote: boolean): Prepared {
   // 必须 WHOLE_DOCUMENT：默认模式只返回 body 内容，<head> 里的 <style> 会被整块丢掉，
   // 字体族 / 字号 / 行高 / 媒体查询 / body 背景全部失效（2026-11-24 实测：457 封里 189 封中招）。
   const clean = DOMPurify.sanitize(raw, { WHOLE_DOCUMENT: true, FORBID_TAGS, FORBID_ATTR })
   const doc = new DOMParser().parseFromString(clean, "text/html")
   let blocked = 0
-  // body 内自带的 <style> 留在原地，只把 head 的样式搬到我们自己的 head 里
-  // 重排模式才改宽度；原版式模式保留邮件原始宽高（超宽由阅读区横滚接手）
-  if (adapt) {
-    doc.querySelectorAll("style").forEach((node) => {
-      node.textContent = fluidWidths(node.textContent ?? "")
-    })
-  }
+  // body 内自带的 <style> 留在原地，只把 head 的样式搬到我们自己的 head 里；
+  // 原版式不改任何宽度，超宽由阅读区横滚接手。
   const styles = Array.from(doc.head?.querySelectorAll("style") ?? [])
     .map((node) => {
       const media = node.getAttribute("media")
       return `<style${media ? ` media="${escapeAttr(media)}"` : ""}>${node.textContent ?? ""}</style>`
     })
     .join("\n")
-  // 标记「数据表」：带 border 属性、或单元格自己写了边框样式。只给这类表铺白底，
-  // 邮件布局用的隐形表格不动，避免整封邮件又变回白纸卡片。
-  if (adapt) doc.querySelectorAll("table").forEach((table) => {
-    const borderAttr = table.getAttribute("border")
-    const hasBorder = borderAttr !== null && borderAttr.trim() !== "" && borderAttr.trim() !== "0"
-    const cellBorder = Array.from(table.querySelectorAll("td, th")).some(
-      (cell) => cell.hasAttribute("border") || /border/i.test(cell.getAttribute("style") ?? "")
-    )
-    if (hasBorder || cellBorder) table.setAttribute("data-maildesk-table", "1")
-  })
-  // 固定高度的小窗两种模式都放开（否则缩放后内容还是被裁）
+  // 固定高度的小窗放开：正文明明有空间，不该被裁在邮件自己的小框里
   unclipScrollBoxes(doc)
-  if (adapt) unifyContainer(doc)
   doc.querySelectorAll("img").forEach((img) => {
     const src = img.getAttribute("src") ?? ""
     // cid: 内嵌图片的二进制不落库，这里先换成占位，避免一整排碎图标
@@ -309,22 +191,14 @@ interface HtmlBodyProps {
   remoteImages?: boolean
   /** iframe 里右键时回调页面坐标（正文区右键菜单用） */
   onContextMenu?: (x: number, y: number) => void
-  /** 正文适配方式，来自设置：reflow = 重排进阅读区；original = 原版式，不缩放，超宽交给阅读区横滚 */
-  fitMode?: "reflow" | "original"
 }
 
-export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fitMode = "reflow" }: HtmlBodyProps) {
-  const adapt = fitMode === "reflow"
+export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: HtmlBodyProps) {
   // 用 ref 让 handleLoad 里挂的监听始终拿到最新的回调
   const contextMenuRef = useRef(onContextMenu)
   contextMenuRef.current = onContextMenu
   const [allowed, setAllowed] = useState(remoteImages ?? true)
-  const [height, setHeight] = useState(160)
-  // 内容怎么压都压不进版心时（极宽的表格 / 大图），把 iframe 撑到内容宽度，
-  // 横向滚动交给阅读区（用户 2026-11-24 要求）；能压进去时保持 null
-  const [wide, setWide] = useState<number | null>(null)
-  const wideRef = useRef<number | null>(null)
-  // 原版式模式：iframe 按邮件自己的宽度排版，**不缩放、不压宽**；
+  // iframe 按邮件自己的宽度排版，**不缩放、不压宽**；
   // 超出阅读区的部分由阅读区横向滚动条接手（不裁剪、不改版式）
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null)
   const measureRef = useRef<(() => void) | null>(null)
@@ -336,16 +210,16 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fit
     if (remoteImages !== undefined) setAllowed(remoteImages)
   }, [remoteImages])
 
-  const prepared = useMemo(() => prepare(html, allowed, adapt), [html, allowed, adapt])
+  const prepared = useMemo(() => prepare(html, allowed), [html, allowed])
 
   const document_ = useMemo(
     () =>
       `<!doctype html><html${prepared.rootAttrs ? " " + prepared.rootAttrs : ""}>` +
       `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(allowed)}">` +
       // 应用基线样式在前、邮件自带样式在后：邮件自己的字体/版式/底色优先
-      `<style>${baseCss(fontSize, adapt)}</style>${prepared.styles ? "\n" + prepared.styles : ""}</head>` +
+      `<style>${baseCss(fontSize)}</style>${prepared.styles ? "\n" + prepared.styles : ""}</head>` +
       `<body${prepared.bodyAttrs ? " " + prepared.bodyAttrs : ""}>${prepared.html}</body></html>`,
-    [prepared, fontSize, allowed, adapt]
+    [prepared, fontSize, allowed]
   )
 
   useEffect(() => {
@@ -430,88 +304,39 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fit
         el.dataset.maildeskUnclipped = "1"
       })
     }
-    /**
-     * 邮件用 `text-wrap: nowrap` / `white-space: nowrap` 写标题，单行宽度可能超过阅读区，
-     * 而 float / 定高表格的 min-content 会把这个宽度带成整页宽度（猎聘那封 1033px 的大标题）。
-     * 只对「宽度真的超了」的节点放开换行，按钮、小标签这类不超宽的不动。
-     */
-    const releaseNowrap = () => {
-      // 用正文版心宽度（body 已被限制为 min(100%, 900px)），不是 iframe 宽度：
-      // 超宽屏下 iframe 可能是 1400px，而版心只有 900px，按 iframe 判断会漏掉 900~1400 的超宽节点。
-      const pane = doc.body.clientWidth || doc.documentElement.clientWidth
-      doc.querySelectorAll<HTMLElement>("body *").forEach((el) => {
-        const style = getComputedStyle(el)
-        const nowrap = style.whiteSpace === "nowrap" || style.getPropertyValue("text-wrap") === "nowrap"
-        if (!nowrap) return
-        if (el.getBoundingClientRect().width <= pane + 1) return
-        el.style.setProperty("white-space", "normal", "important")
-        el.style.setProperty("text-wrap", "wrap", "important")
-      })
-    }
-    if (adapt) releaseNowrap()
-
-    // 重排模式：只量内容高度；原版式模式：量出邮件自己的宽度，不缩放、不压宽
+    // 原版式：只量出邮件自己的宽度与高度，不缩放、不压宽
     const measure = () => {
-      if (!adapt) {
-        // pane 取 HtmlBody 根 div（宽度由阅读区决定）；iframe 自己的宽度会被下面改写，不能当 pane
-        const pane = frame.parentElement?.parentElement?.clientWidth || frame.clientWidth
-        // 邮件写死的宽度（内联 width / max-width / width 属性）：定宽版式按它排版，流式邮件跟随阅读区
-        let design = 0
+      // pane 取 HtmlBody 根 div（宽度由阅读区决定）；iframe 自己的宽度会被下面改写，不能当 pane
+      const pane = frame.parentElement?.parentElement?.clientWidth || frame.clientWidth
+      // 邮件写死的宽度（内联 width / max-width / width 属性）：定宽版式按它排版，流式邮件跟随阅读区
+      let design = 0
+      doc.querySelectorAll<HTMLElement>("body *").forEach((el) => {
+        const attr = /^(\d+(?:\.\d+)?)/.exec((el.getAttribute("width") ?? "").trim())
+        const style = /^(\d+(?:\.\d+)?)px$/.exec(el.style.width)
+        const maxWidth = /^(\d+(?:\.\d+)?)px$/.exec(el.style.maxWidth)
+        const specimen = Number(style?.[1] ?? maxWidth?.[1] ?? attr?.[1] ?? 0)
+        if (specimen >= 240 && specimen > design) design = specimen
+      })
+      // 先按阅读区宽度排一遍：定宽内容会在这里露出真实的内容宽度（scrollWidth）
+      frame.style.width = `${pane}px`
+      doc.body.style.setProperty("overflow", "visible", "important")
+      doc.documentElement.style.setProperty("overflow", "visible", "important")
+      const laidOut = Math.max(doc.body.scrollWidth, doc.documentElement.scrollWidth)
+      if (!design) {
         doc.querySelectorAll<HTMLElement>("body *").forEach((el) => {
-          const attr = /^(\d+(?:\.\d+)?)/.exec((el.getAttribute("width") ?? "").trim())
-          const style = /^(\d+(?:\.\d+)?)px$/.exec(el.style.width)
-          const maxWidth = /^(\d+(?:\.\d+)?)px$/.exec(el.style.maxWidth)
-          const specimen = Number(style?.[1] ?? maxWidth?.[1] ?? attr?.[1] ?? 0)
-          if (specimen >= 240 && specimen > design) design = specimen
+          const width = Math.round(el.getBoundingClientRect().width)
+          if (width >= 240 && width < laidOut - 2 && width > design) design = width
         })
-        // 先按阅读区宽度排一遍：定宽内容会在这里露出真实的内容宽度（scrollWidth）
-        frame.style.width = `${pane}px`
-        doc.body.style.setProperty("overflow", "visible", "important")
-        doc.documentElement.style.setProperty("overflow", "visible", "important")
-        const laidOut = Math.max(doc.body.scrollWidth, doc.documentElement.scrollWidth)
-        if (!design) {
-          doc.querySelectorAll<HTMLElement>("body *").forEach((el) => {
-            const width = Math.round(el.getBoundingClientRect().width)
-            if (width >= 240 && width < laidOut - 2 && width > design) design = width
-          })
-        }
-        // 原版式：邮件要多少给多少。弹性邮件跟随阅读区，定宽/超宽内容按内容宽度铺开，
-        // 多出来的横向空间交给阅读区滚动条（不缩放、不改版式，也不裁剪）
-        const width = Math.max(pane, Math.round(design), laidOut)
-        if (width !== pane) frame.style.width = `${width}px`
-        doc.body.style.removeProperty("overflow")
-        doc.documentElement.style.removeProperty("overflow")
-        const content = Math.max(doc.body.getBoundingClientRect().height, doc.documentElement.scrollHeight)
-        const height = Math.max(80, Math.ceil(content))
-        setNatural((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }))
-        return
       }
+      // 邮件要多少给多少。弹性邮件跟随阅读区，定宽/超宽内容按内容宽度铺开，
+      // 多出来的横向空间交给阅读区滚动条（不缩放、不改版式，也不裁剪）
+      const width = Math.max(pane, Math.round(design), laidOut)
+      if (width !== pane) frame.style.width = `${width}px`
+      doc.body.style.removeProperty("overflow")
+      doc.documentElement.style.removeProperty("overflow")
       const content = Math.max(doc.body.getBoundingClientRect().height, doc.documentElement.scrollHeight)
-      const next = Math.max(80, Math.ceil(content))
-      setHeight((value) => (Math.abs(value - next) > 1 ? next : value))
-
-      // 横向：内容比 iframe 宽说明还有压不进去的东西（超宽表格 / 大图）。
-      // 展开一次后不再回退，直到窗口宽到能整下它为止，避免「展开 → 收窄 → 又溢出」抖动。
-      const overflow = Math.max(doc.body.scrollWidth, doc.documentElement.scrollWidth)
-      const viewport = frame.clientWidth
-      const parent = frame.parentElement?.clientWidth ?? viewport
-      if (wideRef.current === null) {
-        if (overflow > viewport + 24) {
-          wideRef.current = overflow
-          doc.documentElement.style.setProperty("overflow", "visible", "important")
-          doc.body.style.setProperty("overflow", "visible", "important")
-          doc.body.style.setProperty("max-width", "none", "important")
-          setWide(overflow)
-        }
-        return
-      }
-      if (parent >= wideRef.current) {
-        wideRef.current = null
-        doc.documentElement.style.removeProperty("overflow")
-        doc.body.style.removeProperty("overflow")
-        doc.body.style.removeProperty("max-width")
-        setWide(null)
-      }
+      const height = Math.max(80, Math.ceil(content))
+      setNatural((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }))
     }
 
     // 失效图片：Chrome 默认画碎图图标，原邮件（QQ 等）走图片代理 + 直接隐藏。
@@ -588,17 +413,14 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fit
     // 邮件自带 @font-face 与图片解码完成后行高会变，补两次测量兜底（顺带再放开一次滚动框）
     void doc.fonts?.ready.then(() => {
       releaseScrollBoxes()
-      if (adapt) releaseNowrap()
       measure()
     }).catch(() => undefined)
     window.setTimeout(() => {
       releaseScrollBoxes()
-      if (adapt) releaseNowrap()
       measure()
     }, 120)
     window.setTimeout(() => {
       releaseScrollBoxes()
-      if (adapt) releaseNowrap()
       measure()
     }, 600)
 
@@ -637,30 +459,17 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fit
           </button>
         </div>
       ) : null}
-      {adapt ? (
-        <iframe
-          ref={frameRef}
-          title="邮件正文"
-          sandbox="allow-same-origin"
-          scrolling="no"
-          srcDoc={document_}
-          onLoad={handleLoad}
-          className={wide ? "block border-0 bg-transparent" : "block w-full border-0 bg-transparent"}
-          style={{ height, width: wide ?? undefined }}
-        />
-      ) : (
-        // 原版式：iframe 按邮件自己的宽度排版，不缩放、不压宽；超宽部分交给阅读区横滚（不裁剪）
-        <iframe
-          ref={frameRef}
-          title="邮件正文"
-          sandbox="allow-same-origin"
-          scrolling="no"
-          srcDoc={document_}
-          onLoad={handleLoad}
-          className="block border-0 bg-transparent"
-          style={{ width: natural?.width ?? "100%", height: natural?.height ?? 160 }}
-        />
-      )}
+      {/* 原版式：iframe 按邮件自己的宽度排版，不缩放、不压宽；超宽部分交给阅读区横滚（不裁剪） */}
+      <iframe
+        ref={frameRef}
+        title="邮件正文"
+        sandbox="allow-same-origin"
+        scrolling="no"
+        srcDoc={document_}
+        onLoad={handleLoad}
+        className="block border-0 bg-transparent"
+        style={{ width: natural?.width ?? "100%", height: natural?.height ?? 160 }}
+      />
     </div>
   )
 }

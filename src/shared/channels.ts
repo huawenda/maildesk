@@ -4,6 +4,8 @@ export const CH = {
   appOpenExternal: "app:open-external",
   appChrome: "app:chrome",
   appZoom: "app:zoom",
+  appLogPath: "app:log-path",
+  appOpenLogFolder: "app:open-log-folder",
 
   windowMinimize: "window:minimize",
   windowToggleMaximize: "window:toggle-maximize",
@@ -42,6 +44,8 @@ export const CH = {
 
   syncNow: "sync:now",
   syncStatus: "sync:status",
+  syncOverview: "sync:overview",
+  syncReconnect: "sync:reconnect",
   syncEvent: "sync:event",
 
   settingsGet: "settings:get",

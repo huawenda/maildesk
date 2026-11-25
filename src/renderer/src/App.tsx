@@ -376,11 +376,12 @@ export default function App() {
       } else if (event.type === "messages") {
         setFolderTick((tick) => tick + 1)
         // 主进程的本地变更回执（移动/删除/已读）added 恒为 0，界面已经改好了，
-        // 再整箱重取就是白白闪一下；只有真来了新邮件（added > 0）才重拉列表
-        if (event.added > 0) setRefreshTick((tick) => tick + 1)
+        // 再整箱重取就是白白闪一下；只有真来了新邮件（added > 0）或正文刚下完
+        // （bodiesDone，摘要/附件标记已写库）才重拉列表
+        if (event.added > 0 || event.bodiesDone) setRefreshTick((tick) => tick + 1)
       } else if (event.type === "reconcile") {
-        // 服务器侧的删除/移动/已读已被本地对齐，重拉列表与计数
-        if (event.added + event.removed + event.moved + event.flags > 0) {
+        // 服务器侧的删除/移动/已读/文件夹增删已被本地对齐，重拉列表与计数
+        if (event.added + event.removed + event.moved + event.flags + (event.folders ?? 0) > 0) {
           setFolderTick((tick) => tick + 1)
           setRefreshTick((tick) => tick + 1)
           setUnreadTick((tick) => tick + 1)

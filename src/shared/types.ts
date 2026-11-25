@@ -212,9 +212,9 @@ export type SyncEvent =
       /** 该文件夹的历史已经补完（或没得补） */
       finished?: boolean
     }
-  | { type: "messages"; folderId: string; added: number }
+  | { type: "messages"; folderId: string; added: number; bodiesDone?: boolean }
   /** 双向对账的结果：本地库被服务器状态修正了多少条（界面据此重拉列表）。 */
-  | { type: "reconcile"; added: number; removed: number; moved: number; flags: number }
+  | { type: "reconcile"; added: number; removed: number; moved: number; flags: number; folders?: number }
   /** 历史邮件的收件人/抄送姓名按原始头修正过（界面据此重拉列表，不弹新邮件提示）。 */
   | { type: "recipients"; updated: number }
 

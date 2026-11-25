@@ -385,38 +385,54 @@ export function setSnippet(id: string, snippet: string): void {
   run("UPDATE message SET snippet = ? WHERE id = ?", snippet, id)
 }
 
-/** 一次同步开始时先数一下总共有多少封缺正文，给进度条用。 */
-export function countMessagesNeedingBody(): number {
+/**
+ * 一次同步开始时先数一下本账户有多少封缺正文，给进度条用。
+ * 必须按账户取：多账户同时 bootstrap 时，拿全库计数会让两个引擎抢同一批行、
+ * 甚至用 A 的连接去开 B 的文件夹（INBOX 这类路径两边都存在，会写错正文）。
+ */
+export function countMessagesNeedingBody(accountId: string): number {
   const row = get<{ c: number }>(
-    `SELECT COUNT(*) AS c FROM message m JOIN folder f ON f.id = m.folder_id
-     WHERE f.enabled = 1 AND (m.body_text IS NULL OR (m.has_html = 1 AND m.body_html IS NULL))`
+    `SELECT COUNT(*) AS c FROM message m
+     JOIN folder f ON f.id = m.folder_id
+     WHERE f.account_id = ? AND f.enabled = 1
+       AND (m.body_text IS NULL OR (m.has_html = 1 AND m.body_html IS NULL))`,
+    accountId
   )
   return Number(row?.c ?? 0)
 }
 
 /**
- * 还没有本地正文的邮件（含「声明有 HTML 但只缓存了纯文本」的老数据）。
+ * 本账户还没有本地正文的邮件（含「声明有 HTML 但只缓存了纯文本」的老数据）。
  * 启动后的正文补齐按这个列表往前推，补完之后点开任何一封都不会再回服务器。
  */
 export function messagesNeedingBody(
+  accountId: string,
   limit: number
 ): { id: string; folderId: string; uid: number }[] {
   return all<{ id: string; folder_id: string; uid: number }>(
-    `SELECT id, folder_id, uid FROM message
-     WHERE (body_text IS NULL OR (has_html = 1 AND body_html IS NULL))
-       AND folder_id IN (SELECT id FROM folder WHERE enabled = 1)
-     ORDER BY COALESCE(sent_at, 0) DESC LIMIT ?`,
+    `SELECT m.id, m.folder_id, m.uid FROM message m
+     JOIN folder f ON f.id = m.folder_id
+     WHERE f.account_id = ? AND f.enabled = 1
+       AND (m.body_text IS NULL OR (m.has_html = 1 AND m.body_html IS NULL))
+     ORDER BY COALESCE(m.sent_at, 0) DESC LIMIT ?`,
+    accountId,
     limit
   ).map((row) => ({ id: row.id, folderId: row.folder_id, uid: row.uid }))
 }
 
-/** 旧版本把正文内嵌图算成附件：取出还没按新规则复核过的邮件（有标记但没解析过附件）。 */
-export function messagesNeedingAttachmentFlags(limit: number): { id: string; folderId: string; uid: number }[] {
+/** 旧版本把正文内嵌图算成附件：取出本账户还没按新规则复核过的邮件（有标记但没解析过附件）。 */
+export function messagesNeedingAttachmentFlags(
+  accountId: string,
+  limit: number
+): { id: string; folderId: string; uid: number }[] {
   return all<{ id: string; folder_id: string; uid: number }>(
     `SELECT m.id, m.folder_id, m.uid FROM message m
-     WHERE m.has_attachments = 1
+     JOIN folder f ON f.id = m.folder_id
+     WHERE f.account_id = ? AND f.enabled = 1
+       AND m.has_attachments = 1
        AND NOT EXISTS (SELECT 1 FROM attachment a WHERE a.message_id = m.id)
      ORDER BY m.sent_at DESC LIMIT ?`,
+    accountId,
     limit
   ).map((row) => ({ id: row.id, folderId: row.folder_id, uid: row.uid }))
 }

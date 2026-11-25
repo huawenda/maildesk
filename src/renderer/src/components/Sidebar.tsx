@@ -31,7 +31,6 @@ const folderIcons = {
 interface SidebarProps {
   collapsed: boolean
   onOpenSettings: () => void
-  version?: string
   folders: NavFolder[]
   folderId: string
   activeLabel: string | null
@@ -52,7 +51,6 @@ interface SidebarProps {
 export function Sidebar({
   collapsed,
   onOpenSettings,
-  version,
   folders,
   folderId,
   activeLabel,
@@ -225,10 +223,6 @@ export function Sidebar({
           <Settings className="size-4 shrink-0" />
           {collapsed ? null : <span>设置</span>}
         </button>
-
-        {version && !collapsed ? (
-          <div className="px-2 pb-0.5 text-[10.5px] text-muted-foreground/70">MailDesk v{version}</div>
-        ) : null}
       </div>
     </aside>
   )

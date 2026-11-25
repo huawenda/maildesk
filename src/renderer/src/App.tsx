@@ -969,7 +969,6 @@ export default function App() {
         <Sidebar
           collapsed={collapsed}
           onOpenSettings={() => setSettingsOpen(true)}
-          version={version}
           folders={navList}
           folderId={folderId}
           activeLabel={activeLabel}

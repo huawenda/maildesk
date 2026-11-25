@@ -74,8 +74,8 @@ const baseCss = (fontSize: number, adapt: boolean) => `
   td, th { overflow-wrap: break-word; }
 `
       : `
-  /* 等比缩放模式：保留邮件原版式（页面底色、定宽、字体全按源邮件），整页再缩放适配阅读区 */
-  img { height: auto; }
+  /* 原版式模式：页面底色、定宽、字体、图片尺寸全按源邮件，不改宽高、不缩放；
+     超出阅读区的部分由阅读区横向滚动条接手 */
 `
   }
   blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid #d8d8d8; color: #6b6b6b; }
@@ -224,7 +224,7 @@ function prepare(raw: string, allowRemote: boolean, adapt: boolean): Prepared {
   const doc = new DOMParser().parseFromString(clean, "text/html")
   let blocked = 0
   // body 内自带的 <style> 留在原地，只把 head 的样式搬到我们自己的 head 里
-  // 重排模式才改宽度；等比缩放模式保留原版式（缩放会兜住一切超宽）
+  // 重排模式才改宽度；原版式模式保留邮件原始宽高（超宽由阅读区横滚接手）
   if (adapt) {
     doc.querySelectorAll("style").forEach((node) => {
       node.textContent = fluidWidths(node.textContent ?? "")
@@ -309,8 +309,8 @@ interface HtmlBodyProps {
   remoteImages?: boolean
   /** iframe 里右键时回调页面坐标（正文区右键菜单用） */
   onContextMenu?: (x: number, y: number) => void
-  /** 正文适配方式，来自设置：reflow = 重排进阅读区；zoom = 保留原版式等比缩放 */
-  fitMode?: "reflow" | "zoom"
+  /** 正文适配方式，来自设置：reflow = 重排进阅读区；original = 原版式，不缩放，超宽交给阅读区横滚 */
+  fitMode?: "reflow" | "original"
 }
 
 export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fitMode = "reflow" }: HtmlBodyProps) {
@@ -324,9 +324,9 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fit
   // 横向滚动交给阅读区（用户 2026-11-24 要求）；能压进去时保持 null
   const [wide, setWide] = useState<number | null>(null)
   const wideRef = useRef<number | null>(null)
-  // 等比缩放模式下的布局：iframe 按原版式宽度渲染，再整体 transform 缩放到阅读区
-  const [zoom, setZoom] = useState<{ width: number; height: number; scale: number } | null>(null)
-  const zoomRef = useRef(1)
+  // 原版式模式：iframe 按邮件自己的宽度排版，**不缩放、不压宽**；
+  // 超出阅读区的部分由阅读区横向滚动条接手（不裁剪、不改版式）
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null)
   const measureRef = useRef<(() => void) | null>(null)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
@@ -367,8 +367,8 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fit
       if (!handler) return
       event.preventDefault()
       const rect = frame.getBoundingClientRect()
-      const scale = zoomRef.current
-      handler(rect.left + event.clientX * scale, rect.top + event.clientY * scale)
+      // 原版式模式不再缩放，iframe 内坐标与页面坐标 1:1
+      handler(rect.left + event.clientX, rect.top + event.clientY)
     })
 
     // 字体与源邮件一致：不改字号、字重、字体族，只处理「深字压深底 / 白字压白底」这种
@@ -450,14 +450,12 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fit
     }
     if (adapt) releaseNowrap()
 
-    // 重排模式：只量内容高度；等比缩放模式：量出原版式宽度后整体缩放到阅读区
+    // 重排模式：只量内容高度；原版式模式：量出邮件自己的宽度，不缩放、不压宽
     const measure = () => {
       if (!adapt) {
-        // 缩放模式下 iframe 外面还有一层「缩放后尺寸」的盒子，它的宽度来自 scale 本身，
-        // 拿它当 pane 会形成 0 → scale 0 → 0 的死循环；这里取再上一层（HtmlBody 根 div，宽度由阅读区决定）
+        // pane 取 HtmlBody 根 div（宽度由阅读区决定）；iframe 自己的宽度会被下面改写，不能当 pane
         const pane = frame.parentElement?.parentElement?.clientWidth || frame.clientWidth
-        // 设计宽度：优先看元素上「写死的宽度」（内联 width / width 属性），这类邮件是定宽版式；
-        // 都没有才回落到实测的最大块宽。只有设计宽度比阅读区更宽时才缩放，流式邮件不动。
+        // 邮件写死的宽度（内联 width / max-width / width 属性）：定宽版式按它排版，流式邮件跟随阅读区
         let design = 0
         doc.querySelectorAll<HTMLElement>("body *").forEach((el) => {
           const attr = /^(\d+(?:\.\d+)?)/.exec((el.getAttribute("width") ?? "").trim())
@@ -466,30 +464,26 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fit
           const specimen = Number(style?.[1] ?? maxWidth?.[1] ?? attr?.[1] ?? 0)
           if (specimen >= 240 && specimen > design) design = specimen
         })
-        const probe = Math.max(pane, 1024)
-        frame.style.width = `${probe}px`
+        // 先按阅读区宽度排一遍：定宽内容会在这里露出真实的内容宽度（scrollWidth）
+        frame.style.width = `${pane}px`
         doc.body.style.setProperty("overflow", "visible", "important")
         doc.documentElement.style.setProperty("overflow", "visible", "important")
+        const laidOut = Math.max(doc.body.scrollWidth, doc.documentElement.scrollWidth)
         if (!design) {
           doc.querySelectorAll<HTMLElement>("body *").forEach((el) => {
             const width = Math.round(el.getBoundingClientRect().width)
-            if (width >= 240 && width < probe - 2 && width > design) design = width
+            if (width >= 240 && width < laidOut - 2 && width > design) design = width
           })
         }
-        const needScale = design > pane + 1
-        const width = needScale ? Math.min(1600, Math.round(design)) : pane
-        frame.style.width = `${width}px`
+        // 原版式：邮件要多少给多少。弹性邮件跟随阅读区，定宽/超宽内容按内容宽度铺开，
+        // 多出来的横向空间交给阅读区滚动条（不缩放、不改版式，也不裁剪）
+        const width = Math.max(pane, Math.round(design), laidOut)
+        if (width !== pane) frame.style.width = `${width}px`
         doc.body.style.removeProperty("overflow")
         doc.documentElement.style.removeProperty("overflow")
         const content = Math.max(doc.body.getBoundingClientRect().height, doc.documentElement.scrollHeight)
         const height = Math.max(80, Math.ceil(content))
-        const scale = needScale ? Math.min(1, pane / width) : 1
-        zoomRef.current = scale
-        setZoom((prev) =>
-          prev && prev.width === width && prev.height === height && Math.abs(prev.scale - scale) < 0.001
-            ? prev
-            : { width, height, scale }
-        )
+        setNatural((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }))
         return
       }
       const content = Math.max(doc.body.getBoundingClientRect().height, doc.documentElement.scrollHeight)
@@ -655,30 +649,17 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu, fit
           style={{ height, width: wide ?? undefined }}
         />
       ) : (
-        // 等比缩放：外层盒子的尺寸按缩放后的结果给，iframe 自己按原版式宽度排版再 transform
-        <div
-          style={{
-            width: Math.round((zoom?.width ?? 0) * (zoom?.scale ?? 1)),
-            height: Math.round((zoom?.height ?? 0) * (zoom?.scale ?? 1)),
-            overflow: "hidden"
-          }}
-        >
-          <iframe
-            ref={frameRef}
-            title="邮件正文"
-            sandbox="allow-same-origin"
-            scrolling="no"
-            srcDoc={document_}
-            onLoad={handleLoad}
-            className="block border-0 bg-transparent"
-            style={{
-              width: zoom?.width ?? "100%",
-              height: zoom?.height ?? 160,
-              transform: `scale(${zoom?.scale ?? 1})`,
-              transformOrigin: "top left"
-            }}
-          />
-        </div>
+        // 原版式：iframe 按邮件自己的宽度排版，不缩放、不压宽；超宽部分交给阅读区横滚（不裁剪）
+        <iframe
+          ref={frameRef}
+          title="邮件正文"
+          sandbox="allow-same-origin"
+          scrolling="no"
+          srcDoc={document_}
+          onLoad={handleLoad}
+          className="block border-0 bg-transparent"
+          style={{ width: natural?.width ?? "100%", height: natural?.height ?? 160 }}
+        />
       )}
     </div>
   )

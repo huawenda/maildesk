@@ -760,6 +760,30 @@ function GroupHeader({
   collapsed: boolean
   onToggle: () => void
 }) {
+  // 非紧凑（标准/宽松）保留原来的灰底圆角条：有上下箭头、半角括号计数
+  if (!compact) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        title={collapsed ? "展开本组" : "收起本组"}
+        className={cn(
+          "flex h-full w-full items-center gap-1.5 rounded-lg px-2 text-left text-[11.5px] font-medium text-foreground/80 transition-colors",
+          floating ? "bg-muted shadow-sm" : "bg-muted/70 hover:bg-muted/60"
+        )}
+      >
+        {collapsed ? (
+          <ChevronRight className="size-3 shrink-0 opacity-70" />
+        ) : (
+          <ChevronDown className="size-3 shrink-0 opacity-70" />
+        )}
+        <span>{label}</span>
+        <span className="tabular-nums text-muted-foreground/80">({count} 封)</span>
+      </button>
+    )
+  }
+
   return (
     <button
       type="button"
@@ -768,7 +792,7 @@ function GroupHeader({
       title={collapsed ? "展开本组" : "收起本组"}
       className={cn(
         "flex h-full w-full items-center px-2 text-left text-[11.5px] font-semibold text-foreground/80 transition-colors",
-        // 无底色的纯文字组头条（QQ 邮箱口径，2026-11-24 用户指定）；吸顶时必须实底，否则下方行会透上来
+        // 紧凑视图是无底色的纯文字组头条（QQ 邮箱口径，2026-11-24 用户指定）；吸顶时必须实底，否则下方行会透上来
         floating ? "bg-card" : "bg-transparent hover:bg-row-hover",
         // 折叠状态用左侧的小箭头提示，展开时不画
         collapsed ? "gap-1" : "gap-0"

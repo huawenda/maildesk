@@ -28,6 +28,8 @@
   --color-row-selected: var(--row-selected);
   --color-nav-hover: var(--nav-hover);
   --color-nav-selected: var(--nav-selected);
+  /* 侧栏选中项的计数角标：QQ 邮箱那颗亮蓝（取自用户截图 #0F7AF5），只在选中态出现 */
+  --color-nav-count-active: var(--nav-count-active);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-star: var(--star);
@@ -70,6 +72,7 @@
   /* 侧栏文件夹项（QQ 邮箱口径）：hover 浅灰、选中浅蓝，不跟随列表的两色（用户要求保留这一套） */
   --nav-hover: #dbe3ed;
   --nav-selected: #c6dcf4;
+  --nav-count-active: #0f7af5;
   --input: #cdcdcd;
   --ring: #2659cc;
   --star: #a96f12;

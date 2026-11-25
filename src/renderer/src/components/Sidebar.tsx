@@ -140,7 +140,7 @@ export function Sidebar({
                 "flex h-7 shrink-0 items-center gap-2.5 rounded-md text-[12px] transition-colors",
                 collapsed ? "justify-center px-0" : "px-2",
                 active
-                  ? "bg-nav-selected font-semibold text-foreground"
+                  ? "bg-nav-selected font-bold text-foreground"
                   : "text-[#111111] hover:bg-nav-hover"
               )}
               style={indent ? { paddingLeft: 8 + indent } : undefined}
@@ -151,7 +151,7 @@ export function Sidebar({
                 <span
                   className={cn(
                     "ml-auto text-[11px] tabular-nums",
-                    countMode === "unread" ? "text-star" : "text-muted-foreground"
+                    active ? "text-nav-count-active" : "text-muted-foreground"
                   )}
                 >
                   {count}

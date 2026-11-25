@@ -66,7 +66,7 @@ interface ReaderProps {
   /** 是否默认放行远程图片，来自设置 */
   remoteImages: boolean
   /** 正文适配方式 */
-  bodyFit: "reflow" | "zoom"
+  bodyFit: "reflow" | "original"
   onToggleStar: () => void
   onToggleUnread: () => void
   /** 右键菜单里「标为已读 / 未读」「全部标为已读」 */

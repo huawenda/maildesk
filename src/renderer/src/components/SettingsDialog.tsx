@@ -47,8 +47,8 @@ interface SettingsDialogProps {
   onUiScaleChange: (value: number) => void
   remoteImages: boolean
   onRemoteImagesChange: (value: boolean) => void
-  bodyFit: "reflow" | "zoom"
-  onBodyFitChange: (value: "reflow" | "zoom") => void
+  bodyFit: "reflow" | "original"
+  onBodyFitChange: (value: "reflow" | "original") => void
   accounts: Account[]
   version?: string
   onManageAccounts: () => void
@@ -263,13 +263,13 @@ export function SettingsDialog({
                 </Row>
                 <Row
                   label="正文适配方式"
-                  hint="重排：把邮件版式压进阅读区，表格会换行；等比缩放：保留邮件原版式，整封按阅读区宽度缩放（窄窗口字会变小）"
+                  hint="重排：把邮件版式压进阅读区，表格会换行；原版式：完全按邮件原始宽高显示，超出阅读区的部分横向滚动"
                 >
                   <Segmented
                     value={bodyFit}
                     options={[
                       { value: "reflow", label: "重排" },
-                      { value: "zoom", label: "等比缩放" }
+                      { value: "original", label: "原版式" }
                     ]}
                     onChange={onBodyFitChange}
                   />

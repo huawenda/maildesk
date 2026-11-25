@@ -137,8 +137,8 @@ export default function App() {
   const dragRef = useRef<{ x: number; width: number } | null>(null)
   const [backfill, setBackfill] = useState<{ done: number; total: number } | null>(null)
   const [remoteImages, setRemoteImages] = useState<boolean>(true)
-  // 正文适配：reflow = 重排进阅读区；zoom = 保留原版式等比缩放
-  const [bodyFit, setBodyFit] = useState<"reflow" | "zoom">("reflow")
+  // 正文适配：reflow = 重排进阅读区；original = 保留原版式、不缩放，超宽交给阅读区横滚
+  const [bodyFit, setBodyFit] = useState<"reflow" | "original">("reflow")
   const [standardThreeLines, setStandardThreeLines] = useState<boolean>(false)
   const [groupHeadersNonCompact, setGroupHeadersNonCompact] = useState<boolean>(true)
   const [stickyGroupHeaders, setStickyGroupHeaders] = useState<boolean>(true)
@@ -175,7 +175,8 @@ export default function App() {
         setCollapsed(settings.sidebarCollapsed)
         setFontSize(settings.fontSize)
         setRemoteImages(settings.remoteImages)
-        setBodyFit(settings.bodyFit ?? "reflow")
+        // 旧库里的 "zoom"（旧的等比缩放）没有对应项了：读进来一律回落到默认的重排
+        setBodyFit(settings.bodyFit === "original" ? "original" : "reflow")
         setStandardThreeLines(settings.standardThreeLines)
         setGroupHeadersNonCompact(settings.groupHeadersNonCompact)
         setStickyGroupHeaders(settings.stickyGroupHeaders)
@@ -999,7 +1000,7 @@ export default function App() {
           onSync={runSync}
         />
         {/* 画布区（列表 + 阅读器）：整块抠成一张悬浮卡片，四周留出背景色（2026-11-24 用户要求） */}
-        <div className="mt-0 mb-0 ml-2 mr-3 flex min-w-0 flex-1 overflow-hidden rounded-t-lg bg-card">
+        <div className="mt-0 mb-0 ml-0 mr-3 flex min-w-0 flex-1 overflow-hidden rounded-t-lg bg-card">
           <MessageList
             folderId={folderId}
             messages={visible}

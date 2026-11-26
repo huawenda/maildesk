@@ -7,7 +7,7 @@ import { openPassword } from "./security/credentials"
 import { all, get } from "./db"
 import { probeImap } from "./net/probe"
 import { buildImapOptions } from "./sync/connection"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 /**
@@ -514,12 +514,16 @@ export async function runSelfTest(): Promise<void> {
         const detail = getMessage(target.id)
         const dir = join(app.getAppPath(), ".capture", "dl")
         mkdirSync(dir, { recursive: true })
-        const saved: Array<{ filename: string | null; bytes: number }> = []
+        const saved: Array<{ filename: string | null; bytes: number; ms: number }> = []
         for (const item of detail.attachments) {
+          const startedAt = Date.now()
           const file = await manager.downloadAttachment(target.id, item.id)
           if (!file) continue
-          writeFileSync(join(dir, String(item.filename ?? item.id)), file.buffer)
-          saved.push({ filename: item.filename, bytes: file.buffer.length })
+          const ms = Date.now() - startedAt
+          const bytes = statSync(file.path).size
+          writeFileSync(join(dir, String(item.filename ?? item.id)), readFileSync(file.path))
+          saved.push({ filename: item.filename, bytes, ms })
+          console.log("[attach] downloaded", item.filename, bytes, "bytes in", ms, "ms")
         }
         report.attachmentTest = {
           subject: target.subject,

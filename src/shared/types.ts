@@ -323,6 +323,8 @@ export interface MailApi {
     cancelDownload(attachmentId: string): Promise<boolean>
     /** 在资源管理器里定位已下载的文件。 */
     reveal(attachmentId: string): Promise<boolean>
+    /** 清空已完成/已取消/失败的记录（进行中的不动），返回清掉多少条。 */
+    clearDownloads(): Promise<number>
     /** 下载列表变化；返回取消订阅函数。 */
     onDownloads(cb: (tasks: DownloadTask[]) => void): () => void
   }

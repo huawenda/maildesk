@@ -43,6 +43,8 @@ const api: MailApi = {
     downloads: () => ipcRenderer.invoke(CH.attachmentsDownloads),
     cancelDownload: (attachmentId) => ipcRenderer.invoke(CH.attachmentsCancel, attachmentId),
     reveal: (attachmentId) => ipcRenderer.invoke(CH.attachmentsReveal, attachmentId),
+    /** 清空已完成/已取消/失败的记录（进行中的不动） */
+    clearDownloads: () => ipcRenderer.invoke(CH.attachmentsClearDownloads),
     onDownloads: (cb) => {
       const listener = (_event: unknown, payload: DownloadTask[]) => cb(payload)
       ipcRenderer.on(CH.attachmentsDownloads, listener)

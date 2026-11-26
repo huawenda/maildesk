@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, copyFile, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { z, type ZodType } from "zod"
 import { CH } from "@shared/channels"
@@ -30,6 +30,7 @@ import { getSettings, setSettings } from "../db/settings"
 import { probeImap } from "../net/probe"
 import {
   cancelAttachmentDownload,
+  clearAttachmentDownloads,
   downloadAttachment,
   listAttachmentDownloads,
   recordDownloadPath,
@@ -43,6 +44,7 @@ import {
   stopAccountSync,
   reconnectAccount,
   syncNow,
+  prefetchMessageAttachments,
   syncOverview,
   syncStatus
 } from "../sync/manager"
@@ -216,13 +218,19 @@ export function registerIpc(): void {
     return listMessages(query.folderId)
   })
 
-  // 正文懒加载：库里没有就回源头拉一次（PRD 7.6）
+  // 正文懒加载：库里没有就回源头拉一次（PRD 7.6）；拉到正文后顺手预取附件，
+  // 用户点「保存」时文件通常已经在缓存里（对齐 Foxmail 的体验）。
   ipcMain.handle(CH.messagesGet, async (_event, raw: unknown) => {
     const id = parse(idSchema, raw)
     const detail = getMessage(id)
-    if (!needsBody(id)) return detail
+    if (!needsBody(id)) {
+      if (detail.attachments.length > 0) prefetchMessageAttachments(id)
+      return detail
+    }
     const loaded = await loadMessageBody(id)
-    return loaded ? getMessage(id) : detail
+    const next = loaded ? getMessage(id) : detail
+    if (next.attachments.length > 0) prefetchMessageAttachments(id)
+    return next
   })
 
   // 本地先落地（界面立刻变），再推服务器；断线时进队列，下次对账前补发
@@ -264,7 +272,8 @@ export function registerIpc(): void {
     if (picked.canceled || !picked.filePath) return { saved: false }
     const file = await downloadAttachment(messageId, attachmentId)
     if (!file) return { saved: false, error: "network: 拉取附件失败，请先同步这封邮件" }
-    await writeFile(picked.filePath, file.buffer)
+    // 缓存命中时这里只是一次本地拷贝，大附件也是秒落盘
+    await copyFile(file.path, picked.filePath)
     setAttachmentPath(attachmentId, picked.filePath)
     recordDownloadPath(attachmentId, picked.filePath)
     return { saved: true, path: picked.filePath }
@@ -279,28 +288,26 @@ export function registerIpc(): void {
     if ((meta.size ?? 0) > 8 * 1024 * 1024) return { ok: false, error: "unsupported: 图片超过 8MB" }
     const file = await downloadAttachment(messageId, attachmentId)
     if (!file) return { ok: false, error: "network: 拉取附件失败" }
+    const buffer = await readFile(file.path)
+    if (buffer.length > 8 * 1024 * 1024) return { ok: false, error: "unsupported: 图片超过 8MB" }
     return {
       ok: true,
-      dataUrl: "data:" + (file.mime ?? mime) + ";base64," + file.buffer.toString("base64"),
+      dataUrl: "data:" + (file.mime ?? mime) + ";base64," + buffer.toString("base64"),
       mime: file.mime ?? mime,
       name: file.filename
     }
   })
 
-  // 打开附件：先落到 userData/temp 再用系统默认程序打开，不经过保存对话框
+  // 打开附件：缓存文件就是最终文件，直接交给系统默认程序（不再复制到 temp）
   ipcMain.handle(CH.attachmentsOpen, async (_event, raw: unknown) => {
     const { messageId, attachmentId } = parse(attachmentRefSchema, raw)
     const meta = getAttachment(attachmentId)
     if (!meta) return { ok: false, error: "not-found: attachment" }
     const file = await downloadAttachment(messageId, attachmentId)
     if (!file) return { ok: false, error: "network: 拉取附件失败，请先同步这封邮件" }
-    const dir = join(app.getPath("temp"), "maildesk-attachments")
-    await mkdir(dir, { recursive: true })
-    const target = await uniquePath(dir, safeFilename(file.filename ?? meta.filename ?? "附件"))
-    await writeFile(target, file.buffer)
-    const failure = await shell.openPath(target)
-    if (!failure) recordDownloadPath(attachmentId, target)
-    return failure ? { ok: false, error: failure } : { ok: true, path: target }
+    const failure = await shell.openPath(file.path)
+    if (!failure) recordDownloadPath(attachmentId, file.path)
+    return failure ? { ok: false, error: failure } : { ok: true, path: file.path }
   })
 
   ipcMain.handle(CH.attachmentsSaveAll, async (event, raw: unknown) => {
@@ -321,7 +328,7 @@ export function registerIpc(): void {
       const file = await downloadAttachment(messageId, item.id)
       if (!file) continue
       const target = await uniquePath(dir, safeFilename(item.filename ?? "附件"))
-      await writeFile(target, file.buffer)
+      await copyFile(file.path, target)
       setAttachmentPath(item.id, target)
       recordDownloadPath(item.id, target)
       saved += 1
@@ -330,6 +337,7 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(CH.attachmentsDownloads, () => listAttachmentDownloads())
+  ipcMain.handle(CH.attachmentsClearDownloads, () => clearAttachmentDownloads())
   ipcMain.handle(CH.attachmentsCancel, (_event, raw: unknown) =>
     cancelAttachmentDownload(parse(idSchema, raw))
   )

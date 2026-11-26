@@ -39,6 +39,7 @@ export const CH = {
   attachmentsDownloads: "attachments:downloads",
   attachmentsCancel: "attachments:cancel",
   attachmentsReveal: "attachments:reveal",
+  attachmentsClearDownloads: "attachments:clear-downloads",
 
   searchQuery: "search:query",
 

@@ -5,6 +5,7 @@ import type { DownloadTask, Folder, SyncEvent, SyncOverview, SyncState, SyncStat
 import { listAccounts } from "../db/accounts"
 import { getFolder, listFolders } from "../db/folders"
 import { getMessageLocator } from "../db/messages"
+import type { CachedAttachment } from "../attachments"
 import { SyncEngine } from "./engine"
 
 const engines = new Map<string, SyncEngine>()
@@ -148,11 +149,23 @@ export function cancelAttachmentDownload(attachmentId: string): boolean {
   return true
 }
 
+/** 清除下载记录：只删已结束的（完成/失败/取消），正在下载的不动。 */
+export function clearAttachmentDownloads(): number {
+  let removed = 0
+  for (const [id, task] of [...downloads]) {
+    if (task.status === "downloading") continue
+    downloads.delete(id)
+    removed += 1
+  }
+  if (removed > 0) emitDownloads()
+  return removed
+}
+
 /** 附件下载按邮件所属账户路由到对应引擎（多账户时不能下错账号）。 */
 export async function downloadAttachment(
   messageId: string,
   attachmentId: string
-): Promise<{ filename: string; mime: string | null; buffer: Buffer } | null> {
+): Promise<CachedAttachment | null> {
   const locator = getMessageLocator(messageId)
   const folder = getFolder(locator.folderId)
   if (!folder) return null
@@ -199,8 +212,24 @@ export async function downloadAttachment(
   }
 }
 
-const PRECEDENCE: SyncState[] = ["error", "fetching", "selecting", "connecting", "idling", "disconnected"]
+/**
+ * 打开邮件后静默预取该邮件的附件（对齐 Foxmail：点保存时文件已经在本地）。
+ * 不进下载管理器、不推进度：只影响「点保存」的等待时间；手动保存会复用同一次下载。
+ */
+export function prefetchMessageAttachments(messageId: string): void {
+  try {
+    const locator = getMessageLocator(messageId)
+    const folder = getFolder(locator.folderId)
+    if (!folder) return
+    const engine = engineFor(folder.accountId)
+    if (!engine) return
+    void engine.prefetchMessageAttachments(messageId).catch(() => undefined)
+  } catch {
+    // 邮件刚被删除/移动时定位不到，忽略即可
+  }
+}
 
+const PRECEDENCE: SyncState[] = ["error", "fetching", "selecting", "connecting", "idling", "disconnected"]
 export function syncStatus(): SyncStatus {
   const all = [...engines.values()].map((engine) => engine.status())
   if (all.length === 0) return { state: "disconnected" }

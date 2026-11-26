@@ -381,6 +381,16 @@ const htmlToText = (html: string): string =>
     .replace(/<[^>]+>/g, "")
     .trim()
 
+/** 正文 HTML 的落库上限。超过就只能截断，而截断的 HTML 会渲染成半封，必须留日志。 */
+const MAX_HTML = 24 * 1024 * 1024
+
+/** HTML 超长时截断并按 part 号告警（内嵌 base64 图片的营销邮件最容易撞到）。 */
+const clipHtml = (html: string, partId: string): string => {
+  if (html.length <= MAX_HTML) return html
+  console.warn("[sync] html body truncated", { partId, length: html.length })
+  return html.slice(0, MAX_HTML)
+}
+
 /**
  * 同步时预下载正文：把携带回来的 text/plain 与 text/html 块解码成正文。
  * 优先用 text/plain 当搜索文本；html 缺失时用它兜底。
@@ -396,7 +406,7 @@ export function bodyFromParts(
     if (!raw || raw.length === 0) continue
     const decoded = decodePart(raw, part)
     if (part.html) {
-      if (html === null && decoded.trim()) html = decoded.slice(0, 2 * 1024 * 1024)
+      if (html === null && decoded.trim()) html = clipHtml(decoded, part.id)
     } else if (!text.trim()) {
       text = decoded
     }
@@ -526,6 +536,6 @@ export async function parseBody(
       })
     }
   }
-  const html = typeof mail.html === "string" && mail.html.trim() ? mail.html.slice(0, 2 * 1024 * 1024) : null
+  const html = typeof mail.html === "string" && mail.html.trim() ? clipHtml(mail.html, "mailparser") : null
   return { text: text.slice(0, 512 * 1024), html, hasHtml: html !== null, attachments }
 }

@@ -148,5 +148,12 @@ export const MIGRATIONS: string[] = [
   `
   UPDATE message SET body_text = NULL, body_html = NULL
   WHERE body_html LIKE '%cid:%';
+  `,
+  // v10：内嵌图上限从 2MB 提到 10MB。旧逻辑下超过 2MB（base64 编码尺寸）的图被整张跳过，
+  // 纯图片邮件于是只剩 cid 占位、正文一片空白。清掉仍带 cid 引用的正文，让
+  // bodyBackfillLoop 用新上限重新取一次；只为这类邮件付一次重下的代价。
+  `
+  UPDATE message SET body_text = NULL, body_html = NULL
+  WHERE body_html LIKE '%cid:%';
   `
 ]

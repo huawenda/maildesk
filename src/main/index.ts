@@ -14,6 +14,12 @@ import { createTray, destroyTray, testNotify } from "./tray"
 const isDev = !app.isPackaged
 const CAPTURE_PATH = process.env.MAILDESK_CAPTURE
 
+// 开发期控制台里那条 "Electron Security Warning (Insecure Content-Security-Policy)"
+// 是 Electron 对未打包应用的通用提醒（它只看主窗口，不看邮件 iframe 里我们注入的 CSP）。
+// 应用加载的是本地打包页面、没有任何远程内容，这条只会淹没真正的报错，开发期关掉；
+// 打包版本来就不打印。
+if (isDev) process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = "true"
+
 // 「关闭到托盘」时窗口只是 hide，真正退出（托盘菜单 / app.quit）要先放行 close
 let quitting = false
 app.on("before-quit", () => {
@@ -121,6 +127,30 @@ function createWindow(): BrowserWindow {
     win.show()
   })
 
+  // 开发期快捷键：应用菜单是 null（自绘标题栏），Chromium 的 F12 / Ctrl+Shift+I 默认也就不生效了。
+  // 只在未打包时挂，正式包不给用户开 DevTools、也不给整页刷新（会丢当前选中/滚动位置）。
+  if (!app.isPackaged) {
+    // 渲染进程里带 [maildesk] 前缀的诊断日志转发到终端（DevTools 之外也能看，排查布局循环用）
+    win.webContents.on("console-message", (event) => {
+      const text = String(event.message ?? "")
+      if (text.startsWith("[maildesk]") || text.includes("[Violation]")) console.log(text)
+    })
+    win.webContents.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown") return
+      const key = input.key.toLowerCase()
+      const mod = input.control || input.meta
+      if (key === "f12" || (mod && input.shift && key === "i")) {
+        event.preventDefault()
+        win.webContents.toggleDevTools()
+        return
+      }
+      if (key === "f5" || (mod && !input.shift && key === "r")) {
+        event.preventDefault()
+        win.webContents.reload()
+      }
+    })
+  }
+
   // 自绘标题栏需要知道最大化状态来换图标。
   const pushWindowState = () => {
     if (!win.isDestroyed()) win.webContents.send(CH.windowStateEvent, win.isMaximized())
@@ -220,6 +250,34 @@ function createWindow(): BrowserWindow {
                 .catch((error) => String(error))
               console.log("capture-nav", JSON.stringify(picked))
               await new Promise((resolve) => setTimeout(resolve, 1200))
+            }
+            if (process.env.MAILDESK_CAPTURE_LISTSCROLL) {
+              // 连续滚动邮件列表，用来量滚动回调耗时（Chrome 会打 [Violation]）
+              const bottom = await win.webContents
+                .executeJavaScript(
+                  `(async () => {
+                    const el = document.querySelector('[role="listbox"]')
+                    if (!el) return -1
+                    const step = Number(${JSON.stringify(process.env.MAILDESK_CAPTURE_LISTSCROLL)}) || 400
+                    for (let i = 1; i <= 30; i += 1) {
+                      el.scrollTop = i * step
+                      await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 30)))
+                    }
+                    return Math.round(el.scrollTop)
+                  })()`
+                )
+                .catch(() => null)
+              console.log("capture-listscroll", JSON.stringify(bottom))
+            }
+            if (process.env.MAILDESK_CAPTURE_DOWNLOADS) {
+              // 打开标题栏的「下载管理」浮层（排查浮层内的 ResizeObserver 循环用）
+              const opened = await win.webContents
+                .executeJavaScript(
+                  "(() => { const el = document.querySelector('button[title=\"下载管理\"]'); if (!el) return false; el.click(); return true })()"
+                )
+                .catch(() => false)
+              console.log("capture-downloads", JSON.stringify(opened))
+              await new Promise((resolve) => setTimeout(resolve, 800))
             }
             if (process.env.MAILDESK_CAPTURE_SELECT) {
               const row = Number(process.env.MAILDESK_CAPTURE_ROW ?? "0")
@@ -532,6 +590,8 @@ app.whenReady().then(() => {
   // 数据库在窗口之前就绪：渲染进程首帧就会请求 accounts/settings。
   openDb(process.env.MAILDESK_DATA_DIR ?? app.getPath("userData"))
   registerIpc()
+  // 附件缓存按 LRU 收一次上限（默认 1GB），上次异常退出留下的半截 .part 也一并清掉
+  void import("./attachments").then(({ pruneAttachmentCache }) => pruneAttachmentCache())
 
   if (process.env.MAILDESK_SELFTEST) {
     runSelfTest()

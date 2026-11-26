@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { Account, Folder, SyncEvent, SyncState } from "@shared/types"
 import { AccountCapsule } from "@/components/AccountCapsule"
 import { AccountDialog } from "@/components/AccountDialog"
@@ -939,32 +939,83 @@ export default function App() {
   // 会丢掉后续 pointermove（实测拖一下只走一步就停），这里直接用全局监听。
   const listWidthRef = useRef(listWidth)
   listWidthRef.current = listWidth
+  // 拖动时直接改这个节点的 style.width：React 只在松手时更新一次，避免每帧重渲染整棵树
+  const listPaneRef = useRef<HTMLElement | null>(null)
+  // 拖动中的实时宽度：即使拖动期间因为别的状态（同步事件等）触发重渲染，
+  // 也要在 commit 之后把 DOM 宽度盖回去，否则会被 React 的 style={{width}} 拽回起点
+  const dragWidthRef = useRef(listWidth)
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
     dragRef.current = { x: event.clientX, width: listWidth }
+    dragWidthRef.current = listWidth
     setResizing(true)
   }
 
+  // 拖动期间任何一次重渲染（同步事件、通知……）都会把 style.width 写回旧值，
+  // commit 之后立刻用拖动中的实时宽度盖回去，保证全程跟手
+  useLayoutEffect(() => {
+    if (!resizing) return
+    const pane = listPaneRef.current
+    if (pane) pane.style.width = `${dragWidthRef.current}px`
+  })
+
   useEffect(() => {
     if (!resizing) return
-    const onMove = (event: PointerEvent) => {
+    // 指针事件在高回报率鼠标/触控板上可能一帧来好几次：合并到 rAF，
+    // 一帧最多改一次宽度，避免 React 每来一个 pointermove 就整棵列表重渲染
+    let pendingX = 0
+    let moved = false
+    let frame = 0
+    let latest = dragRef.current?.width ?? listWidth
+    const apply = () => {
+      frame = 0
       const drag = dragRef.current
       if (!drag) return
-      setListWidth(clampListWidth(drag.width + event.clientX - drag.x, window.innerWidth))
+      latest = clampListWidth(drag.width + pendingX - drag.x, window.innerWidth)
+      dragWidthRef.current = latest
+      // 只写 DOM，不 setState：拖动期间零 React 渲染（列表 30 行 + 阅读器整棵树都不重绘）
+      const pane = listPaneRef.current
+      if (pane) pane.style.width = `${latest}px`
+      else setListWidth(latest)
+    }
+    const onMove = (event: PointerEvent) => {
+      if (!dragRef.current) return
+      // 兜底：指针在窗口外松开 / 被别的程序抢走时收不到 pointerup，看 buttons 就知道已经松手
+      if (event.buttons === 0) {
+        onUp()
+        return
+      }
+      pendingX = event.clientX
+      moved = true
+      if (frame) return
+      frame = requestAnimationFrame(apply)
     }
     const onUp = () => {
+      if (frame) {
+        cancelAnimationFrame(frame)
+        frame = 0
+      }
+      const drag = dragRef.current
+      if (drag && moved) {
+        // 收尾用最后一次指针位置算，别读 listWidthRef：它要等下一次渲染才更新
+        latest = clampListWidth(drag.width + pendingX - drag.x, window.innerWidth)
+        setListWidth(latest)
+        store("maildesk.listWidth", latest)
+      }
       dragRef.current = null
       setResizing(false)
-      store("maildesk.listWidth", listWidthRef.current)
     }
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
     window.addEventListener("pointercancel", onUp)
+    window.addEventListener("blur", onUp)
     return () => {
+      if (frame) cancelAnimationFrame(frame)
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onUp)
+      window.removeEventListener("blur", onUp)
     }
   }, [resizing])
 
@@ -1067,6 +1118,7 @@ export default function App() {
             onFilterChange={setFilter}
             loading={loading}
             width={listWidth}
+            paneRef={listPaneRef}
           />
           {/* 1px 分隔线本身就是拖拽把手：5px 命中区，跨在两栏边界上 */}
           <div
@@ -1112,9 +1164,17 @@ export default function App() {
             onMove={(targetFolderId) => selectedId && moveMessage(selectedId, targetFolderId)}
             onDelete={() => selectedId && deleteMessage(selectedId)}
             permanentDelete={inTrash === true}
+            resizing={resizing}
           />
         </div>
       </div>
+
+      {/* 拖动分隔线时盖一层透明遮罩：邮件正文是 iframe，指针划进去之后的 pointerup
+          不会冒泡到父文档，松手后拖拽状态就卡住了（用户实测「鼠标松了还在拖」）。
+          遮罩把指针事件留在父文档里，顺带统一光标，也不会选中正文文字。 */}
+      {resizing ? (
+        <div aria-hidden className="fixed inset-0 z-50 cursor-col-resize select-none" />
+      ) : null}
 
       <Notice message={notice} />
 

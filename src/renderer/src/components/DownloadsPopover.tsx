@@ -56,11 +56,23 @@ export function DownloadsPopover({ triggerClassName }: { triggerClassName: strin
       </PopoverTrigger>
 
       <PopoverContent align="end" sideOffset={12} className="w-[320px]">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex items-center justify-between gap-2">
           <span className="text-[12.5px] font-medium">下载</span>
-          <span className="text-[11.5px] tabular-nums text-muted-foreground">
-            {active.length > 0 ? `${active.length} 个进行中` : "暂无进行中"}
-          </span>
+          <div className="flex items-center gap-1">
+            <span className="text-[11.5px] tabular-nums text-muted-foreground">
+              {active.length > 0 ? `${active.length} 个进行中` : "暂无进行中"}
+            </span>
+            {tasks.length > active.length ? (
+              <button
+                type="button"
+                title="清除已完成/已取消的记录（正在下载的不受影响）"
+                onClick={() => void mail.attachments.clearDownloads()}
+                className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
+              >
+                清除记录
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div className="scrollbar-overlay max-h-[280px] space-y-0.5 overflow-y-auto">

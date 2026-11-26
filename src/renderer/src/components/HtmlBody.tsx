@@ -114,6 +114,27 @@ function unclipScrollBoxes(root: ParentNode): void {
   })
 }
 
+/**
+ * 邮件 CSS 里的 `@import` 指向的是外部样式表：CSP 只放行内联样式，它永远加载不了，
+ * 只会每打开一次就往控制台打一条 `Loading the stylesheet ... violates CSP`（用户实测刷屏）。
+ * 直接删掉声明本身，不改变邮件自己的版式。
+ */
+const stripCssImports = (css: string): string =>
+  css.replace(/@import[^;{}]*;/gi, "").replace(/@import[^;{}]*$/i, "")
+
+/**
+ * `@font-face` 只保留内嵌（`data:`）的字体。
+ * 邮件里常见的写法是 `src: url(/fonts/Xxx.woff2)`（相对路径）或远程地址，前者会按 srcdoc 的
+ * 父文档解析到 **应用自己的 origin**（dev 下就是 http://localhost:5173），必然 404，
+ * Chrome 还会反复重试并打 `Failed to decode downloaded font` / `OTS parsing error`，
+ * 同时带来无谓的布局失效与重排（用户实测一封邮件 12 条 OTS 报错）。
+ * 删掉后字体族声明仍在，只是回退到系统字体——和现在「加载失败后回退」的结果一样。
+ */
+const stripExternalFontFaces = (css: string): string =>
+  css.replace(/@font-face\s*\{[^}]*\}/gi, (block) => (/\bsrc\s*:[^;}]*data:/i.test(block) ? block : ""))
+
+const cleanCss = (css: string): string => stripExternalFontFaces(stripCssImports(css))
+
 /** 清洗 + 拦截外链资源：DOMPurify 去脚本，再把 http(s) 图片换成透明占位并计数 */
 function prepare(raw: string, allowRemote: boolean): Prepared {
   // 必须 WHOLE_DOCUMENT：默认模式只返回 body 内容，<head> 里的 <style> 会被整块丢掉，
@@ -121,12 +142,25 @@ function prepare(raw: string, allowRemote: boolean): Prepared {
   const clean = DOMPurify.sanitize(raw, { WHOLE_DOCUMENT: true, FORBID_TAGS, FORBID_ATTR })
   const doc = new DOMParser().parseFromString(clean, "text/html")
   let blocked = 0
+  // 双保险：DOMPurify 已经按 FORBID_TAGS 清过一遍，这里再显式拔掉可执行的节点与带
+  // javascript: 的地址。控制台里那串 `Blocked script execution ... allow-scripts is not set`
+  // 就是残留脚本触发的，删干净之后只剩 CSP 兜底、日志也不再刷。
+  doc.querySelectorAll("script, iframe, frame, object, embed, link, meta, base").forEach((node) => node.remove())
+  doc.querySelectorAll("[href], [src], [action]").forEach((node) => {
+    for (const attr of ["href", "src", "action"]) {
+      if (/^\s*javascript:/i.test(node.getAttribute(attr) ?? "")) node.removeAttribute(attr)
+    }
+  })
+  doc.querySelectorAll("style").forEach((node) => {
+    const css = cleanCss(node.textContent ?? "")
+    if (css !== node.textContent) node.textContent = css
+  })
   // body 内自带的 <style> 留在原地，只把 head 的样式搬到我们自己的 head 里；
   // 原版式不改任何宽度，超宽由阅读区横滚接手。
   const styles = Array.from(doc.head?.querySelectorAll("style") ?? [])
     .map((node) => {
       const media = node.getAttribute("media")
-      return `<style${media ? ` media="${escapeAttr(media)}"` : ""}>${node.textContent ?? ""}</style>`
+      return `<style${media ? ` media="${escapeAttr(media)}"` : ""}>${cleanCss(node.textContent ?? "")}</style>`
     })
     .join("\n")
   // 固定高度的小窗放开：正文明明有空间，不该被裁在邮件自己的小框里
@@ -189,11 +223,16 @@ interface HtmlBodyProps {
   fontSize?: number
   /** 设置里的「默认显示远程图片」；不传时按放行处理 */
   remoteImages?: boolean
+  /**
+   * 拖动列表分隔线时暂停测量：邮件正文的宽度每帧变一次就要整篇重排，
+   * 大邮件上这就是肉眼可见的卡顿。拖动期间冻结，松手后再量一次。
+   */
+  paused?: boolean
   /** iframe 里右键时回调页面坐标（正文区右键菜单用） */
   onContextMenu?: (x: number, y: number) => void
 }
 
-export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: HtmlBodyProps) {
+export function HtmlBody({ html, fontSize = 14, remoteImages, paused = false, onContextMenu }: HtmlBodyProps) {
   // 用 ref 让 handleLoad 里挂的监听始终拿到最新的回调
   const contextMenuRef = useRef(onContextMenu)
   contextMenuRef.current = onContextMenu
@@ -204,6 +243,14 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
   const measureRef = useRef<(() => void) | null>(null)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
+  // 拖动分隔线时暂停测量（handleLoad 里挂的 ResizeObserver 通过 ref 拿到最新值）
+  const pausedRef = useRef(paused)
+  pausedRef.current = paused
+
+  // 松手后补一次测量：拖动期间冻结了尺寸，宽度变了要重新排版才会「弹回去」
+  useEffect(() => {
+    if (!paused) measureRef.current?.()
+  }, [paused])
 
   // 设置变化即时生效：关掉开关后当前这封也会立刻拦截图片
   useEffect(() => {
@@ -304,8 +351,13 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
         el.dataset.maildeskUnclipped = "1"
       })
     }
-    // 原版式：只量出邮件自己的宽度与高度，不缩放、不压宽
-    const measure = () => {
+    // 原版式：只量出邮件自己的宽度与高度，不缩放、不压宽。
+    // ⚠️ measure 里**不能改 html/body 的 overflow**：baseCss 把它钉在 hidden，临时改成 visible
+    // 再改回来，会让被 ResizeObserver 盯着的文档盒尺寸每帧都变，Chrome 就会刷
+    // “ResizeObserver loop completed with undelivered notifications”（用户实测每次开信几万条）。
+    // scrollWidth 在 overflow:hidden 下照样返回完整内容宽度，不需要那个切换。
+    const measureNow = () => {
+      if (!frame.isConnected || !doc.defaultView) return
       // pane 取 HtmlBody 根 div（宽度由阅读区决定）；iframe 自己的宽度会被下面改写，不能当 pane
       const pane = frame.parentElement?.parentElement?.clientWidth || frame.clientWidth
       // 邮件写死的宽度（内联 width / max-width / width 属性）：定宽版式按它排版，流式邮件跟随阅读区
@@ -317,10 +369,10 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
         const specimen = Number(style?.[1] ?? maxWidth?.[1] ?? attr?.[1] ?? 0)
         if (specimen >= 240 && specimen > design) design = specimen
       })
-      // 先按阅读区宽度排一遍：定宽内容会在这里露出真实的内容宽度（scrollWidth）
+      // 先按阅读区宽度排一遍：定宽内容会在这里露出真实的内容宽度（scrollWidth）。
+      // 必须无条件写回 pane 再量：如果沿用上一次撑宽后的宽度，内容宽度会反过来影响下一次测量
+      // （宽 → 内容收缩 → 收窄 → 内容又变宽），就是「ResizeObserver 循环」的经典自激。
       frame.style.width = `${pane}px`
-      doc.body.style.setProperty("overflow", "visible", "important")
-      doc.documentElement.style.setProperty("overflow", "visible", "important")
       const laidOut = Math.max(doc.body.scrollWidth, doc.documentElement.scrollWidth)
       if (!design) {
         doc.querySelectorAll<HTMLElement>("body *").forEach((el) => {
@@ -332,11 +384,21 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
       // 多出来的横向空间交给阅读区滚动条（不缩放、不改版式，也不裁剪）
       const width = Math.max(pane, Math.round(design), laidOut)
       if (width !== pane) frame.style.width = `${width}px`
-      doc.body.style.removeProperty("overflow")
-      doc.documentElement.style.removeProperty("overflow")
       const content = Math.max(doc.body.getBoundingClientRect().height, doc.documentElement.scrollHeight)
       const height = Math.max(80, Math.ceil(content))
       setNatural((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }))
+    }
+
+    // 观察回调里会改 iframe 尺寸，合并到下一帧只跑一次，避免一次布局变化触发多轮回调
+    let frameRequest = 0
+    const measure = () => {
+      // 拖动分隔线期间冻结：正文宽度每帧都变的话，整封邮件每帧重排一次，卡顿就是这么来的
+      if (pausedRef.current) return
+      if (frameRequest) return
+      frameRequest = requestAnimationFrame(() => {
+        frameRequest = 0
+        measureNow()
+      })
     }
 
     // 失效图片：Chrome 默认画碎图图标，原邮件（QQ 等）走图片代理 + 直接隐藏。

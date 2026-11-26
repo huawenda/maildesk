@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type Ref } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   AlignJustify,
@@ -253,6 +253,8 @@ interface MessageListProps {
   loading: boolean
   /** 列表宽度（px），由标题栏下方的分隔线拖拽控制，范围 320–520 */
   width: number
+  /** 挂到列表根节点上：拖动分隔线时 App 直接改它的 style.width，避免整棵树每帧重渲染 */
+  paneRef?: Ref<HTMLElement>
 }
 
 export function MessageList({
@@ -288,7 +290,8 @@ export function MessageList({
   filter,
   onFilterChange,
   loading,
-  width
+  width,
+  paneRef
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   // 紧凑视图里被收起的分组（存组 key，如 group-today），按文件夹分别记：来回切文件夹时各自的折叠状态还在
@@ -417,13 +420,16 @@ export function MessageList({
     })
   }
 
-  const toggleGroup = (key: string) => {
-    setCollapsedByFolder((current) => {
-      const groups = current[collapseKey] ?? []
-      const next = groups.includes(key) ? groups.filter((item) => item !== key) : [...groups, key]
-      return { ...current, [collapseKey]: next }
-    })
-  }
+  const toggleGroup = useCallback(
+    (key: string) => {
+      setCollapsedByFolder((current) => {
+        const groups = current[collapseKey] ?? []
+        const next = groups.includes(key) ? groups.filter((item) => item !== key) : [...groups, key]
+        return { ...current, [collapseKey]: next }
+      })
+    },
+    [collapseKey]
+  )
 
   // 标准密度的行高跟着「两行 / 三行」设置走；宽松固定三行 88px
   const rowHeight = density === "standard" ? (standardThreeLines ? 72 : 60) : ROW_HEIGHT[density]
@@ -495,12 +501,21 @@ export function MessageList({
     return () => element.removeEventListener("scroll", update)
   }, [groupAnchors, grouped, stickyGroupHeaders])
 
+  // 这三个函数必须稳定：inline 箭头函数每次渲染都是新对象，virtualizer 会因此重跑
+  // 内部 effect / 测量，滚动时额外掉帧
+  const getScrollElement = useCallback(() => scrollRef.current, [])
+  const estimateSize = useCallback(
+    (index: number) => (rows[index]?.kind === "group" ? groupRowHeight : rowSlot),
+    [rows, groupRowHeight, rowSlot]
+  )
+  const getItemKey = useCallback((index: number) => rows[index]?.key ?? index, [rows])
+
   const virtualizer = useVirtualizer({
     count: rows.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => (rows[index]?.kind === "group" ? groupRowHeight : rowSlot),
+    getScrollElement,
+    estimateSize,
     overscan: 10,
-    getItemKey: (index) => rows[index]?.key ?? index
+    getItemKey
   })
 
   // 密度切换后行高变化，必须重新测量（PRD FR-03.2）
@@ -517,7 +532,7 @@ export function MessageList({
   }, [selectedId])
 
   return (
-    <section className="flex shrink-0 flex-col bg-card" style={{ width }}>
+    <section ref={paneRef} className="flex shrink-0 flex-col bg-card" style={{ width }}>
       {/* 内边距 8px 三边等距：行高 44 = 8 + 按钮 28 + 8 */}
       <div className="flex h-11 shrink-0 items-center gap-0.5 px-2">
         {filters.map((item) => (
@@ -596,7 +611,7 @@ export function MessageList({
             </button>
           </span>
           <span
-            className="col-sep relative flex shrink-0 items-center justify-end whitespace-nowrap pr-2"
+            className="relative flex shrink-0 items-center justify-end whitespace-nowrap pr-2"
             style={{ width: cols.size }}
           >
             <ColHandle
@@ -673,66 +688,42 @@ export function MessageList({
             {virtualizer.getVirtualItems().map((row) => {
               const item = rows[row.index]
               if (!item) return null
-              const height = item.kind === "group" ? groupRowHeight : rowSlot
-              return item.kind === "group" ? (
-                  <div
-                    key={item.key}
-                    className={cn("absolute inset-x-0 top-0", compact ? "pt-2" : "pb-1.5")}
-                    style={{ height, transform: `translateY(${row.start}px)` }}
-                  >
-                    <GroupHeader
-                      label={item.label}
-                      count={item.count}
-                      compact={compact}
-                      collapsed={collapsedSet.has(item.key)}
-                      onToggle={() => toggleGroup(item.key)}
-                    />
-                  </div>
-                ) : (
-                  <ContextMenu
-                    key={item.key}
-                    onOpenChange={(open) => open && onContextSelect?.(item.message.id)}
-                  >
-                    <ContextMenuTrigger asChild>
-                      <div
-                        className={cn("absolute inset-x-0 top-0", compact ? "" : "pb-1.5")}
-                        style={{ height, transform: `translateY(${row.start}px)` }}
-                      >
-                        <MessageRow
-                          message={item.message}
-                          selected={
-                            selectedIds && selectedIds.length > 0
-                              ? selectedSet.has(item.message.id)
-                              : item.message.id === selectedId
-                          }
-                          density={density}
-                          cols={cols}
-                          showSnippet={showSnippet}
-                          dateWithWeekday={dateWithWeekday}
-                          showTime={showTimeNonCompact}
-                          folderName={showFolder ? folderNameOf?.(item.message.folderId) : undefined}
-                          highlightQuery={highlightQuery}
-                          highlightScope={highlightScope}
-                          onSelect={onSelect}
-                          onToggleStar={onToggleStar}
-                          onSetRead={onSetRead}
-                        />
-                      </div>
-                    </ContextMenuTrigger>
-                    <MessageContextMenu
-                      message={item.message}
-                      moveTargets={moveTargets}
-                      junkFolderId={junkFolderId}
-                      permanentDelete={permanentDelete}
-                      onSetRead={onSetRead}
-                      onMarkAllRead={onMarkAllRead}
-                      onToggleStar={onToggleStar}
-                      onMove={onMove}
-                      onDelete={onDelete}
-                      onRestore={onRestore}
-                    />
-                  </ContextMenu>
-                )
+              return (
+                <VirtualRow
+                  key={item.key}
+                  item={item}
+                  start={row.start}
+                  height={item.kind === "group" ? groupRowHeight : rowSlot}
+                  compact={compact}
+                  density={density}
+                  cols={cols}
+                  selected={
+                    item.kind === "message" &&
+                    (selectedIds && selectedIds.length > 0
+                      ? selectedSet.has(item.message.id)
+                      : item.message.id === selectedId)
+                  }
+                  collapsed={collapsedSet.has(item.key)}
+                  showSnippet={showSnippet}
+                  dateWithWeekday={dateWithWeekday}
+                  showTime={showTimeNonCompact}
+                  folderName={showFolder && item.kind === "message" ? folderNameOf?.(item.message.folderId) : undefined}
+                  highlightQuery={highlightQuery}
+                  highlightScope={highlightScope}
+                  onSelect={onSelect}
+                  onToggleStar={onToggleStar}
+                  onSetRead={onSetRead}
+                  onMarkAllRead={onMarkAllRead}
+                  onMove={onMove}
+                  moveTargets={moveTargets}
+                  onDelete={onDelete}
+                  permanentDelete={permanentDelete}
+                  onRestore={onRestore}
+                  junkFolderId={junkFolderId}
+                  onToggleGroup={toggleGroup}
+                  onContextSelect={onContextSelect}
+                />
+              )
             })}
             </div>
           </>
@@ -742,6 +733,123 @@ export function MessageList({
     </section>
   )
 }
+
+/**
+ * 虚拟列表的一行。必须 memo：滚动时 virtualizer 每帧触发父组件重渲染，
+ * 之前每一行都会连带重渲染 Radix ContextMenu 子树 + 整块邮件行，实测一次 scroll
+ * 回调 150–200ms（Chrome 的 `[Violation] 'scroll' handler took …`）。
+ * 这里只在 props 真的变化时重绘，滚动时同一行直接跳过。
+ */
+const VirtualRow = memo(function VirtualRow({
+  item,
+  start,
+  height,
+  compact,
+  density,
+  cols,
+  selected,
+  collapsed,
+  showSnippet,
+  dateWithWeekday,
+  showTime,
+  folderName,
+  highlightQuery,
+  highlightScope,
+  onSelect,
+  onToggleStar,
+  onSetRead,
+  onMarkAllRead,
+  onMove,
+  moveTargets,
+  onDelete,
+  permanentDelete,
+  onRestore,
+  junkFolderId,
+  onToggleGroup,
+  onContextSelect
+}: {
+  item: ListRow
+  start: number
+  height: number
+  compact: boolean
+  density: Density
+  cols: CompactCols
+  selected: boolean
+  collapsed: boolean
+  showSnippet: boolean
+  dateWithWeekday: boolean
+  showTime: boolean
+  folderName?: string
+  highlightQuery?: string
+  highlightScope?: SearchScope
+  onSelect: (id: string, additive: boolean, range?: boolean) => void
+  onToggleStar?: (id: string) => void
+  onSetRead?: (id: string, read: boolean) => void
+  onMarkAllRead?: () => void
+  onMove?: (id: string, folderId: string) => void
+  moveTargets?: { id: string; label: string }[]
+  onDelete?: (id: string) => void
+  permanentDelete?: boolean
+  onRestore?: (id: string) => void
+  junkFolderId?: string
+  onToggleGroup: (key: string) => void
+  onContextSelect?: (id: string) => void
+}) {
+  if (item.kind === "group") {
+    return (
+      <div
+        className={cn("absolute inset-x-0 top-0", compact ? "pt-2" : "pb-1.5")}
+        style={{ height, transform: `translateY(${start}px)` }}
+      >
+        <GroupHeader
+          label={item.label}
+          count={item.count}
+          compact={compact}
+          collapsed={collapsed}
+          onToggle={() => onToggleGroup(item.key)}
+        />
+      </div>
+    )
+  }
+  return (
+    <ContextMenu onOpenChange={(open) => open && onContextSelect?.(item.message.id)}>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn("absolute inset-x-0 top-0", compact ? "" : "pb-1.5")}
+          style={{ height, transform: `translateY(${start}px)` }}
+        >
+          <MessageRow
+            message={item.message}
+            selected={selected}
+            density={density}
+            cols={cols}
+            showSnippet={showSnippet}
+            dateWithWeekday={dateWithWeekday}
+            showTime={showTime}
+            folderName={folderName}
+            highlightQuery={highlightQuery}
+            highlightScope={highlightScope}
+            onSelect={onSelect}
+            onToggleStar={onToggleStar}
+            onSetRead={onSetRead}
+          />
+        </div>
+      </ContextMenuTrigger>
+      <MessageContextMenu
+        message={item.message}
+        moveTargets={moveTargets}
+        junkFolderId={junkFolderId}
+        permanentDelete={permanentDelete}
+        onSetRead={onSetRead}
+        onMarkAllRead={onMarkAllRead}
+        onToggleStar={onToggleStar}
+        onMove={onMove}
+        onDelete={onDelete}
+        onRestore={onRestore}
+      />
+    </ContextMenu>
+  )
+})
 
 /** 日期分组条：整行铺满列表宽度、可点击折叠；右侧带该组邮件数 */
 function GroupHeader({

@@ -125,8 +125,9 @@ Manager (单例)
 6. 写游标与计数（`updateFolderCursor` / `updateFolderCounts`）。
    - **游标先推进再取正文**：正文失败时下一轮 `bodyBackfillLoop` 会按 `idsNeedingBody` 补，不会卡住。
 7. 先发 `messages { added }` 让列表出现（主题/发件人/时间立刻可见）。
-8. `fetchBodies()` 取这些邮件正文（同一把 mailbox lock）。
-9. 再发 `messages { added: 0, bodiesDone: true }` 让摘要/附件标记刷新。
+8. 正文：`bodyItems.length <= INLINE_BODY_LIMIT (150)` 时在同一把 mailbox lock 里 `fetchBodies()`；
+   超过就 `kickBodyBackfill()` 交给后台正文链（见第 7 节），**不阻塞「已同步」与下一个文件夹**。
+9. 内联取正文后补发 `messages { added: 0, bodiesDone: true }` 让摘要/附件标记刷新。
    `added: 0` 不触发托盘通知，避免重复弹窗。
 
 ## 7. 正文与内嵌图（`fetchBodies`）
@@ -136,17 +137,53 @@ Manager (单例)
 - 按「part 号组合」分组，把结构相同的邮件合并成一次 `FETCH bodyParts`，每批 50。
 - 没有文本块（`collectTextParts` 为空）的邮件直接写空正文 + 附件元数据。
 - 解码：
-  - `text/plain` → `body_text`（≤512KB）；`text/html` → `body_html`（≤2MB）；
+  - `text/plain` → `body_text`（≤512KB）；`text/html` → `body_html`（≤24MB，超出按 part 号告警后截断）；
+    旧上限 2MB 会让「HTML 里直接内联 base64 图片」的营销邮件截成半封；
   - 都没有时用 HTML 去标签兜出纯文本；
   - `snippet` 从正文生成，随 `setMessageBody` 写入。
 - 内嵌图：`collectInlineImages`（`image/*`、带 Content-ID、且 disposition 不是 attachment）在同步时一并取回，
-  转 `data:` URL 替换 `cid:` 引用；单张 ≤2MB、整封合计 ≤8MB，超限保留占位。
+  转 `data:` URL 替换 `cid:` 引用；**单张 ≤10MB（BODYSTRUCTURE 的编码尺寸）、整封合计 ≤16MB（解码后）**，
+  超限保留占位并打 `[sync] inline image skipped`（含 messageId/uid/跳过数与已嵌入数）。
+  上限判断必须按编码尺寸理解：base64 比原图大 1/3，旧的 2MB 上限等价于原图 1.5MB，
+  正好卡掉「整封 2MB 以上的纯图片宣传邮件」，整封渲染成空白（2026-11-26 用户实测）。
   带 filename 或 `Content-Disposition: attachment` 的才是附件；inline 图片不计入附件、不挂回形针。
 - 附件只写元数据（文件名/MIME/尺寸/part），**二进制不入库**。
 - 尺寸口径：一律取 BODYSTRUCTURE 的 octets，base64 按 76 字符 + CRLF 折算
   `(size − ceil(size/78)×2) × 3/4`。
-- 兜底 `fetchBody(messageId)`：只在极端结构/老数据时点开才用，取整封前 512KB，
-  不是主路径。
+- **正文下载走后台链 + 多连接并行**（首次同步 / 历史回溯的主力）：
+  - 触发：`syncFolder` 一批正文超过 `INLINE_BODY_LIMIT`、`backfillBatch` 每批头部落库后、
+    启动时的 `backgroundUpkeep`；`bodyRunning` 保证同一时刻只有一条链。
+  - 每轮 `messagesNeedingBody(account, BODY_BATCH=500)`，按 `sent_at DESC` 最近优先。
+  - 一个文件夹的 500 封切成 `BODY_CHUNK=100` 的块，交给最多 `BODY_CONCURRENCY`（默认 3）条会话并发；
+    主连接算一条，其余由 `ensureBodyClient()` 懒连（`disableAutoIdle`，不参与 IDLE/推送）。
+    服务端拒绝并发会话时 connect 失败 → 只记日志并退回主连接，不影响同步。
+    `MAILDESK_BODY_CONCURRENCY=1` 可强制单连接。
+  - 每完成一块才推 `bodies { done, total }`（只按真正落库的封数前进），整轮结束再发一次
+    `messages { added: 0, bodiesDone: true }` 让摘要刷新。
+- 兜底 `fetchBody(messageId)`：点开缺正文的邮件时走同一条 BODYSTRUCTURE + part 路径
+  （不再用 mailparser 解析前 2MB，内嵌图也能拿到）。
+- 单批 `FETCH` 的估算字节上限 `BODY_FETCH_BUDGET=32MB`（图片编码尺寸 + 每块正文 64KB），
+  内嵌图上限放到 10MB 后 50 封大图邮件一次拉回来会吃几百 MB 内存。
+
+## 7.1 附件（缓存 + 预取 + 流式落盘）
+
+目标是「点保存几乎立刻落盘」（对标 Foxmail）：**打开邮件时附件就已经在本地**。
+
+- 缓存目录：`<userData>/attachments/<messageId>/<attachmentId>/<原文件名>`（`src/main/attachments.ts`）。
+  按 mtime 做 LRU，超过 `CACHE_LIMIT`（1GB）从最旧的删；启动时与每次下载完成后各 prune 一次。
+- 下载：`client.download(uid, part, { chunkSize: 32MB })` 的流直接 `pipeline` 进 `createWriteStream`，
+  先写 `.part` 再 `rename`（中断不会留下能被当成缓存的半截文件），进度按已写字节节流 120ms 推给渲染层。
+  **`chunkSize` 必须显式给**：imapflow 默认 64KB，一个 50MB 的视频就是 ~1000 次往返，
+  实测 6 分钟只走了 286KB；32MB 窗口下同一个附件 17.6 秒下完（约 2.9MB/s，接近单连接上限）。
+  60 秒没有任何新字节就判定卡死、销毁流按失败上报（`ATTACHMENT_STALL_MS`）。
+  **不再整包 `Buffer`**：内存占用只有一个窗口大小。
+- **不在 `schedule()` 队列里**：附件下载走独立连接（`ensureWorkerClient(BODY_CONCURRENCY)`，
+  连不上退回主连接），不会被正文补齐/历史回溯堵住；`attachmentJobs` 按 attachmentId 去重，
+  预取与手动保存共用同一次下载，进度监听器按调用方各自挂。
+- **预取**：`messagesGet`（打开邮件）之后调 `prefetchMessageAttachments`，逐个下载该邮件的附件
+  （单封 >200MB 跳过）。预取静默：不推进度、不进下载管理器。
+- 保存/打开/预览：一律先查缓存。命中时保存是 `copyFile`、打开是 `shell.openPath(缓存文件)`、
+  预览是 `readFile` → data URL，都不再联网。
 
 ## 8. 后台维护链（`startBackfill` → `backgroundUpkeep`）
 
@@ -161,9 +198,10 @@ Manager (单例)
    - **只按本地已落库 UID 分批取原始头**（每批 200），不拉服务器整箱；
    - 全部成功才写 marker `recipientNamesV1:<accountId>`；
    - 有更新时发 `recipients` 事件让列表重拉。
-4. `bodyBackfillLoop()`：把旧版本懒加载留下的空正文补齐，每批 200 封，批间 120ms。
+4. `bodyBackfillLoop()`：缺正文补齐，每轮 500 封、最近优先，按第 7 节的多连接并行下载。
    - 计数与候选都按账户；连续一批一封都没处理就退出，避免空转。
-5. `backfillLoop()` / `backfillBatch()`：历史回溯（见第 9 节）。
+5. `backfillLoop()` / `backfillBatch()`：历史回溯（见第 9 节）。每批头部落库后 `kickBodyBackfill()`，
+   正文由后台链接力（不再挡在回溯循环里）。
 
 顺序原因：修正与补正文都只服务旧数据，不修也不影响新邮件，所以全部放在 `idling` 之后；
 它们不在队列里，长时间运行不会挡住收新信。
@@ -172,8 +210,9 @@ Manager (单例)
 
 - 游标存在 `folder.backfill_uid`：
   - `null` = 还没开始；`>= 1` = 下一批的上界；`< 1` = 已翻到底。
-- 每批 `BACKFILL_BATCH = 200`，取 `from = max(1, cursor - 199)` 到 `cursor` 的头部；
-  正文同一批取回落库；**无论有没有命中 UID 空洞，都写 `backfill_uid = from - 1`**。
+- 每批 `BACKFILL_BATCH = 500`，取 `from = max(1, cursor - 499)` 到 `cursor` 的头部；
+  本批正文交给后台正文链（`kickBodyBackfill()`），批次里不再串行下载正文；
+  **无论有没有命中 UID 空洞，都写 `backfill_uid = from - 1`**。
   不能用 `MIN(uid) - 1` 推游标：服务端 UID 有空洞，空批次会让游标原地不动，同一段无限重试。
 - 判断「这箱拉完了没」不能用 `folder.total_count`（那是本地行数），要看 SELECT 后
   `mailbox.exists`（服务端真实封数）。本地 ≥ 服务端直接把游标置 0。
@@ -199,8 +238,9 @@ Manager (单例)
    - 服务端已删除的文件夹：先 `DELETE FROM message WHERE folder_id` 再删 folder
      （SQLite 级联删不触发 FTS 的 AFTER DELETE 触发器，会留残影）。
 3. 决定扫描目标（两段式）：
-   - 深度扫描：`reason === "manual"` 或 `reconcileRounds % DEEP_RECONCILE_EVERY(5) === 0`
-     （启动第一轮必然是深度，3min 定时器每 5 轮做一次，即约 15 分钟）；
+   - 深度扫描：`reconcileRounds % DEEP_RECONCILE_EVERY(5) === 0`（启动第一轮必然是深度，
+     3min 定时器每 5 轮做一次，即约 15 分钟）。**手动同步不再强制深度扫描**：STATUS 没变化就
+     不拉 `1:*`（一个大箱子几万条 UID+FLAGS，慢链路上点一次同步要多等十几秒）；
    - 否则只扫 STATUS 快照变化过的文件夹：
      新邮件改 `uidNext`，删除改 `MESSAGES`，手机端读信改 `UNSEEN`；
      拿不到快照时保守扫描。非收件箱的快照只在整树刷新时更新，最晚等一次整树刷新或深度扫描。
@@ -333,7 +373,8 @@ FTS5 的触发器挂在 `message` 的 INSERT/DELETE/UPDATE 上；删文件夹必
 
 | 环境变量 | 作用 |
 | --- | --- |
-| `MAILDESK_SYNC_DEBUG=1` | 打印 `[sync] scan` / `[sync] folder` / `reconcile shallow` 明细 |
+| `MAILDESK_SYNC_DEBUG=1` | 打印 `[sync] scan` / `[sync] folder`（含 `selectMs` / `fetchMs`）/ `[sync] body batch` 明细 |
+| `MAILDESK_BODY_CONCURRENCY=<n>` | 正文下载并发连接数（1–4，默认 3）；服务端限制会话时设成 1 |
 | `MAILDESK_DATA_DIR=<dir>` | 指向隔离库，避免污染真实数据 |
 | `MAILDESK_SELFTEST=1` | 主进程跑数据层自检并退出 |
 | `MAILDESK_TEST_EMAIL/HOST/PORT/PASSWORD` | 自检用的临时账户 |
@@ -387,3 +428,7 @@ FTS5 的触发器挂在 `message` 的 INSERT/DELETE/UPDATE 上；删文件夹必
 | 2026-11-25 | 新增只读 `sync:overview` / `sync:reconnect` 与「同步状态」面板契约；事件补 `accountId` |
 | 2026-11-25 | 空箱子不再发 `0 / N` 进度；时间线合并同类进度、丢弃 0 进度，空箱子回溯显示「无历史」 |
 | 2026-11-25 | `state.folder` 在 `idling`/`disconnected` 时清空，状态事件不再带上一次的文件夹名 |
+| 2026-11-26 | 内嵌图上限 2MB/8MB → 10MB/16MB（2MB 是 base64 尺寸，卡死整封 2MB+ 的纯图片宣传邮件），跳过时落日志；`body_html` 上限 2MB → 24MB 并在截断时告警；`fetchBody` 兜底取整封前 2MB |
+| 2026-11-26 | 同步提速：历史回溯批次 200 → 500；正文移出关键路径（>150 封走后台链）；正文链最多 3 条连接并行（`MAILDESK_BODY_CONCURRENCY`，默认 3，失败退回单连接）；`fetchBody` 改走 BODYSTRUCTURE + part，内嵌图不再丢；手动同步不再强制全量 UID+FLAGS 扫描；`[sync] folder` 加 `selectMs/fetchMs`、`[sync] body batch` 打印并发与耗时 |
+| 2026-11-26 | 附件系统重做：落 `attachments/<messageId>/<attachmentId>/<文件名>` 缓存（1GB LRU）、流式写盘、独立连接且不进 `schedule()` 队列、打开邮件即静默预取（>200MB 跳过）；保存/打开/预览全部走缓存（`copyFile` / `openPath` / `readFile`），不再重新联网 |
+| 2026-11-26 | 附件下载显式 `chunkSize: 32MB`（imapflow 默认 64KB，50MB 附件要 ~1000 次往返，实测 6 分钟只走 286KB → 改后 17.6 秒）；加 60s 无字节的卡死兜底 |

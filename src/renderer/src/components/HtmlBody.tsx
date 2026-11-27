@@ -2,6 +2,7 @@ import DOMPurify from "dompurify"
 import { ImageOff } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { mail } from "@/lib/ipc"
+import { isDragging, onDragEnd } from "@/lib/drag-pause"
 
 /** 1×1 透明 GIF：拦截远程图片后占位，保留原尺寸以免版式跳动 */
 const TRANSPARENT =
@@ -223,16 +224,11 @@ interface HtmlBodyProps {
   fontSize?: number
   /** 设置里的「默认显示远程图片」；不传时按放行处理 */
   remoteImages?: boolean
-  /**
-   * 拖动列表分隔线时暂停测量：邮件正文的宽度每帧变一次就要整篇重排，
-   * 大邮件上这就是肉眼可见的卡顿。拖动期间冻结，松手后再量一次。
-   */
-  paused?: boolean
   /** iframe 里右键时回调页面坐标（正文区右键菜单用） */
   onContextMenu?: (x: number, y: number) => void
 }
 
-export function HtmlBody({ html, fontSize = 14, remoteImages, paused = false, onContextMenu }: HtmlBodyProps) {
+export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: HtmlBodyProps) {
   // 用 ref 让 handleLoad 里挂的监听始终拿到最新的回调
   const contextMenuRef = useRef(onContextMenu)
   contextMenuRef.current = onContextMenu
@@ -243,14 +239,11 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, paused = false, on
   const measureRef = useRef<(() => void) | null>(null)
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const observerRef = useRef<ResizeObserver | null>(null)
-  // 拖动分隔线时暂停测量（handleLoad 里挂的 ResizeObserver 通过 ref 拿到最新值）
-  const pausedRef = useRef(paused)
-  pausedRef.current = paused
+  const mutationRef = useRef<MutationObserver | null>(null)
 
-  // 松手后补一次测量：拖动期间冻结了尺寸，宽度变了要重新排版才会「弹回去」
-  useEffect(() => {
-    if (!paused) measureRef.current?.()
-  }, [paused])
+  // 拖动列表分隔线期间冻结测量（模块级标志，不走 props，避免按下时重渲染）：
+  // 正文宽度每帧变一次就要整篇重排，大邮件上这是肉眼可见的卡顿。松手后补量一次。
+  useEffect(() => onDragEnd(() => measureRef.current?.()), [])
 
   // 设置变化即时生效：关掉开关后当前这封也会立刻拦截图片
   useEffect(() => {
@@ -272,6 +265,8 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, paused = false, on
   useEffect(() => {
     observerRef.current?.disconnect()
     observerRef.current = null
+    mutationRef.current?.disconnect()
+    mutationRef.current = null
     if (measureRef.current) window.removeEventListener("resize", measureRef.current)
     measureRef.current = null
   }, [document_])
@@ -356,48 +351,61 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, paused = false, on
     // 再改回来，会让被 ResizeObserver 盯着的文档盒尺寸每帧都变，Chrome 就会刷
     // “ResizeObserver loop completed with undelivered notifications”（用户实测每次开信几万条）。
     // scrollWidth 在 overflow:hidden 下照样返回完整内容宽度，不需要那个切换。
-    const measureNow = () => {
+    //
+    // ⚠️ 宽度两段式测量（先缩回 pane 量 scrollWidth、再按内容撑开）**每次都会改变 iframe 宽度**，
+    // 而 iframe 宽度一变 body 就会触发 ResizeObserver → 再测 → 又缩回 pane……宽度在
+    // pane 与 content 之间来回跳，就是 2026-11-26 日志里那波每秒几百条的 RO 循环。
+    // 所以宽度只在「阅读区宽度变了 / 显式要求」时重算，其余回调只更新高度。
+    let lastPane = -1
+    let lastWidth = 0
+    const measureNow = (forceWidth = false) => {
       if (!frame.isConnected || !doc.defaultView) return
       // pane 取 HtmlBody 根 div（宽度由阅读区决定）；iframe 自己的宽度会被下面改写，不能当 pane
       const pane = frame.parentElement?.parentElement?.clientWidth || frame.clientWidth
-      // 邮件写死的宽度（内联 width / max-width / width 属性）：定宽版式按它排版，流式邮件跟随阅读区
-      let design = 0
-      doc.querySelectorAll<HTMLElement>("body *").forEach((el) => {
-        const attr = /^(\d+(?:\.\d+)?)/.exec((el.getAttribute("width") ?? "").trim())
-        const style = /^(\d+(?:\.\d+)?)px$/.exec(el.style.width)
-        const maxWidth = /^(\d+(?:\.\d+)?)px$/.exec(el.style.maxWidth)
-        const specimen = Number(style?.[1] ?? maxWidth?.[1] ?? attr?.[1] ?? 0)
-        if (specimen >= 240 && specimen > design) design = specimen
-      })
-      // 先按阅读区宽度排一遍：定宽内容会在这里露出真实的内容宽度（scrollWidth）。
-      // 必须无条件写回 pane 再量：如果沿用上一次撑宽后的宽度，内容宽度会反过来影响下一次测量
-      // （宽 → 内容收缩 → 收窄 → 内容又变宽），就是「ResizeObserver 循环」的经典自激。
-      frame.style.width = `${pane}px`
-      const laidOut = Math.max(doc.body.scrollWidth, doc.documentElement.scrollWidth)
-      if (!design) {
+      if (forceWidth || pane !== lastPane) {
+        lastPane = pane
+        // 邮件写死的宽度（内联 width / max-width / width 属性）：定宽版式按它排版，流式邮件跟随阅读区
+        let design = 0
         doc.querySelectorAll<HTMLElement>("body *").forEach((el) => {
-          const width = Math.round(el.getBoundingClientRect().width)
-          if (width >= 240 && width < laidOut - 2 && width > design) design = width
+          const attr = /^(\d+(?:\.\d+)?)/.exec((el.getAttribute("width") ?? "").trim())
+          const style = /^(\d+(?:\.\d+)?)px$/.exec(el.style.width)
+          const maxWidth = /^(\d+(?:\.\d+)?)px$/.exec(el.style.maxWidth)
+          const specimen = Number(style?.[1] ?? maxWidth?.[1] ?? attr?.[1] ?? 0)
+          if (specimen >= 240 && specimen > design) design = specimen
         })
+        // 先按阅读区宽度排一遍：定宽内容会在这里露出真实的内容宽度（scrollWidth）。
+        // 必须无条件写回 pane 再量：如果沿用上一次撑宽后的宽度，内容宽度会反过来影响下一次测量
+        // （宽 → 内容收缩 → 收窄 → 内容又变宽），就是「ResizeObserver 循环」的经典自激。
+        if (frame.style.width !== `${pane}px`) frame.style.width = `${pane}px`
+        const laidOut = Math.max(doc.body.scrollWidth, doc.documentElement.scrollWidth)
+        if (!design) {
+          doc.querySelectorAll<HTMLElement>("body *").forEach((el) => {
+            const width = Math.round(el.getBoundingClientRect().width)
+            if (width >= 240 && width < laidOut - 2 && width > design) design = width
+          })
+        }
+        // 邮件要多少给多少。弹性邮件跟随阅读区，定宽/超宽内容按内容宽度铺开，
+        // 多出来的横向空间交给阅读区滚动条（不缩放、不改版式，也不裁剪）
+        const width = Math.max(pane, Math.round(design), laidOut)
+        if (width !== pane && frame.style.width !== `${width}px`) frame.style.width = `${width}px`
+        lastWidth = width
       }
-      // 邮件要多少给多少。弹性邮件跟随阅读区，定宽/超宽内容按内容宽度铺开，
-      // 多出来的横向空间交给阅读区滚动条（不缩放、不改版式，也不裁剪）
-      const width = Math.max(pane, Math.round(design), laidOut)
-      if (width !== pane) frame.style.width = `${width}px`
       const content = Math.max(doc.body.getBoundingClientRect().height, doc.documentElement.scrollHeight)
       const height = Math.max(80, Math.ceil(content))
-      setNatural((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }))
+      setNatural((prev) =>
+        prev && prev.width === lastWidth && prev.height === height ? prev : { width: lastWidth, height }
+      )
     }
 
     // 观察回调里会改 iframe 尺寸，合并到下一帧只跑一次，避免一次布局变化触发多轮回调
     let frameRequest = 0
-    const measure = () => {
+    const measure = (forceWidth = false) => {
       // 拖动分隔线期间冻结：正文宽度每帧都变的话，整封邮件每帧重排一次，卡顿就是这么来的
-      if (pausedRef.current) return
+      if (isDragging()) return
       if (frameRequest) return
       frameRequest = requestAnimationFrame(() => {
         frameRequest = 0
-        measureNow()
+        measureNow(forceWidth)
       })
     }
 
@@ -424,6 +432,9 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, paused = false, on
         return
       }
       img.addEventListener("error", () => neutralize(img), { once: true })
+      // 图片解码后可能比当前 iframe 更宽（远程图/内嵌大图）：重算一次宽度，
+      // 否则宽度只按初始内容定死，宽图会被 iframe 的 overflow:hidden 裁掉
+      img.addEventListener("load", () => measure(true), { once: true })
     })
 
     // 长线程的引用历史先折起来：Gmail / Outlook / Yahoo / blockquote 四类容器
@@ -459,31 +470,45 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, paused = false, on
     collapseQuotes()
     measure()
 
-    // 图片加载、字体替换、窗口缩放都会改变内容高度；body / 根元素 / frame 三个观察点一起盯。
-    // 根元素也要观察：有的邮件用定高表格（height="100%"）包内容，body 高度可能不动，
-    // 只盯 body 会漏掉「内容变高、正文却停在旧高度」的情况。
+    // 图片加载、字体替换、窗口缩放都会改变内容高度。
+    // ⚠️ 这里**不 observe 邮件文档里的节点**（`doc.body` / `doc.documentElement`）：观察别的文档的
+    // 节点时，Chromium 会把这些跨文档的尺寸变化记成「无法投递的通知」，回调又不派发给我们，
+    // 于是每帧刷一条 `ResizeObserver loop completed with undelivered notifications`
+    // （2026-11-26 实测打开某些邮件后每秒 150+ 条、且我们包的 observer 一次回调都没有）。
+    // 内容变化改用 MutationObserver（它没有布局循环语义）+ 图片 load + 字体 ready + 定时补量。
     observerRef.current?.disconnect()
-    observerRef.current = new ResizeObserver(measure)
-    observerRef.current.observe(doc.body)
-    observerRef.current.observe(doc.documentElement)
+    // RO 回调只更新高度（宽度已经定了）：传 entries 进去会被当成 forceWidth，禁止这样写
+    observerRef.current = new ResizeObserver(() => measure())
     observerRef.current.observe(frame)
     // 父容器（正文的 w-full 包装）跟窗口宽度走；iframe 被撑成固定 px 后它自己的盒子不再变化，
     // 只观察 frame 会收不到「窗口变宽」的通知，横向展开状态就永远退不回去（用户实测卡在窄宽度）。
     if (frame.parentElement) observerRef.current.observe(frame.parentElement)
-    measureRef.current = measure
-    window.addEventListener("resize", measure)
+
+    // 邮件 DOM 变化（展开引用、懒加载插节点等）后补量一次高度
+    mutationRef.current?.disconnect()
+    mutationRef.current = new MutationObserver(() => measure())
+    mutationRef.current.observe(doc.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true
+    })
+    // measureRef 给外部（拖动分隔线松手、窗口 resize）用，一律要求重算宽度
+    const forceMeasure = () => measure(true)
+    measureRef.current = forceMeasure
+    window.addEventListener("resize", forceMeasure)
     // 邮件自带 @font-face 与图片解码完成后行高会变，补两次测量兜底（顺带再放开一次滚动框）
     void doc.fonts?.ready.then(() => {
       releaseScrollBoxes()
-      measure()
+      measure(true)
     }).catch(() => undefined)
     window.setTimeout(() => {
       releaseScrollBoxes()
-      measure()
+      measure(true)
     }, 120)
     window.setTimeout(() => {
       releaseScrollBoxes()
-      measure()
+      measure(true)
     }, 600)
 
     // 链接：页内锚点交给 iframe 自己滚；http(s)、协议相对、mailto、tel 交给系统；

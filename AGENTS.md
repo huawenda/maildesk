@@ -4,11 +4,11 @@ Windows 单平台的桌面邮件客户端，只走 IMAP 收信，不发信、不
 
 ## 事实来源
 
-- `docs/PRD.md` 是唯一规格来源（当前 v0.3）。改布局、交互、文案、颜色之前先改 PRD，再改代码；PRD 里没写的，先补一节再动手。
+- `docs/PRD.md` 是唯一规格来源（当前 v0.4）。改布局、交互、文案、颜色之前先改 PRD，再改代码；PRD 里没写的，先补一节再动手。PRD 开头的「目录」与文末「变更记录」由 `check:docs` 校验：加章节要进目录，行为变化要递增版本并追加一行。
 - `docs/sync.md` 是同步链路的实现说明书（生命周期、串行/并行、游标、事件、已知坑）。改 `src/main/sync/` 或同步相关的数据写入时必须同步更新它，并在文末「变更记录」追加一条；只改代码不改文档视为未完成。
 - 早期视觉参考（`docs/ui-refs/` 的对比页与产品截图、`docs/palette-compare.png` 调色对照）已于 2026-11-27 由用户删除，不要再引用或恢复；设计依据以 `DESIGN.md` 与实际 token 为准。
-- `DESIGN.md` 是设计语言的机器可读摘要（Stitch DESIGN.md 格式，给设计 agent 读：token / 字号 / 圆角 / 组件 / Do's & Don'ts）。**它只是镜像**：token 的唯一事实来源仍然是 `globals.css` 的 `:root`，改颜色、字号、圆角、间距时必须同时更新 `globals.css`、`DESIGN.md` 和 `docs/design-rules.md` 这三处，否则会漂。`npm run check:docs` 会核对 DESIGN 的 colors 块与正文色值；AGENTS 里只留红线，**不要在正文里复述 hex**，写 token 名。
-- `docs/design-rules.md` 是「设计红线」的全文（从 AGENTS 拆出）；`docs/pitfalls.md` 是「已知坑」全文（从 AGENTS 拆出）。动 UI 前读前者，动同步/渲染/打包/截图前读后者对应小节。
+- `DESIGN.md` 是设计语言的机器可读摘要（Stitch DESIGN.md 格式，给设计 agent 读：token / 字号 / 圆角 / 组件 / Do's & Don'ts）。**它只是镜像**：token 的唯一取值处仍然是 `globals.css` 的 `:root`，改颜色时必须同时更新 `globals.css`、`DESIGN.md` 和 `docs/PRD.md` 6.2 的取值表；`design-rules` / AGENTS 只写 token 名、不写色值。`npm run check:docs` 会核对这三处的 token 取值、所有文档正文里的 hex（必须在 CSS 或例外清单里）以及 PRD 目录，**不要在正文里复述 hex**。
+- `docs/design-rules.md` 是「设计红线」的全文（从 AGENTS 拆出）；`docs/pitfalls.md` 是「已知坑」全文（从 AGENTS 拆出）；`docs/rendering.md` 是阅读器正文渲染的实现说明（清洗 → CSP → iframe → 测量）。动 UI 前读第一个，动渲染前读第三个，动同步/打包/截图前按关键词查第二个。
 - 有疑问不要猜产品意图，直接问用户；但实现细节（组件拆分、命名、状态管理）自己定，不要反问。
 
 ## 技术栈（已锁定，不要替换）
@@ -53,14 +53,14 @@ src/renderer/src/     React UI（唯一的重构区域）
   styles/globals.css 设计 token 唯一落地处
 src/shared/          主/渲染共用类型与 zod schema
 fixtures/            开发期假数据
-docs/                PRD、sync、design-rules、pitfalls、图标脚本
+docs/                PRD、sync、rendering、design-rules、pitfalls、图标脚本
 ```
 
 ## 代码约定
 
 - 渲染进程**永远不碰 Node / IMAP**，所有数据走 `window.mail`（preload 暴露的 `MailApi`）。新增能力先加 `src/shared/types.ts` 的类型，再加 IPC，最后接 UI。
 - **全局禁选**：`body` 上 `user-select: none`，阅读器 `article` 用 `select-text` 放开，iframe 里的邮件正文天然可选中，表单控件单独 `user-select: text`；`img/a` 加 `-webkit-user-drag: none`。不要为了省事在根节点放开选择，列表拖动会刷出一片蓝色文字（用户实测）。
-- 颜色只能引用语义 token（`bg-card`、`text-muted-foreground`、`border-border`…），不要在组件里写死 hex；token 只在 `globals.css` 的 `:root` 里定义（**只维护浅色主题，没有 `.dark`**）。**静态叠层（列头、分组条）用 `foreground/[0.0x]`，不要用 `white/[0.0x]`；hover 与选中全应用只有一套 `--row-hover` `#F2F4F7` / `--row-selected` `#E3ECFA`（`--accent` 取 `#F2F4F7`，菜单/按钮的 `hover:bg-accent` 与列表一致；侧栏 `--nav-hover`/`--nav-selected` 也取同值，2026-11-27 起不再单独维护一套蓝。例外：标题栏控件——☰ 账户菜单、折叠/密度/下载/窗口三键——hover 用 `hover:bg-foreground/10`）**：白色叠层在浅色主题下等于没画，用户会反馈"浅色没法用/看着累"（2026-11-22 实测）。配色（2026-11-27 定稿 A 方案：冷中性 + 单一蓝，取代 QQ 浅蓝灰）：外壳 `#F3F3F3`（Win11 默认标题栏色）、列表/阅读器画布纯白 `#FFFFFF`、墨阶 `#16181B` / `#5B6169` / `#8B9199`、结构线 `--border: #DADEE4`、表格与行 `--table-line` / `--row-line` 同为 `#E9EBEF`、浮面 `--muted: #ECEEF1`、主色 `#2B5FD9`；不要再回到带蓝调的 `#E6EDF5` 外壳或 `#F3F4F6`/`#DBEBFD` 那套交互色。`--background` 同时用于窗口底色（`src/main/index.ts` 的 `backgroundColor` 要跟着改）。
+- 颜色只能引用语义 token（`bg-card`、`text-muted-foreground`、`border-border`…），不要在组件里写死 hex；token 只在 `globals.css` 的 `:root` 里定义（**只维护浅色主题，没有 `.dark`**）。**静态叠层（列头、分组条）用 `foreground/[0.0x]`，不要用 `white/[0.0x]`；hover 与选中全应用只有一套 `--row-hover` / `--row-selected`（`--accent` 与 `--row-hover` 同值，菜单/按钮的 `hover:bg-accent` 与列表一致；侧栏 `--nav-hover`/`--nav-selected` 同口径，2026-11-27 起不再单独维护一套蓝。例外：标题栏控件——☰ 账户菜单、折叠/密度/下载/窗口三键——hover 用 `hover:bg-foreground/10`）**：白色叠层在浅色主题下等于没画，用户会反馈"浅色没法用/看着累"（2026-11-22 实测）。配色（2026-11-27 定稿 A 方案：冷中性 + 单一蓝，取代 QQ 浅蓝灰）：外壳 `--background`（Win11 默认标题栏灰）、列表/阅读器画布 `--card`、墨阶 `--foreground` / `--muted-foreground` / `--ink-faint`、结构线 `--border`、表格与行 `--table-line` / `--row-line`、浮面 `--muted`、主色 `--primary`；不要再回到带蓝调的旧外壳或灰蓝交互色。`--background` 同时用于窗口底色（`src/main/index.ts` 的 `backgroundColor` 要跟着改）。
 - 列表与正文都在本地：同步时把正文一并落库（点开不再请求服务器），列表只读 header + snippet；UI 开发期一律用 `fixtures/messages.json` + `lib/mock.ts` 的 fillers（**类型定义在 `lib/message.ts`，mock 只造数据**，业务组件不要从 mock 引类型），不要为了“看着像真的”偷偷接网络。**演示数据只在 dev 构建存在**（`mock.ts` 用 `import.meta.env.DEV` 门控 `folders` / `labels` / `messages` / fillers，Vite 生产构建会常量折叠成空数组并把 fixtures JSON 摇掉）：正式包没有账户时列表显示「还没有配置账户」引导、侧栏不出现「标签」，绝不能出现演示邮件或「已同步 · 1 分钟前」这类假状态。
 - 类名合并用 `cn()`；组件文件一个导出组件 + 局部常量，不用默认导出。
 - **日志**：主进程业务日志统一走 `src/main/log.ts` 的 `logger`（electron-log，落 `%APPDATA%/maildesk/logs/main.log`）；`src/main/sync/*` 已全部改成 `logger.info/warn/error`。例外：`sync/parse.ts` 保持 `console.warn`——它是纯模块，vitest 里不能 import electron。

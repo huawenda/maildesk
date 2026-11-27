@@ -1,7 +1,7 @@
 # MailDesk
 
 Windows 单平台的桌面邮件客户端：**只收信（IMAP，不发信、不碰 SMTP）**，核心目标是可自由重构的 UI。
-产品与设计规格见 [docs/PRD.md](docs/PRD.md)，同步链路细节见 [docs/sync.md](docs/sync.md)，设计 token 与组件规格见 [DESIGN.md](DESIGN.md)，UI 红线见 [docs/design-rules.md](docs/design-rules.md)，踩坑记录见 [docs/pitfalls.md](docs/pitfalls.md)。
+产品与设计规格见 [docs/PRD.md](docs/PRD.md)，同步链路细节见 [docs/sync.md](docs/sync.md)，正文渲染实现见 [docs/rendering.md](docs/rendering.md)，设计 token 与组件规格见 [DESIGN.md](DESIGN.md)，UI 红线见 [docs/design-rules.md](docs/design-rules.md)，踩坑记录见 [docs/pitfalls.md](docs/pitfalls.md)。
 
 ## 已具备的功能
 
@@ -9,7 +9,7 @@ Windows 单平台的桌面邮件客户端：**只收信（IMAP，不发信、不
 - **列表**：紧凑 / 标准 / 宽松三种密度；按日期或体积分组（可切换升降序、折叠、组头吸顶）；未读/已读圆点（紧凑模式可点击切换）、置顶、附件回形针、搜索时多一列所在文件夹。
 - **搜索**：标题栏常驻组合胶囊，范围可选 发件人 / 收件人 / 标题 / 正文，结果直接作为列表数据（跨文件夹），命中关键词高亮。
 - **阅读器**：HTML 正文文本优先渲染（保留源邮件字体、远程图片拦截、引用折叠、失效图片占位、不整页缩放，内嵌截图随同步落库）、纯文本直排；附件双击打开，右键 打开 / 保存 / 保存全部；下载有进度与下载管理面板（可取消、可打开所在文件夹）。
-- **邮件操作**：标已读/未读（含全部已读）、星标、移动到文件夹、删除/永久删除、复原；右键菜单在列表与正文通用；Shift 范围多选、Ctrl+A 全选。
+- **邮件操作**：标已读/未读（含全部已读）、置顶、移动到文件夹、删除/永久删除、复原；右键菜单在列表与正文通用；Shift 范围多选、Ctrl+A 全选。
 - **账户**：多账户并存，自定义 IMAP，测试连接，编辑账户，凭据用 Windows DPAPI 加密。
 - **同步**：连上账户即全量下载到本地 SQLite（首屏 200 封，其余后台补齐），**正文随邮件一起落库，点开不再请求服务器**；IDLE 实时推送 + 60 秒兜底轮询；双向对账（网页端移动/删除/已读都会对齐）。
 - **文件夹选择**：侧栏底部「选择文件夹」可扫描服务器全部目录并勾选；未勾选的不同步、不占侧栏，本地已有邮件保留。
@@ -56,7 +56,7 @@ electron-builder 二进制建议走镜像：
     resources      运行时资源（托盘图标，打包走 extraResources）
     build          打包图标（icon.ico / icon.png）
     fixtures       手写演示邮件，仅 dev 构建使用
-    docs           PRD、同步说明、设计红线、已知坑、图标脚本
+    docs           PRD、同步与渲染说明、设计红线、已知坑、图标脚本
 
 ## 技术栈
 

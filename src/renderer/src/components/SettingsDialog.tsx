@@ -55,7 +55,7 @@ interface SettingsDialogProps {
 /** 设置里的行：左标签 + 说明，右控件。所有行同高，保证纵向节奏一致。 */
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-6 border-b border-border/60 py-3.5 last:border-b-0">
+    <div className="flex items-center justify-between gap-6 border-b border-table-line py-3.5 last:border-b-0">
       <div className="min-w-0">
         <div className="text-[13.5px]">{label}</div>
         {hint ? <div className="mt-0.5 text-[12px] text-muted-foreground">{hint}</div> : null}
@@ -156,7 +156,7 @@ export function SettingsDialog({
         className="h-[540px] w-[720px] max-w-full overflow-hidden p-0"
       >
         <div className="flex min-h-0 flex-1">
-        <div className="flex w-44 shrink-0 flex-col border-r border-border p-2">
+        <div className="flex w-44 shrink-0 flex-col border-r border-table-line p-2">
           <div className="px-2.5 pb-2 pt-1.5 text-[12px] font-medium text-muted-foreground">设置</div>
           {SECTIONS.map((item) => (
             <button
@@ -176,7 +176,7 @@ export function SettingsDialog({
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-5">
+          <div className="flex h-11 shrink-0 items-center justify-between border-b border-table-line px-5">
             <DialogTitle className="text-[13px] font-medium">
               {SECTIONS.find((s) => s.id === section)?.label}
             </DialogTitle>

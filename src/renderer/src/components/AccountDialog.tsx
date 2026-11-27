@@ -152,7 +152,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent aria-describedby={undefined}>
-          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-4">
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-table-line px-4">
             {view === "form" && accounts.length > 0 ? (
               <button
                 onClick={() => {
@@ -321,7 +321,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
           <OverlayScrollbar target={bodyRef} />
 
           {view === "form" ? (
-            <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-3">
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t border-table-line px-4 py-3">
               {accounts.length > 0 ? (
                 <button
                   onClick={() => {

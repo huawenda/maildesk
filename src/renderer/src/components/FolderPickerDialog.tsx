@@ -139,7 +139,7 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(620px,calc(100vw-48px))]">
-        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-table-line px-4">
           <DialogTitle>选择文件夹</DialogTitle>
           <span className="text-[11.5px] text-muted-foreground">
             勾选的文件夹会显示在侧栏并参与同步
@@ -149,7 +149,7 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
           </kbd>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
+        <div className="flex shrink-0 items-center gap-2 border-b border-table-line px-4 py-2.5">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -232,7 +232,7 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
         </div>
         <OverlayScrollbar target={listRef} />
 
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-table-line px-4 py-3">
           <span className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-muted-foreground">
             {note ?? `已选 ${selected.size} 个文件夹；未勾选的不同步，本地已有的邮件会保留`}
           </span>

@@ -145,7 +145,7 @@ function AccountCard({
   const progress = account.progress
   const bodies = account.bodies
   return (
-    <section className="border-b border-border px-4 py-3 last:border-b-0">
+    <section className="border-b border-table-line px-4 py-3 last:border-b-0">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -434,7 +434,7 @@ export function SyncStatusDialog({ open, onOpenChange, events, folderLabel }: Sy
           所有账户的连接状态、文件夹同步进度、定时器与最近事件。
         </DialogDescription>
 
-        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4 pr-10">
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-table-line px-4 pr-10">
           <span className="text-[13.5px] font-medium">同步状态</span>
           <span className="truncate text-[11.5px] text-muted-foreground">{summary}</span>
           <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -466,7 +466,7 @@ export function SyncStatusDialog({ open, onOpenChange, events, folderLabel }: Sy
           ) : null}
 
           {accounts.length === 0 ? (
-            <div className="flex h-40 shrink-0 flex-col items-center justify-center gap-1 border-b border-border text-[12.5px] text-muted-foreground">
+            <div className="flex h-40 shrink-0 flex-col items-center justify-center gap-1 border-b border-table-line text-[12.5px] text-muted-foreground">
               <span>还没有配置账户</span>
               <span className="text-[11.5px]">在侧栏底部「设置 → 账户」里添加 IMAP 账户</span>
             </div>
@@ -480,7 +480,7 @@ export function SyncStatusDialog({ open, onOpenChange, events, folderLabel }: Sy
           <OverlayScrollbar target={accountsRef} />
 
           <section className="flex min-h-0 flex-1 flex-col">
-            <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 pb-2 pt-3">
+            <div className="flex shrink-0 items-center gap-2 border-b border-table-line px-4 pb-2 pt-3">
               <span className="text-[12px] font-medium">最近事件</span>
               <span className="text-[11px] text-muted-foreground">仅本次会话，最多 200 条</span>
             </div>
@@ -508,7 +508,7 @@ export function SyncStatusDialog({ open, onOpenChange, events, folderLabel }: Sy
           </section>
         </div>
 
-        <div className="flex h-9 shrink-0 items-center gap-2 border-t border-border px-4 text-[11px] text-muted-foreground">
+        <div className="flex h-9 shrink-0 items-center gap-2 border-t border-table-line px-4 text-[11px] text-muted-foreground">
           <span className="truncate" title={logPath}>
             {logPath ? `日志 ${logPath}` : "日志路径读取中…"}
           </span>

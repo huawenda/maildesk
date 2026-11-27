@@ -82,6 +82,11 @@ const folderStatusLabel = (folder: AccountSyncSnapshot["folders"][number]): stri
   return folder.enabled ? "待同步" : "未启用"
 }
 
+/** 表格的几何常量：容器高度按「表头 + 整数行」算，滚到底不会露出半行（2026-11-27 用户要求） */
+const ROW_HEIGHT = 27
+const HEADER_HEIGHT = 29
+const VISIBLE_ROWS = 11
+
 function FolderTable({
   account,
   folderLabel
@@ -90,37 +95,44 @@ function FolderTable({
   folderLabel: (path: string) => string
 }) {
   const folders = account.folders.filter((folder) => folder.enabled)
+  // 文件夹多时在表格内部滚（表头吸顶），别把整个「同步状态」弹窗顶长（2026-11-27 用户要求）
+  const tableRef = useRef<HTMLDivElement>(null)
   if (folders.length === 0) {
     return <div className="mt-2 rounded-md bg-muted/50 px-3 py-2 text-[11.5px] text-muted-foreground">没有启用的文件夹</div>
   }
   return (
-    <div className="mt-2 overflow-hidden rounded-md border border-table-line">
+    <div
+      ref={tableRef}
+      className="scrollbar-overlay mt-2 overflow-y-auto rounded-md border border-table-line"
+      style={{ maxHeight: HEADER_HEIGHT + VISIBLE_ROWS * ROW_HEIGHT + 2 }}
+    >
       <table className="w-full table-fixed border-collapse text-[11.5px]">
-        <thead className="bg-foreground/[0.03] text-muted-foreground">
+        {/* 吸顶表头必须用不透明底色，否则滚动时下面的行会透出来；用 shell 的 --background 保留灰底（bg-card 是白色，等于没有底色） */}
+        <thead className="sticky top-0 z-10 bg-background text-muted-foreground">
           <tr>
-            <th className="px-2 py-1 text-left font-medium">文件夹</th>
-            <th className="w-14 px-2 py-1 text-right font-medium">本地</th>
-            <th className="w-14 px-2 py-1 text-right font-medium">服务端</th>
-            <th className="w-12 px-2 py-1 text-right font-medium">未读</th>
-            <th className="w-20 px-2 py-1 text-left font-medium">回溯</th>
-            <th className="w-20 px-2 py-1 text-left font-medium">状态</th>
+            <th className="h-7 px-2 text-left align-middle font-medium leading-7">文件夹</th>
+            <th className="h-7 w-14 px-2 text-right align-middle font-medium leading-7">本地</th>
+            <th className="h-7 w-14 px-2 text-right align-middle font-medium leading-7">服务端</th>
+            <th className="h-7 w-12 px-2 text-right align-middle font-medium leading-7">未读</th>
+            <th className="h-7 w-20 px-2 text-left align-middle font-medium leading-7">回溯</th>
+            <th className="h-7 w-20 px-2 text-left align-middle font-medium leading-7">状态</th>
           </tr>
         </thead>
         <tbody>
           {folders.map((folder) => (
             <tr key={folder.id} className="border-t border-table-line">
-              <td className="truncate px-2 py-1" title={folder.path}>
+              <td className="h-[26px] truncate px-2 align-middle leading-[26px]" title={folder.path}>
                 {folderLabel(folder.path) || folder.name}
               </td>
-              <td className="px-2 py-1 text-right tabular-nums">{folder.localCount}</td>
-              <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">
+              <td className="h-[26px] px-2 text-right align-middle tabular-nums leading-[26px]">{folder.localCount}</td>
+              <td className="h-[26px] px-2 text-right align-middle tabular-nums leading-[26px] text-muted-foreground">
                 {folder.serverCount ?? "—"}
               </td>
-              <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">{folder.unreadCount}</td>
-              <td className="px-2 py-1 tabular-nums text-muted-foreground">{folderBackfillLabel(folder)}</td>
+              <td className="h-[26px] px-2 text-right align-middle tabular-nums leading-[26px] text-muted-foreground">{folder.unreadCount}</td>
+              <td className="h-[26px] px-2 align-middle tabular-nums leading-[26px] text-muted-foreground">{folderBackfillLabel(folder)}</td>
               <td
                 className={cn(
-                  "truncate px-2 py-1",
+                  "h-[26px] truncate px-2 align-middle leading-[26px]",
                   folder.busy ? "text-primary" : "text-muted-foreground"
                 )}
               >
@@ -130,6 +142,7 @@ function FolderTable({
           ))}
         </tbody>
       </table>
+      <OverlayScrollbar target={tableRef} />
     </div>
   )
 }
@@ -145,7 +158,7 @@ function AccountCard({
   const progress = account.progress
   const bodies = account.bodies
   return (
-    <section className="border-b border-table-line px-4 py-3 last:border-b-0">
+    <section className="border-b border-table-line px-4 pb-2 pt-3 last:border-b-0">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -471,7 +484,7 @@ export function SyncStatusDialog({ open, onOpenChange, events, folderLabel }: Sy
               <span className="text-[11.5px]">在侧栏底部「设置 → 账户」里添加 IMAP 账户</span>
             </div>
           ) : (
-            <div ref={accountsRef} className="scrollbar-overlay max-h-[52%] min-h-0 shrink-0 overflow-y-auto">
+            <div ref={accountsRef} className="scrollbar-overlay max-h-[66%] min-h-0 shrink-0 overflow-y-auto">
               {accounts.map((account) => (
                 <AccountCard key={account.accountId} account={account} folderLabel={folderLabel} />
               ))}
@@ -480,7 +493,7 @@ export function SyncStatusDialog({ open, onOpenChange, events, folderLabel }: Sy
           <OverlayScrollbar target={accountsRef} />
 
           <section className="flex min-h-0 flex-1 flex-col">
-            <div className="flex shrink-0 items-center gap-2 border-b border-table-line px-4 pb-2 pt-3">
+            <div className="flex shrink-0 items-center gap-2 border-b border-table-line px-4 pb-2 pt-1.5">
               <span className="text-[12px] font-medium">最近事件</span>
               <span className="text-[11px] text-muted-foreground">仅本次会话，最多 200 条</span>
             </div>

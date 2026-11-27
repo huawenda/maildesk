@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type Ref } from "react"
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type Ref } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { CaretDown, CaretUp, CaretRight, Tray, CircleNotch, Paperclip } from "@phosphor-icons/react"
 import { avatarColor, formatCompactTime, formatListTime, initials } from "@/lib/format"
@@ -238,6 +238,10 @@ interface MessageListProps {
   width: number
   /** 挂到列表根节点上：拖动分隔线时 App 直接改它的 style.width，避免整棵树每帧重渲染 */
   paneRef?: Ref<HTMLElement>
+  /** 邮件页签模式下列表会被卸载：切回文件夹时用这个值把滚动位置还回去（2026-11-27） */
+  initialScrollTop?: number
+  /** 每次滚动把 scrollTop 报给 App 存在 ref 里（不 setState，滚动期间不触发渲染） */
+  onScrollOffset?: (top: number) => void
 }
 
 export function MessageList({
@@ -272,7 +276,9 @@ export function MessageList({
   highlightScope,
   loading,
   width,
-  paneRef
+  paneRef,
+  initialScrollTop = 0,
+  onScrollOffset
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   // 紧凑视图里被收起的分组（存组 key，如 group-today），按文件夹分别记：来回切文件夹时各自的折叠状态还在
@@ -298,11 +304,40 @@ export function MessageList({
   // 多选集合：行底色不看 selectedId（活动行），否则 Ctrl+A 只会亮一行
   const selectedSet = useMemo(() => new Set(selectedIds ?? []), [selectedIds])
 
-  // 换文件夹或换过滤条件才回到顶部；不能依赖 messages[0].id —— 删掉第一封也会变，
-  // 那样每删一封列表就跳回顶部（用户实测反馈）。折叠状态不在这里清，按文件夹各记各的
+  // 滚动位置要跨「邮件页签 ↔ 文件夹页签」保留：页签模式下列表被卸载，scrollTop 会丢。
+  // 这里只把值报给 App 存进 ref（不 setState），滚动过程中不触发渲染。
+  const onScrollOffsetRef = useRef(onScrollOffset)
+  onScrollOffsetRef.current = onScrollOffset
   useEffect(() => {
+    const element = scrollRef.current
+    if (!element) return
+    const report = () => onScrollOffsetRef.current?.(element.scrollTop)
+    element.addEventListener("scroll", report, { passive: true })
+    return () => element.removeEventListener("scroll", report)
+  }, [])
+
+  // 换文件夹 / 换过滤条件回到顶部；不能依赖 messages[0].id —— 删掉第一封也会变，
+  // 那样每删一封列表就跳回顶部（用户实测反馈）。折叠状态不在这里清，按文件夹各记各的
+  useLayoutEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
   }, [folderId, resetKey])
+
+  // 挂载时（从邮件页签切回文件夹）还原上次的滚动位置：页签模式下列表被卸载，scrollTop 会丢。
+  // 必须排在「回到顶部」之后、用 layout effect 先定位再绘制，否则会先闪一帧顶部。
+  const initialScrollRef = useRef(initialScrollTop)
+  initialScrollRef.current = initialScrollTop
+  useLayoutEffect(() => {
+    const top = initialScrollRef.current
+    const element = scrollRef.current
+    if (!element || top <= 0) return
+    element.scrollTop = top
+    // 虚拟列表挂载后还会按测量结果校正一次，下一帧再兜一次
+    const id = requestAnimationFrame(() => {
+      if (element.isConnected && Math.abs(element.scrollTop - top) > 1) element.scrollTop = top
+    })
+    return () => cancelAnimationFrame(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 紧凑视图列宽：发件人 / 日期 / 大小 / 文件夹（搜索时）可拖动列分隔线调整，双击恢复默认
   const [cols, setCols] = useState<CompactCols>(readCompactCols)
@@ -505,7 +540,13 @@ export function MessageList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rowHeight])
 
+  // 挂载时不再「滚动到选中项」：位置已经在上面的 layout effect 里定好了，
+  // 再滚一次会把用户原来那一屏顶掉（从邮件页签切回列表时选中项常常早就滚出视野）。
+  const prevSelectedRef = useRef<string | null>(null)
   useEffect(() => {
+    const previous = prevSelectedRef.current
+    prevSelectedRef.current = selectedId
+    if (previous === null) return
     const index = rows.findIndex((item) => item.kind === "message" && item.message.id === selectedId)
     if (index >= 0) virtualizer.scrollToIndex(index, { align: "auto" })
     // 选中项变化时才滚动，避免每次渲染都强制归位

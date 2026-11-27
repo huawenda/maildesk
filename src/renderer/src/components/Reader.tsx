@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type UIEvent } from "react"
+import { Fragment, useEffect, useRef, useState, type UIEvent } from "react"
 import { CaretDown, DownloadSimple, FileArchive, FileImage, FileXls, FileText, Files, FolderSimple, Envelope, EnvelopeOpen, SidebarSimple, ArrowSquareOut, PushPin, Trash } from "@phosphor-icons/react"
 import { Check, CircleNotch, X } from "@phosphor-icons/react"
 import {
@@ -6,6 +6,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import {
@@ -61,12 +62,14 @@ interface ReaderProps {
   onRestore?: (id: string) => void
   /** 抽屉里点某封邮件时跳过去（App 负责切文件夹、选中、标已读） */
   onNavigate: (message: Message) => void
-  /** 「移动到」菜单里的目标文件夹（已排除容器与当前文件夹） */
-  moveTargets: { id: string; label: string }[]
+  /** 「移动到」菜单里的目标文件夹（已排除容器与当前文件夹）；dividerBefore 用来在系统/自建文件夹之间画分隔线 */
+  moveTargets: { id: string; label: string; dividerBefore?: boolean }[]
   onMove: (folderId: string) => void
   onDelete: () => void
   /** 在垃圾箱里是永久删除，其余是「移到垃圾箱」 */
   permanentDelete: boolean
+  /** 邮件页签模式（2026-11-27）：正文独占整块画布时放开 900px 版心，按窗口宽度排版 */
+  wideBody?: boolean
 }
 
 type SaveState = "saving" | "saved" | "error"
@@ -85,7 +88,8 @@ export function Reader({
   moveTargets,
   onMove,
   onDelete,
-  permanentDelete
+  permanentDelete,
+  wideBody = false
 }: ReaderProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
   // 正文纵向滚动条：静止时隐藏，滚动后 700ms 内显示（样式见 globals.css 的 scrollbar-native）
@@ -387,7 +391,12 @@ export function Reader({
                             <FolderSimple className="size-4" />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56">
+                        {/* 高度跟随内容：不加 max-height / 内滚动（2026-11-27 用户要求） */}
+                        <DropdownMenuContent
+                          align="end"
+                          className="w-56"
+                          style={{ maxHeight: "none", overflowY: "visible" }}
+                        >
                           <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
                             移动到
                           </DropdownMenuLabel>
@@ -395,9 +404,12 @@ export function Reader({
                             <DropdownMenuItem disabled>没有其他文件夹</DropdownMenuItem>
                           ) : (
                             moveTargets.map((folder) => (
-                              <DropdownMenuItem key={folder.id} onSelect={() => onMove(folder.id)}>
-                                {folder.label}
-                              </DropdownMenuItem>
+                              <Fragment key={folder.id}>
+                                {folder.dividerBefore ? <DropdownMenuSeparator /> : null}
+                                <DropdownMenuItem onSelect={() => onMove(folder.id)}>
+                                  {folder.label}
+                                </DropdownMenuItem>
+                              </Fragment>
                             ))
                           )}
                         </DropdownMenuContent>
@@ -472,7 +484,7 @@ export function Reader({
                 // 文本优先：正文直接落在画布上，不再套「印刷品」白纸卡片，也不整页缩放。
                 // 邮件自己的浅色底/底图仍然保留，深色主题下由 HtmlBody 做一次对比度兜底。
                 // 直角矩形容器标出正文范围（用户 2026-11-24，无边框、左右边距由 article 的 px-6 控制）
-                <div className="w-full max-w-[900px] flex-1 pb-5 pt-4">
+                <div className={cn("w-full flex-1 pb-5 pt-4", wideBody ? null : "max-w-[900px]")}>
                   <HtmlBody
                     key={message.id}
                     html={message.bodyHtml}
@@ -495,7 +507,7 @@ export function Reader({
               ) : (
                 // 纯文本没有自带底色，直接落在阅读画布上：卡片在邮件语义里是附件/附属块，
                 // 正文套卡片会造成双重内边距，浅色下还会灰叠灰（用户 2026-11-22 反馈）
-                <div className="w-full max-w-[900px] flex-1 pb-5 pt-4">
+                <div className={cn("w-full flex-1 pb-5 pt-4", wideBody ? null : "max-w-[900px]")}>
                   <div className="max-w-[76ch] space-y-4 leading-[1.75] text-foreground/90" style={{ fontSize }}>
                     {message.body.map((paragraph, index) => (
                       <PlainBodyBlock key={index} text={paragraph} />
@@ -572,12 +584,22 @@ export function Reader({
                   >
                     <div className="flex items-center gap-2">
                       {item.unread ? <span className="size-1.5 shrink-0 rounded-full bg-primary" /> : null}
-                      <span className={cn("truncate text-[12.5px]", item.unread ? "font-semibold" : "font-medium")}>
+                      <span
+                        className={cn(
+                          "truncate text-[12.5px]",
+                          item.unread ? "font-semibold text-foreground" : "font-medium text-ink-read"
+                        )}
+                      >
                         {item.subject || "（无主题）"}
                       </span>
                     </div>
-                    {/* 抽屉里不再显示正文摘要，改为完整时间（yyyy年M月d日 周X HH:mm） */}
-                    <div className="text-[11px] tabular-nums text-muted-foreground">
+                    {/* 抽屉里不再显示正文摘要，改为完整时间（yyyy年M月d日 周X HH:mm）；已读整行压暗一档，与列表一致 */}
+                    <div
+                      className={cn(
+                        "text-[11px] tabular-nums",
+                        item.unread ? "text-muted-foreground" : "text-ink-faint"
+                      )}
+                    >
                       {formatFullTime(item.date)}
                     </div>
                   </button>

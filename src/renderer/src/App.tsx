@@ -52,6 +52,8 @@ const describeError = (error: unknown): string => {
 /** 列表宽度：PRD 4.1 定的可拖范围 */
 const LIST_MIN = 320
 const LIST_DEFAULT = 380
+/** 侧栏宽度：白卡左边距、gap 宽度、面板宽度都用它 */
+const SIDEBAR_WIDTH = 220
 // 上限跟着窗口走：最多占窗口宽度的一半，窗口放大后列表也能跟着拉宽
 const listMaxWidth = (viewport: number) => Math.max(LIST_MIN, Math.floor(viewport / 2))
 const clampListWidth = (value: number, viewport: number) =>
@@ -137,6 +139,8 @@ export default function App() {
   const [openTabs, setOpenTabs] = useState<Message[]>([])
   const [activeTab, setActiveTab] = useState<string>("folder")
   const [detail, setDetail] = useState<Message | null>(null)
+  // 列表滚动位置：页签模式下列表被卸载，切回文件夹页签时用它把位置还原（不触发渲染）
+  const listScrollRef = useRef(0)
   // 标题栏常驻搜索：query 为空的列表就是当前文件夹；有 query 时列表换成跨文件夹的搜索结果
   const [searchQuery, setSearchQuery] = useState("")
   const [searchScope, setSearchScope] = useState<SearchScope>("from")
@@ -144,6 +148,37 @@ export default function App() {
   const [searchFocusToken, setSearchFocusToken] = useState(0)
   const [density, setDensity] = useState<Density>(() => readStored("maildesk.density", "standard"))
   const [collapsed, setCollapsed] = useState<boolean>(() => readStored("maildesk.sidebarCollapsed", false))
+  // 侧栏：**始终绝对定位**的面板 + 一个只占位的 gap。
+  // 面板靠 transform 滑入滑出（合成器动画，列表一帧都不重绘）；gap 的宽度 = 侧栏是否占位，
+  // 停靠/展开时 gap 从 0 过渡到 220，画布就是被它推向右的。
+  // 参考 shadcn 的 Peek & Pin（gap + absolute panel）与 OpenCode 的 sidebar-peek。
+  const [sidebarPeek, setSidebarPeek] = useState(false)
+  const peekTimer = useRef<number | null>(null)
+  const cancelPeekClose = useCallback(() => {
+    if (peekTimer.current !== null) {
+      window.clearTimeout(peekTimer.current)
+      peekTimer.current = null
+    }
+  }, [])
+  const openSidebarPeek = useCallback(() => {
+    if (!collapsed) return
+    cancelPeekClose()
+    setSidebarPeek(true)
+  }, [cancelPeekClose, collapsed])
+  // 按钮和面板之间隔着标题栏，移出按钮不能立刻收：留 180ms 让指针走进面板
+  const closeSidebarPeekSoon = useCallback(() => {
+    cancelPeekClose()
+    peekTimer.current = window.setTimeout(() => {
+      peekTimer.current = null
+      setSidebarPeek(false)
+    }, 180)
+  }, [cancelPeekClose])
+  useEffect(() => {
+    if (collapsed) return
+    cancelPeekClose()
+    setSidebarPeek(false)
+  }, [collapsed, cancelPeekClose])
+  useEffect(() => () => cancelPeekClose(), [cancelPeekClose])
   const [fontSize, setFontSize] = useState<number>(() => readStored("maildesk.fontSize", 14))
   const [listWidth, setListWidth] = useState<number>(() =>
     clampListWidth(readStored("maildesk.listWidth", LIST_DEFAULT), window.innerWidth)
@@ -624,13 +659,17 @@ export default function App() {
   }, [])
 
   // 「移动到」菜单：复用侧栏命名（收件箱/草稿箱/已发送…），排除 Noselect 容器与当前文件夹
-  const moveTargets = useMemo(
-    () =>
-      navList
-        .filter((item) => item.selectable && item.id !== folderId)
-        .map((item) => ({ id: item.id, label: item.label })),
-    [navList, folderId]
-  )
+  // 移动到…菜单的候选：只列可选文件夹（容器 / 草稿箱 / 已发送等照旧排除 Noselect 与当前文件夹）；
+  // 默认（系统）文件夹与自建文件夹之间插一道分隔线（2026-11-27 用户要求）
+  const moveTargets = useMemo(() => {
+    const customIds = new Set(liveFolders.filter((folder) => folder.role === null).map((folder) => folder.id))
+    const targets: { id: string; label: string; dividerBefore?: boolean }[] = navList
+      .filter((item) => item.selectable && item.id !== folderId)
+      .map((item) => ({ id: item.id, label: item.label }))
+    const boundary = targets.findIndex((item) => customIds.has(item.id))
+    if (boundary > 0) targets[boundary] = { ...targets[boundary], dividerBefore: true }
+    return targets
+  }, [navList, folderId, liveFolders])
 
   // 「标为垃圾邮件」的目标：当前就在垃圾箱时不显示这一项
   const junkFolderId = useMemo(() => {
@@ -979,17 +1018,22 @@ export default function App() {
     window.addEventListener("blur", finish)
   }
 
-  // 侧栏收起/展开是 200ms 的宽度动画，期间正文宽度每帧都在变：先冻结测量，结束后补量一次
+  // 侧栏展开/收起是 200ms 的宽度动画（动的是 gap，不是面板），期间正文宽度每帧都在变：先冻结测量，结束后补量一次
   const sidebarTimer = useRef<number | null>(null)
   const toggleSidebar = useCallback(() => {
     setDragging(true)
-    setCollapsed((value) => !value)
     if (sidebarTimer.current) window.clearTimeout(sidebarTimer.current)
     sidebarTimer.current = window.setTimeout(() => {
       sidebarTimer.current = null
       setDragging(false)
     }, 260)
-  }, [])
+
+    // 抽屉开着时点按钮 = 停靠：面板原地不动（transform 一直是 0），只让 gap 从 0 长到 220，
+    // 画布因此向右让位；露出抽屉的那一帧就已经是最终位置，没有交接、没有二次移动（2026-11-27）
+    cancelPeekClose()
+    setSidebarPeek(false)
+    setCollapsed((value) => !value)
+  }, [cancelPeekClose])
 
   useEffect(
     () => () => {
@@ -1045,10 +1089,21 @@ export default function App() {
     setActiveTab("folder")
   }, [folderId, searchActive, activeLabel])
 
-  // 列表栏与邮件标签共用同一个阅读器：邮件标签模式下让正文独占整块画布
-  const readerFor = (message: Message | null) => (
+  // 列表滚动位置只对「同一个列表」有效：换箱 / 换搜索时清零，避免把上一箱的位置带到新列表上
+  // （在 render 期比这里做，MessageList 才能在同一次渲染里拿到正确的 initialScrollTop）
+  const listKey = `${folderId}|${activeLabel ?? ""}|${searchActive ? "search" : "folder"}`
+  const listKeyRef = useRef(listKey)
+  if (listKeyRef.current !== listKey) {
+    listKeyRef.current = listKey
+    listScrollRef.current = 0
+  }
+
+  // 列表栏与邮件标签共用同一个阅读器：邮件标签模式下让正文独占整块画布，
+  // 并把 900px 版心放开（宽版正文），换来的才是「双击真的看到更多宽度」
+  const readerFor = (message: Message | null, wideBody = false) => (
     <Reader
       message={message}
+      wideBody={wideBody}
       fontSize={fontSize}
       remoteImages={remoteImages}
       onToggleStar={() => message && toggleStar(message.id)}
@@ -1082,6 +1137,7 @@ export default function App() {
         onManageAccounts={() => setAccountsOpen(true)}
         collapsed={collapsed}
         onToggleCollapsed={toggleSidebar}
+        onHoverCollapsed={(hovering) => (hovering ? openSidebarPeek() : closeSidebarPeekSoon())}
         searchQuery={searchQuery}
         onSearchQueryChange={setSearchQuery}
         searchScope={searchScope}
@@ -1090,14 +1146,28 @@ export default function App() {
         density={density}
         onDensityChange={setDensity}
       />
-      <div className="flex min-h-0 flex-1">
-        {/* 侧栏不卸载、只把宽度收成 0：这样收起/展开才有动效，内部也不重排（内容始终 220 宽） */}
+      <div className="relative flex min-h-0 flex-1">
+        {/* 侧栏 = gap（只占位）+ 绝对定位面板（2026-11-27，对齐 shadcn Peek & Pin / OpenCode）：
+            · peek 时 gap 保持 0、面板用 transform 滑入 → 画布一帧都不动；
+            · 停靠/收起时动的是 gap 的宽度 → 画布右移/左移；
+            · 面板始终是同一个 Sidebar 实例，不卸载，文件夹折叠状态与滚动位置都不会丢。 */}
+        <div
+          aria-hidden="true"
+          className="shrink-0 transition-[width] duration-200 ease-out motion-reduce:transition-none"
+          style={{ width: collapsed ? 0 : SIDEBAR_WIDTH }}
+        />
         <div
           className={cn(
-            "shrink-0 overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none",
-            collapsed ? "w-0" : "w-[220px]"
+            "absolute inset-y-0 left-0 z-30 w-[220px] overflow-hidden bg-background",
+            "transition-transform duration-200 ease-out motion-reduce:transition-none",
+            collapsed && !sidebarPeek ? "-translate-x-full pointer-events-none" : "translate-x-0",
+            // 只有浮层态自己画描边和投影：展开时画布左侧那 1px 由画布自己的边框提供，画两条会变成 2px。
+            // 上边那道线让抽屉和标题栏分开，同时接上画布顶边那根线（2026-11-27 用户要求）。
+            collapsed && sidebarPeek && "border-t border-r border-border elevation-menu"
           )}
-          inert={collapsed}
+          inert={collapsed && !sidebarPeek}
+          onMouseEnter={cancelPeekClose}
+          onMouseLeave={closeSidebarPeekSoon}
         >
           <Sidebar
             onOpenSettings={() => setSettingsOpen(true)}
@@ -1116,18 +1186,24 @@ export default function App() {
               return liveFolders.find((folder) => folder.id === id)?.totalCount ?? 0
             }}
             countMode={folderCount}
-            onSelectFolder={switchFolder}
+            onSelectFolder={(id) => {
+              switchFolder(id)
+              // 抽屉式侧栏里选完箱子就收回去，别挡着列表（2026-11-27）
+              if (collapsed) setSidebarPeek(false)
+            }}
             onManageFolders={() => setFolderPickerOpen(true)}
             onSelectLabel={(label) => {
               setActiveLabel((current) => (current === label ? null : label))
               setSearchQuery("")
               setSelectedId(null)
+              if (collapsed) setSidebarPeek(false)
             }}
             showLabels={!live}
             syncing={syncing}
             syncLabel={syncLabel}
             onSync={runSync}
             onOpenSyncStatus={() => setSyncStatusOpen(true)}
+            showScrollbar={!collapsed}
           />
         </div>
         {/* 画布区（列表 + 阅读器）：白卡贴住窗口右、下、左三条边（2026-11-27 用户要求边距全部收成 0），
@@ -1135,7 +1211,9 @@ export default function App() {
             收起时左边贴窗口，四角都取直角 */}
         <div
           className={cn(
-            "mb-0 ml-0 mr-0 mt-0 flex min-w-0 flex-1 flex-col overflow-hidden border border-border bg-card",
+            "mb-0 ml-0 mr-0 mt-0 flex min-w-0 flex-1 flex-col overflow-hidden border-t border-border bg-card",
+            // 展开态要有左边框把画布和侧栏分开（收起到贴窗口时不要，窗口边框本身就是边界）
+            !collapsed && "border-l border-border",
             collapsed ? "rounded-none" : "rounded-tl-lg"
           )}
         >
@@ -1155,7 +1233,7 @@ export default function App() {
             onClose={closeTab}
           />
           {activeMessage ? (
-            <div className="flex min-h-0 flex-1">{readerFor(activeMessage)}</div>
+            <div className="flex min-h-0 flex-1">{readerFor(activeMessage, true)}</div>
           ) : (
             <div className="flex min-h-0 flex-1">
               <MessageList
@@ -1194,6 +1272,10 @@ export default function App() {
                 loading={loading}
                 width={listWidth}
                 paneRef={listPaneRef}
+                initialScrollTop={listScrollRef.current}
+                onScrollOffset={(top) => {
+                  listScrollRef.current = top
+                }}
               />
               {/* 1px 分隔线本身就是拖拽把手：5px 命中区，跨在两栏边界上 */}
               <div

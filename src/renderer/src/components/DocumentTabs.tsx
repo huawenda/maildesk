@@ -68,9 +68,9 @@ export function DocumentTabs({
               key={tab.id}
               ref={isActive ? activeRef : undefined}
               className={cn(
-                "group flex h-7 w-[200px] shrink-0 items-center rounded-md transition-colors",
+                "group relative flex h-7 w-[200px] shrink-0 items-center rounded-md transition-colors",
                 isActive
-                  ? "bg-card ring-1 ring-border shadow-[0_1px_2px_rgba(16,24,40,0.06)]"
+                  ? "bg-card ring-1 ring-foreground/15 shadow-[0_1px_2px_rgba(16,24,40,0.08),0_6px_16px_-10px_rgba(16,24,40,0.35)]"
                   : "bg-background hover:bg-foreground/[0.05]"
               )}
             >
@@ -88,11 +88,11 @@ export function DocumentTabs({
                 className={cn(
                   "flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pl-2 text-left text-[12.5px] transition-colors",
                   tab.closable ? "pr-1" : "pr-2",
-                  isActive ? "font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+                  isActive ? "font-bold text-foreground" : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 <Icon
-                  className={cn("size-3.5 shrink-0", isActive ? "text-primary/80" : "text-muted-foreground/70")}
+                  className={cn("size-3.5 shrink-0", isActive ? "text-primary" : "text-muted-foreground/70")}
                 />
                 <span className="truncate">{tab.label}</span>
               </button>

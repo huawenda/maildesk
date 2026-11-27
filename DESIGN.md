@@ -147,7 +147,7 @@ components:
     backgroundColor: "{colors.background}"
     width: "{spacing.sidebar}"
     padding: "10px"
-    note: 收起时不保留图标栏，整块宽度收成 0（200ms），画布吃掉空间
+    note: 收起时不保留图标栏，整块宽度收成 0（200ms），画布吃掉空间；默认（系统）文件夹与自建文件夹之间有一道 1px `{colors.border}` 分隔线（左右内缩 8px，无自建文件夹时不画）
   sidebar-item:
     backgroundColor: transparent
     textColor: "{colors.foreground}"
@@ -175,7 +175,7 @@ components:
     backgroundColor: "{colors.card}"
     rounded: "top-left {rounded.lg}（侧栏展开）/ none（侧栏收起）"   # 右上、右下始终直角
     margin: "0"                # 四边全贴窗口/侧栏/标题栏（2026-11-27 从 7px 收成 0）
-    border: "1px {colors.border}"
+    border: "上边 1px {colors.border}；左边仅展开时 1px（收起贴窗口不画）；右/下不画（2026-11-27）"
     shadow: none
   list-filter-tab:
     backgroundColor: transparent
@@ -185,6 +185,20 @@ components:
     rounded: "{rounded.md}"
     padding: "0 10px"
     active: "background {colors.row-hover}, text {colors.foreground}"
+  document-tab:
+    backgroundColor: "{colors.background}"        # 未选中：与标题栏同色
+    textColor: "{colors.muted-foreground}"
+    fontWeight: 400
+    height: 28px
+    width: 200px
+    rounded: "{rounded.md}"
+  document-tab-active:
+    backgroundColor: "{colors.card}"
+    textColor: "{colors.foreground}"
+    fontWeight: 700                                # 2026-11-27 选中加粗
+    border: "1px {colors.foreground}/15"
+    shadow: "0 1px 2px {rgba(16,24,40,.08)} + 0 6px 16px -10px {rgba(16,24,40,.35)}"
+    note: 不加主色下划线（试过，用户要求去掉）
   list-column-header:
     backgroundColor: "{colors.foreground}/[0.05]"
     textColor: "{colors.muted-foreground}"
@@ -274,13 +288,13 @@ components:
   button-secondary:
     backgroundColor: transparent
     textColor: "{colors.foreground}"
-    border: "1px {colors.border}"
+    border: "上边 1px {colors.border}；左边仅展开时 1px（收起贴窗口不画）；右/下不画（2026-11-27）"
     height: 32px
     rounded: "{rounded.md}"
     hover: "background {colors.accent}"
   dialog:
     backgroundColor: "{colors.popover}"
-    border: "1px {colors.border}"
+    border: "上边 1px {colors.border}；左边仅展开时 1px（收起贴窗口不画）；右/下不画（2026-11-27）"
     rounded: "{rounded.xl}"
     width: "min(560px, 100vw - 48px)"
     maxHeight: "86vh"
@@ -290,14 +304,14 @@ components:
     overlay: "完全透明，只接「点外部关闭」，不加暗色、不做 blur"
   dropdown-menu:
     backgroundColor: "{colors.popover}"
-    border: "1px {colors.border}"
+    border: "上边 1px {colors.border}；左边仅展开时 1px（收起贴窗口不画）；右/下不画（2026-11-27）"
     rounded: "{rounded.md}"
     shadow: "elevation-menu"
     fontSize: 13px
     note: 菜单项 hover 用 {colors.accent}
   popover:
     backgroundColor: "{colors.popover}"
-    border: "1px {colors.border}"
+    border: "上边 1px {colors.border}；左边仅展开时 1px（收起贴窗口不画）；右/下不画（2026-11-27）"
     rounded: "{rounded.md}"
     padding: 16px
     shadow: "elevation-menu"
@@ -379,7 +393,7 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 
 ## Layout
 
-- **三栏固定结构**：侧栏 220 / 列表 380（可拖 320 ~ 窗口宽度一半，上限随窗口缩放）/ 阅读器吃掉剩余宽度，正文容器 `max-w-[900px]` 且不居中。
+- **三栏固定结构**：侧栏 220 / 列表 380（可拖 320 ~ 窗口宽度一半，上限随窗口缩放）/ 阅读器吃掉剩余宽度，正文容器 `max-w-[900px]` 且不居中（双击进入邮件页签后放开这条上限，正文按画布宽度 − 48 排版）。
 - **标题栏 36px**（`h-9`，2026-11-27 从 44px 减小），自绘（`frame: false`），整条同色、无下边框。从左到右：☰ 账户菜单 → 侧栏开关 → 密度 →（中段搜索胶囊 `absolute left-1/2`）→ 下载 → 窗口三键。标题栏里不放列表标题、未读数，也不把列表分隔线延伸上来。
 - **侧栏可整块收起**：宽度 220 → 0（200ms），内容保持 220 宽不重排、只被裁掉；收起后不保留图标栏，画布左边距恒为 0（贴着窗口左缘）。
 - **列表宽度可拖**：分隔线本身是 5px 命中区（`-mx-[2.5px]` 跨在边界上），拖动时直接改 DOM 宽度（零 React 渲染），松手才提交并持久化；双击复位 380。

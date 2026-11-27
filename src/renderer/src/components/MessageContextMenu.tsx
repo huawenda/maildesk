@@ -1,3 +1,4 @@
+import { Fragment } from "react"
 import { FolderSimple, Envelope, Checks, EnvelopeOpen, PushPin, ShieldWarning, Trash, ArrowUUpLeft } from "@phosphor-icons/react"
 import {
   ContextMenuContent,
@@ -24,7 +25,7 @@ export function MessageContextMenu({
   onRestore
 }: {
   message: Message
-  moveTargets?: { id: string; label: string }[]
+  moveTargets?: { id: string; label: string; dividerBefore?: boolean }[]
   junkFolderId?: string
   permanentDelete?: boolean
   onSetRead?: (id: string, read: boolean) => void
@@ -66,11 +67,18 @@ export function MessageContextMenu({
             <FolderSimple className="size-4" />
             移动到…
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="max-h-72 overflow-y-auto">
+          {/* 高度跟随内容：不加 max-height / 内滚动（2026-11-27 用户要求，原来会被 Radix 的可用高度截成一截滚动条） */}
+          <ContextMenuSubContent
+            className="min-w-[10rem]"
+            style={{ maxHeight: "none", overflowY: "visible" }}
+          >
             {moveTargets.map((folder) => (
-              <ContextMenuItem key={folder.id} onSelect={() => onMove(message.id, folder.id)}>
-                <span className="truncate">{folder.label}</span>
-              </ContextMenuItem>
+              <Fragment key={folder.id}>
+                {folder.dividerBefore ? <ContextMenuSeparator /> : null}
+                <ContextMenuItem onSelect={() => onMove(message.id, folder.id)}>
+                  <span className="truncate">{folder.label}</span>
+                </ContextMenuItem>
+              </Fragment>
             ))}
           </ContextMenuSubContent>
         </ContextMenuSub>

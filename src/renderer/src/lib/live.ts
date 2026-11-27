@@ -13,6 +13,8 @@ export interface NavFolder {
   selectable: boolean
   /** 父级容器 id，用于折叠父项时隐藏子项；顶层为 null。 */
   parentId: string | null
+  /** 这一项前面要画一条分隔线：用于把默认（系统）文件夹和自建文件夹分开（2026-11-27 用户要求） */
+  dividerBefore?: boolean
 }
 
 const ROLE_ICON: Record<Exclude<FolderRole, null>, FolderIcon> = {
@@ -91,21 +93,38 @@ export function navFolders(folders: Folder[]): NavFolder[] {
   // 没给就造一个虚拟分组（id 固定、selectable=false，永远不会被选中）。
   const container = custom.find((item) => !item.selectable && item.depth === 0 && item.parentId === null)
   const topLevel = custom.filter((item) => item.depth === 0 && item.selectable)
-  if (topLevel.length === 0) return [...system, ...custom]
 
-  const group: NavFolder = container ?? {
-    id: "custom-group",
-    label: "其他文件夹",
-    icon: "folder",
-    depth: 0,
-    selectable: false,
-    parentId: null
-  }
-  const topIds = new Set(topLevel.map((item) => item.id))
-  const grouped = custom.map((item) => (topIds.has(item.id) ? { ...item, depth: 1, parentId: group.id } : item))
-  const children = grouped.filter((item) => item.parentId === group.id)
-  const rest = grouped.filter((item) => item.id !== group.id && item.parentId !== group.id)
-  return [...system, group, ...children, ...rest]
+  return withDivider(
+    topLevel.length === 0
+      ? [...system, ...custom]
+      : (() => {
+          const group: NavFolder = container ?? {
+            id: "custom-group",
+            label: "其他文件夹",
+            icon: "folder",
+            depth: 0,
+            selectable: false,
+            parentId: null
+          }
+          const topIds = new Set(topLevel.map((item) => item.id))
+          const grouped = custom.map((item) => (topIds.has(item.id) ? { ...item, depth: 1, parentId: group.id } : item))
+          const children = grouped.filter((item) => item.parentId === group.id)
+          const rest = grouped.filter((item) => item.id !== group.id && item.parentId !== group.id)
+          return [...system, group, ...children, ...rest]
+        })(),
+    system.length
+  )
+}
+
+/**
+ * 默认（系统）文件夹与自建文件夹之间画一条分隔线：标记挂到第一个自建项上
+ * （通常是「其他文件夹」分组标题；没有自建文件夹时不留线）。
+ */
+function withDivider(list: NavFolder[], systemCount: number): NavFolder[] {
+  if (systemCount <= 0 || systemCount >= list.length) return list
+  const next = [...list]
+  next[systemCount] = { ...next[systemCount], dividerBefore: true }
+  return next
 }
 
 const KIND_BY_EXT: Record<string, AttachmentKind> = {

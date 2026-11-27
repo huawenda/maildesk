@@ -72,6 +72,8 @@ interface TitleBarProps {
   onManageAccounts: () => void
   collapsed: boolean
   onToggleCollapsed: () => void
+  /** 鼠标移入/移出折叠按钮：收起状态下据此临时弹出侧栏抽屉（传 true/false） */
+  onHoverCollapsed?: (hovering: boolean) => void
   searchQuery: string
   onSearchQueryChange: (value: string) => void
   searchScope: SearchScope
@@ -88,6 +90,7 @@ export function TitleBar({
   onManageAccounts,
   collapsed,
   onToggleCollapsed,
+  onHoverCollapsed,
   searchQuery,
   onSearchQueryChange,
   searchScope,
@@ -115,6 +118,8 @@ export function TitleBar({
         <button
           type="button"
           onClick={onToggleCollapsed}
+          onMouseEnter={() => onHoverCollapsed?.(true)}
+          onMouseLeave={() => onHoverCollapsed?.(false)}
           title={collapsed ? "展开侧栏" : "收起侧栏"}
           className={ICON_BUTTON}
         >

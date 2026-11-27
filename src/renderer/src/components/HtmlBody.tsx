@@ -81,11 +81,28 @@ const escapeAttr = (value: string): string =>
 const ROOT_ATTRS = ["bgcolor", "background", "style", "class", "dir", "lang"]
 const BODY_ATTRS = [...ROOT_ATTRS, "topmargin", "leftmargin", "marginwidth", "marginheight"]
 
+/**
+ * 营销邮件习惯在 `<html style>` / `<body style>` 上写 `height: 100% !important`（或 `min-height`），
+ * 内联 + `!important` 连我们的样式表都盖不住：body 高度就被钉成 iframe 视口高度，
+ * `body.getBoundingClientRect().height` 与 `documentElement.scrollHeight` 都只剩一屏，
+ * 正文被 overflow:hidden 裁在首屏（2026-11-27 实测 Microsoft Rewards 那封只显示了顶部横幅）。
+ * 只剥掉这三条尺寸声明，其余内联样式（底色、宽度、字体）原样保留。
+ */
+const SIZE_DECL = /^(?:height|min-height|max-height)\s*:/i
+const stripSizeDecls = (style: string): string =>
+  style
+    .split(";")
+    .map((decl) => decl.trim())
+    .filter((decl) => decl && !SIZE_DECL.test(decl))
+    .join("; ")
+
 const attrsOf = (element: Element | null, names: string[]): string =>
   names
     .flatMap((name) => {
-      const value = element?.getAttribute(name)
-      return value === null || value === undefined ? [] : [`${name}="${escapeAttr(value)}"`]
+      const raw = element?.getAttribute(name)
+      if (raw === null || raw === undefined) return []
+      const value = name === "style" ? stripSizeDecls(raw) : raw
+      return value.trim() ? [`${name}="${escapeAttr(value)}"`] : []
     })
     .join(" ")
 
@@ -257,7 +274,10 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
       `<!doctype html><html${prepared.rootAttrs ? " " + prepared.rootAttrs : ""}>` +
       `<head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${cspFor(allowed)}">` +
       // 应用基线样式在前、邮件自带样式在后：邮件自己的字体/版式/底色优先
-      `<style>${baseCss(fontSize)}</style>${prepared.styles ? "\n" + prepared.styles : ""}</head>` +
+      `<style>${baseCss(fontSize)}</style>${prepared.styles ? "\n" + prepared.styles : ""}` +
+      // 但 html/body 的高度必须归零，否则邮件 `<style>` 里的 `body { height: 100% !important }`
+      // 会盖掉基线样式，body 被钉在 iframe 视口高度、正文只剩首屏（放在邮件样式之后才压得住）
+      `<style>html, body { height: auto !important; min-height: 0 !important; max-height: none !important; }</style></head>` +
       `<body${prepared.bodyAttrs ? " " + prepared.bodyAttrs : ""}>${prepared.html}</body></html>`,
     [prepared, fontSize, allowed]
   )

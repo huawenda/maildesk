@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { Fragment, useRef, useState } from "react"
 import { Pulse, Archive, CaretDown, CaretRight, NotePencil, Folder, Folders, Tray, ArrowsClockwise, PaperPlaneTilt, Gear, ShieldWarning, Trash } from "@phosphor-icons/react"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import type { NavFolder } from "@/lib/live"
@@ -34,6 +34,8 @@ interface SidebarProps {
   onSync: () => void
   /** 打开「同步状态」详情面板 */
   onOpenSyncStatus: () => void
+  /** 抽屉 peek 期间隐藏浮层滚动条：它是 fixed + portal，宽度动画时会在列表上横扫（2026-11-27） */
+  showScrollbar?: boolean
 }
 
 export function Sidebar({
@@ -51,7 +53,8 @@ export function Sidebar({
   syncing,
   syncLabel,
   onSync,
-  onOpenSyncStatus
+  onOpenSyncStatus,
+  showScrollbar = true
 }: SidebarProps) {
   // 容器目录默认展开，点右侧箭头（或整行）收起子项
   const navRef = useRef<HTMLElement>(null)
@@ -66,6 +69,14 @@ export function Sidebar({
     }
   }
 
+  // 默认（系统）文件夹与自建文件夹之间的一道分隔线（2026-11-27 用户要求）：
+  // 标记由 navFolders 挂在第一个自建项上（通常是「其他文件夹」分组标题）。
+  // 它前面一个可见项都没有时不画（系统文件夹被全部隐藏的极端情况，避免顶上挂一条孤线）
+  const dividerOf = (folder: NavFolder, index: number) =>
+    folder.dividerBefore && index > 0 ? (
+      <div className="mx-2 my-1.5 h-px shrink-0 bg-border" aria-hidden />
+    ) : null
+
   return (
     <aside className="flex h-full w-[220px] shrink-0 flex-col px-2.5 pb-2 pt-2.5">
       <nav
@@ -75,7 +86,7 @@ export function Sidebar({
         className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-px overflow-y-auto"
         aria-label="文件夹"
       >
-        {folders.map((folder) => {
+        {folders.map((folder, index) => {
           const Icon = folderIcons[folder.icon] ?? Folder
           if (hidden.has(folder.id)) return null
           const indent = folder.depth * 14
@@ -83,56 +94,60 @@ export function Sidebar({
 
           if (!folder.selectable) {
             return (
-              <button
-                key={folder.id}
-                title={folder.label}
-                aria-expanded={expanded}
-                onClick={() => toggleGroup(folder.id)}
-                className="flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-nav-hover"
-                style={indent ? { paddingLeft: 8 + indent } : undefined}
-              >
-                <Icon className="size-[15px] shrink-0 text-muted-foreground" />
-                <span className="truncate">{folder.label}</span>
-                <span className="ml-auto text-muted-foreground">
-                  {expanded ? <CaretDown className="size-3.5" /> : <CaretRight className="size-3.5" />}
-                </span>
-              </button>
+              <Fragment key={folder.id}>
+                {dividerOf(folder, index)}
+                <button
+                  title={folder.label}
+                  aria-expanded={expanded}
+                  onClick={() => toggleGroup(folder.id)}
+                  className="flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-nav-hover"
+                  style={indent ? { paddingLeft: 8 + indent } : undefined}
+                >
+                  <Icon className="size-[15px] shrink-0 text-muted-foreground" />
+                  <span className="truncate">{folder.label}</span>
+                  <span className="ml-auto text-muted-foreground">
+                    {expanded ? <CaretDown className="size-3.5" /> : <CaretRight className="size-3.5" />}
+                  </span>
+                </button>
+              </Fragment>
             )
           }
 
           const active = folder.id === folderId && !activeLabel
           const count = countMode === "unread" ? unreadOf(folder.id) : totalOf(folder.id)
           return (
-            <button
-              key={folder.id}
-              title={folder.label}
-              aria-current={active ? "true" : undefined}
-              onClick={() => onSelectFolder(folder.id)}
-              className={cn(
-                "flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-[12px] transition-colors",
-                active
-                  ? "bg-nav-selected font-bold text-foreground"
-                  : "text-foreground hover:bg-nav-hover"
-              )}
-              style={indent ? { paddingLeft: 8 + indent } : undefined}
-            >
-              <Icon className={cn("size-[15px] shrink-0", active ? "text-primary" : "text-muted-foreground")} />
-              <span className="truncate">{folder.label}</span>
-              {count ? (
-                <span
-                  className={cn(
-                    "ml-auto text-[11px] tabular-nums",
-                    active ? "text-nav-count-active" : "text-muted-foreground"
-                  )}
-                >
-                  {count}
-                </span>
-              ) : null}
-            </button>
+            <Fragment key={folder.id}>
+              {dividerOf(folder, index)}
+              <button
+                title={folder.label}
+                aria-current={active ? "true" : undefined}
+                onClick={() => onSelectFolder(folder.id)}
+                className={cn(
+                  "flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-[12px] transition-colors",
+                  active
+                    ? "bg-nav-selected font-bold text-foreground"
+                    : "text-foreground hover:bg-nav-hover"
+                )}
+                style={indent ? { paddingLeft: 8 + indent } : undefined}
+              >
+                <Icon className={cn("size-[15px] shrink-0", active ? "text-primary" : "text-muted-foreground")} />
+                <span className="truncate">{folder.label}</span>
+                {count ? (
+                  <span
+                    className={cn(
+                      "ml-auto text-[11px] tabular-nums",
+                      active ? "text-nav-count-active" : "text-muted-foreground"
+                    )}
+                  >
+                    {count}
+                  </span>
+                ) : null}
+              </button>
+            </Fragment>
           )
         })}
       </nav>
-      <OverlayScrollbar target={navRef} />
+      {showScrollbar ? <OverlayScrollbar target={navRef} /> : null}
 
       {!showLabels || labels.length === 0 ? null : (
         <>

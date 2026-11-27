@@ -447,7 +447,7 @@ export function Reader({
               <Recipients message={message} />
 
               {message.labels.length > 0 || message.attachments.length > 0 ? (
-                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   {message.labels.map((label) => (
                     <span key={label} className="flex h-5 items-center rounded-full bg-primary/15 px-2 text-[11.5px] text-primary">
                       {label}
@@ -467,7 +467,7 @@ export function Reader({
                   {hiddenCount > 0 ? (
                     <button
                       onClick={() => setShowAllAttachments(true)}
-                      className="flex h-5 items-center rounded-full bg-muted px-2 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
+                      className="flex h-9 items-center rounded-lg border border-dashed border-border px-3 text-[11.5px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
                     >
                       +{hiddenCount} 个附件
                     </button>
@@ -672,36 +672,82 @@ function AttachmentChip({
 }) {
   const Icon = attachmentIcons[attachment.type] ?? FileText
   const savable = Boolean(attachment.id)
-  const hint = savable ? "点击打开" : "演示数据不可打开"
+  const hint = savable ? "双击打开" : "演示数据不可打开"
+  // 第二行文案：正常态是文件大小，下载/保存/失败各自给一句状态（比只换图标更好读）
+  const meta =
+    state === "saving"
+      ? progress !== undefined
+        ? `正在下载 ${progress}%`
+        : "正在下载…"
+      : state === "saved"
+        ? "已保存"
+        : state === "error"
+          ? "打开失败"
+          : formatSize(attachment.size)
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <button
           title={`${attachment.name} · ${formatSize(attachment.size)} · ${hint}`}
-          onClick={savable ? onOpen : undefined}
+          onDoubleClick={savable ? onOpen : undefined}
           disabled={!savable || state === "saving"}
           className={cn(
-            "flex h-5 items-center gap-1.5 rounded-full bg-muted px-2 text-[11.5px] transition-colors",
-            savable && "hover:bg-accent",
-            !savable && "cursor-default",
-            state === "error" && "text-destructive"
+            // 附件是「文件卡片」而不是灰胶囊：白底 + 1px 结构线 + 主色淡底图标块，
+            // 两行文字（文件名 / 大小·状态），和邮件正文的白画布拉开层次但不抢眼。
+            "group relative flex h-9 items-center gap-2 overflow-hidden rounded-lg border bg-card py-1 pl-1.5 pr-2.5 text-left transition-colors",
+            state === "error" ? "border-destructive/40" : "border-border",
+            savable && "hover:border-primary/40 hover:bg-accent",
+            !savable && "cursor-default"
           )}
         >
-          {state === "saving" ? (
-            progress !== undefined ? (
-              <span className="w-7 shrink-0 text-right text-[10.5px] tabular-nums text-muted-foreground">
-                {progress}%
-              </span>
+          <span
+            className={cn(
+              "flex size-6 shrink-0 items-center justify-center rounded-md transition-colors",
+              state === "error"
+                ? "bg-destructive/10 text-destructive"
+                : state === "saved"
+                  ? "bg-success/10 text-success"
+                  : "bg-primary/10 text-primary",
+              savable && !state && "group-hover:bg-primary/15"
+            )}
+          >
+            {state === "saving" ? (
+              progress !== undefined ? (
+                <span className="text-[10px] leading-none tabular-nums">{progress}%</span>
+              ) : (
+                <CircleNotch className="size-3.5 animate-spin" />
+              )
+            ) : state === "saved" ? (
+              <Check className="size-3.5" />
             ) : (
-              <CircleNotch className="size-3 animate-spin text-muted-foreground" />
-            )
-          ) : state === "saved" ? (
-            <Check className="size-3 text-success" />
-          ) : (
-            <Icon className="size-3 text-muted-foreground" />
-          )}
-          <span className="max-w-[260px] truncate">{attachment.name}</span>
-          <span className="tabular-nums text-muted-foreground">{formatSize(attachment.size)}</span>
+              <Icon className="size-3.5" />
+            )}
+          </span>
+          <span className="flex min-w-0 flex-col">
+            <span className="max-w-[220px] truncate text-[12px] leading-[14px] text-foreground">
+              {attachment.name}
+            </span>
+            <span
+              className={cn(
+                "text-[10.5px] leading-[13px] tabular-nums",
+                state === "error"
+                  ? "text-destructive"
+                  : state === "saved"
+                    ? "text-success"
+                    : "text-muted-foreground"
+              )}
+            >
+              {meta}
+            </span>
+          </span>
+          {state === "saving" && progress !== undefined ? (
+            <span aria-hidden className="absolute inset-x-0 bottom-0 h-[2px] bg-primary/15">
+              <span
+                className="block h-full bg-primary transition-[width] duration-150 ease-out"
+                style={{ width: `${progress}%` }}
+              />
+            </span>
+          ) : null}
         </button>
       </ContextMenuTrigger>
       <ContextMenuContent>

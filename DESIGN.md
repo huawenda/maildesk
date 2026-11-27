@@ -261,12 +261,23 @@ components:
     rounded: "{rounded.full}"
     padding: "0 8px"
   chip-attachment:
-    backgroundColor: "{colors.muted}"
+    note: "文件卡片（2026-11-27 从灰胶囊升级）：右侧两行文字，上行文件名 / 下行大小·状态"
+    height: 36px
+    rounded: "{rounded.lg}"
+    border: "1px {colors.border}"
+    backgroundColor: "{colors.card}"
+    padding: "0 10px 0 6px"
+    iconTile: "24×24 rounded-md bg {colors.primary}/10 text {colors.primary}"
+    title: "12 / 400 {colors.foreground}"
+    meta: "10.5 / 400 tabular-nums {colors.muted-foreground}"
+    hover: "border {colors.primary}/40 + bg {colors.accent}"
+    states: "saving 图标块显示百分比 + 卡片底部 2px 主色进度条；saved 图标块与 meta 走 {colors.success}；error 边框与 meta 走 {colors.destructive}"
+  chip-attachment-more:
+    note: "超过 3 个折叠成「+N 个附件」，与卡片同高、虚线描边"
+    height: 36px
+    rounded: "{rounded.lg}"
+    border: "1px dashed {colors.border}"
     textColor: "{colors.muted-foreground}"
-    fontSize: 11.5px
-    height: 20px
-    rounded: "{rounded.full}"
-    padding: "0 8px"
   input:
     backgroundColor: "{colors.muted}"
     textColor: "{colors.foreground}"
@@ -440,7 +451,7 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 
 ### 阅读器
 - 主题 22/30，发件人区左侧 32px 头像，右侧两行：姓名 + 图标组 / 邮箱 + 完整时间。图标组最后一个是「该发件人的全部邮件」右侧 320px 抽屉。
-- 标签 chip（`primary/15` 底 + 主色字）与附件 chip（`muted` 底 + 次要字），同一行 `flex-wrap`；附件左键打开、右键菜单。
+- 标签 chip（`primary/15` 底 + 主色字，20px 胶囊）与附件卡片（36px 白底文件卡片：1px 结构线 + 主色淡底图标块 + 文件名/大小两行）同一行 `flex-wrap`，标签在前、附件在后；附件超过 3 个折叠成同高的虚线「+N 个附件」。附件双击打开、右键菜单（单击不动作）。
 - 正文在 iframe 里按原版式渲染：不缩放、不压宽、不套白纸卡片；超宽内容交给阅读区原生横向滚动条（6px 细条，常显）。
 
 ### 弹窗与浮层

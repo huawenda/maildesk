@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Check, Folder, Loader2, Search } from "lucide-react"
+import { Check, Folder, CircleNotch, MagnifyingGlass } from "@phosphor-icons/react"
 import type { Folder as FolderRow } from "@shared/types"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
@@ -151,7 +151,7 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
 
         <div className="flex shrink-0 items-center gap-2 border-b border-table-line px-4 py-2.5">
           <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <MagnifyingGlass className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -178,7 +178,7 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
         <div ref={listRef} className="scrollbar-overlay min-h-[260px] flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
           {loading ? (
             <div className="flex h-[260px] items-center justify-center gap-2 text-[12.5px] text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> 正在读取服务器文件夹…
+              <CircleNotch className="size-4 animate-spin" /> 正在读取服务器文件夹…
             </div>
           ) : visible.length === 0 ? (
             <div className="flex h-[260px] items-center justify-center text-[12.5px] text-muted-foreground">
@@ -211,7 +211,7 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
                       locked && "opacity-60"
                     )}
                   >
-                    {checked && !container ? <Check className="size-3" strokeWidth={3} /> : null}
+                    {checked && !container ? <Check className="size-3" weight="bold" /> : null}
                   </span>
                   <Folder
                     className={cn(
@@ -250,7 +250,7 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
               disabled={saving || loading || !accountId}
               className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
             >
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              {saving ? <CircleNotch className="size-3.5 animate-spin" /> : null}
               保存
             </button>
           </div>

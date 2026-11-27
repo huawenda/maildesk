@@ -74,8 +74,8 @@
   /* 「已同步」状态用绿色；只给同步状态面板，不当通用成功色到处用 */
   --success: #127a4e;
   --border: #dadee4;
-  --table-line: #e4e7ec;
-  --row-line: #edeff3;
+  --table-line: #e9ebef;
+  --row-line: #e9ebef;
   /* 已读行的实色文字阶梯（不用透明度：叠在 hover / 选中底色上颜色才可控） */
   --ink-read: #5f656d;
   --ink-faint: #8b9199;

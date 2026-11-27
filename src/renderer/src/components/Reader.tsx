@@ -1,21 +1,6 @@
 import { useEffect, useRef, useState, type UIEvent } from "react"
-import {
-  ChevronDown,
-  Download,
-  FileArchive,
-  FileImage,
-  FileSpreadsheet,
-  FileText,
-  FolderDown,
-  FolderInput,
-  Mail,
-  MailOpen,
-  PanelRight,
-  SquareArrowOutUpRight,
-  Pin,
-  Trash2
-} from "lucide-react"
-import { Check, Loader2, X } from "lucide-react"
+import { CaretDown, DownloadSimple, FileArchive, FileImage, FileXls, FileText, Files, FolderSimple, Envelope, EnvelopeOpen, SidebarSimple, ArrowSquareOut, PushPin, Trash } from "@phosphor-icons/react"
+import { Check, CircleNotch, X } from "@phosphor-icons/react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,7 +27,7 @@ const attachmentIcons = {
   image: FileImage,
   pdf: FileText,
   doc: FileText,
-  sheet: FileSpreadsheet,
+  sheet: FileXls,
   zip: FileArchive,
   other: FileText
 } as const
@@ -320,7 +305,7 @@ export function Reader({
     return (
       <section className="flex flex-1 items-center justify-center bg-card text-muted-foreground">
         <div className="flex flex-col items-center gap-2">
-          <Mail className="size-10 opacity-40" />
+          <Envelope className="size-10 opacity-40" />
           <span className="text-[13px]">选择一封邮件开始阅读</span>
         </div>
       </section>
@@ -332,7 +317,6 @@ export function Reader({
 
   return (
     <section className="relative flex min-w-0 flex-1 flex-col bg-card">
-
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div
@@ -368,10 +352,9 @@ export function Reader({
                           message.starred ? "text-primary" : "text-muted-foreground hover:text-foreground"
                         )}
                       >
-                        <Pin
+                        <PushPin
                           className="size-4"
-                          fill={message.starred ? "currentColor" : "none"}
-                          strokeWidth={message.starred ? 0 : 1.8}
+                          weight={message.starred ? "fill" : "regular"}
                         />
                       </button>
                       <button
@@ -379,7 +362,7 @@ export function Reader({
                         onClick={onToggleUnread}
                         className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
                       >
-                        {message.unread ? <Mail className="size-4" /> : <MailOpen className="size-4" />}
+                        {message.unread ? <Envelope className="size-4" /> : <EnvelopeOpen className="size-4" />}
                       </button>
                       <button
                         title="保存全部附件"
@@ -388,11 +371,11 @@ export function Reader({
                         className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                       >
                         {saveAllState === "saving" ? (
-                          <Loader2 className="size-4 animate-spin" />
+                          <CircleNotch className="size-4 animate-spin" />
                         ) : saveAllState === "saved" ? (
                           <Check className="size-4 text-success" />
                         ) : (
-                          <Download className="size-4" />
+                          <DownloadSimple className="size-4" />
                         )}
                       </button>
                       <DropdownMenu>
@@ -401,7 +384,7 @@ export function Reader({
                             title="移动到文件夹"
                             className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
                           >
-                            <FolderInput className="size-4" />
+                            <FolderSimple className="size-4" />
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-56">
@@ -424,7 +407,7 @@ export function Reader({
                         onClick={onDelete}
                         className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-row-hover hover:text-destructive"
                       >
-                        <Trash2 className="size-4" />
+                        <Trash className="size-4" />
                       </button>
                       <button
                         title="查看该发件人的全部邮件"
@@ -434,7 +417,7 @@ export function Reader({
                           senderOpen ? "text-primary" : "text-muted-foreground hover:text-foreground"
                         )}
                       >
-                        <PanelRight className="size-4" />
+                        <SidebarSimple className="size-4" />
                       </button>
                     </div>
                   </div>
@@ -571,7 +554,7 @@ export function Reader({
             <div ref={senderListRef} className="scrollbar-overlay flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1.5">
               {senderBusy ? (
                 <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-muted-foreground">
-                  <Loader2 className="size-3.5 animate-spin" /> 正在查找…
+                  <CircleNotch className="size-3.5 animate-spin" /> 正在查找…
                 </div>
               ) : senderMessages.length === 0 ? (
                 <div className="px-3 py-8 text-center text-[12px] text-muted-foreground">没有找到其他邮件</div>
@@ -617,7 +600,7 @@ export function Reader({
           }}
         >
           <div className="max-w-[70vw] truncate text-[12.5px] text-white/70">{preview?.name ?? "图片预览"}</div>
-          {previewBusy ? <Loader2 className="size-6 animate-spin text-white/70" /> : null}
+          {previewBusy ? <CircleNotch className="size-6 animate-spin text-white/70" /> : null}
           {previewError ? <div className="text-[12.5px] text-destructive">{previewError}</div> : null}
           {preview ? (
             <img
@@ -632,7 +615,7 @@ export function Reader({
               onClick={() => preview && void saveAttachment(preview.attachment)}
               className="flex h-7 items-center gap-1.5 rounded-md bg-white/10 px-3 text-[12.5px] text-white transition-colors hover:bg-white/20 disabled:opacity-50"
             >
-              <Download className="size-3.5" />
+              <DownloadSimple className="size-3.5" />
               保存
             </button>
             <button
@@ -688,7 +671,7 @@ function AttachmentChip({
                 {progress}%
               </span>
             ) : (
-              <Loader2 className="size-3 animate-spin text-muted-foreground" />
+              <CircleNotch className="size-3 animate-spin text-muted-foreground" />
             )
           ) : state === "saved" ? (
             <Check className="size-3 text-success" />
@@ -701,15 +684,15 @@ function AttachmentChip({
       </ContextMenuTrigger>
       <ContextMenuContent>
         <ContextMenuItem disabled={!savable} onSelect={onOpen}>
-          <SquareArrowOutUpRight className="size-4" />
+          <ArrowSquareOut className="size-4" />
           打开
         </ContextMenuItem>
         <ContextMenuItem disabled={!savable} onSelect={onSave}>
-          <Download className="size-4" />
+          <DownloadSimple className="size-4" />
           保存…
         </ContextMenuItem>
         <ContextMenuItem disabled={!savable} onSelect={onSaveAll}>
-          <FolderDown className="size-4" />
+          <Files className="size-4" />
           保存全部…
         </ContextMenuItem>
       </ContextMenuContent>
@@ -804,7 +787,7 @@ function Recipients({ message }: { message: Message }) {
         aria-expanded={open}
       >
         <span className="truncate">{summary}</span>
-        <ChevronDown className={cn("size-3 shrink-0 transition-transform", open && "rotate-180")} />
+        <CaretDown className={cn("size-3 shrink-0 transition-transform", open && "rotate-180")} />
       </button>
       {open ? (
         <div className="mt-1.5 rounded-lg bg-muted/50 px-2.5 py-2">

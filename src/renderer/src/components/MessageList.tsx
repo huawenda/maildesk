@@ -1,14 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type Ref } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import {
-  AlignJustify,
-  ChevronDown,
-  ChevronUp,
-  ChevronRight,
-  Inbox,
-  Loader2,
-  Paperclip,
-} from "lucide-react"
+import { CaretDown, CaretUp, CaretRight, Tray, CircleNotch, Paperclip } from "@phosphor-icons/react"
 import { avatarColor, formatCompactTime, formatListTime, initials } from "@/lib/format"
 import type { Message } from "@/lib/mock"
 import { MessageContextMenu } from "@/components/MessageContextMenu"
@@ -18,13 +10,6 @@ import { cn } from "@/lib/utils"
 import type { Density } from "@/App"
 import type { SearchScope } from "@/components/TitleBarSearch"
 
-export type ListFilter = "all" | "unread" | "attachments"
-
-const filters: { id: ListFilter; label: string }[] = [
-  { id: "all", label: "全部" },
-  { id: "unread", label: "未读" },
-  { id: "attachments", label: "有附件" }
-]
 
 const ROW_HEIGHT: Record<Density, number> = {
   // 紧凑视图是 Foxmail 式表格式单行，行高贴近 Foxmail 的 26px
@@ -35,10 +20,10 @@ const ROW_HEIGHT: Record<Density, number> = {
 
 /** 日期分组条高度（紧凑视图全宽表格） */
 const GROUP_HEIGHT = 24
-/** 紧凑视图里组与组之间留 8px（组头条顶部空出来，2026-11-24 用户要求） */
-const GROUP_TOP_GAP = 8
 /** 标准/宽松视图里组头条下方留 6px（与组内第一封 / 下一个组头）；
- *  上方不再额外加上边距——上一项自己的 6px 下间距就是组与组之间的呼吸 */
+ *  上方不再额外加上边距——上一项自己的 6px 下间距就是组与组之间的呼吸。
+ *  紧凑视图两者都不留（2026-11-27 用户要求）：组头条 24px 紧贴上一封邮件，
+ *  组与组之间改用 1px 分隔线区分。 */
 const GROUP_BOTTOM_GAP = 6
 /** 标准/宽松视图里邮件行之间的间距，必须和组头条到第一封邮件的 6px 一致 */
 const ROW_GAP = 6
@@ -201,14 +186,14 @@ interface MessageListProps {
   messages: Message[]
   /** 当前文件夹 id：只有换文件夹/换过滤才把列表滚回顶部，删一封邮件不能跳回顶部 */
   folderId: string
-  /** 「N 封」：按当前过滤条件给全量数字，拿不到全量时传 null（只有当前页数据，不展示以免说谎） */
-  countLabel: number | null
   selectedId: string | null
   /** 多选集合（Ctrl+点击 / Ctrl+A）；selectedId 是其中的「活动行」，决定阅读器与滚动定位 */
   selectedIds?: string[]
   onSelect: (id: string, additive: boolean, range?: boolean) => void
   /** 星标列直接切换（紧凑视图每行都显示星标） */
   onToggleStar?: (id: string) => void
+  /** 双击一行：为这封邮件打开（或激活）一个文档标签页 */
+  onOpenTab?: (id: string) => void
   /** 右键菜单：只高亮该行，不标已读、不打开正文 */
   onContextSelect?: (id: string) => void
   /** 右键菜单：标为已读 / 未读 */
@@ -248,8 +233,6 @@ interface MessageListProps {
   /** 正在连接/下载：首屏没有邮件时显示同步进度，而不是「这个文件夹还是空的」 */
   syncing?: boolean
   syncHint?: string
-  filter: ListFilter
-  onFilterChange: (filter: ListFilter) => void
   loading: boolean
   /** 列表宽度（px），由标题栏下方的分隔线拖拽控制，范围 320–520 */
   width: number
@@ -260,12 +243,12 @@ interface MessageListProps {
 export function MessageList({
   messages,
   folderId,
-  countLabel,
   selectedId,
   selectedIds,
   onSelect,
   onToggleStar,
   onContextSelect,
+  onOpenTab,
   onSetRead,
   onMarkAllRead,
   onMove,
@@ -287,8 +270,6 @@ export function MessageList({
   syncHint,
   highlightQuery,
   highlightScope,
-  filter,
-  onFilterChange,
   loading,
   width,
   paneRef
@@ -321,7 +302,7 @@ export function MessageList({
   // 那样每删一封列表就跳回顶部（用户实测反馈）。折叠状态不在这里清，按文件夹各记各的
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [folderId, filter, resetKey])
+  }, [folderId, resetKey])
 
   // 紧凑视图列宽：发件人 / 日期 / 大小 / 文件夹（搜索时）可拖动列分隔线调整，双击恢复默认
   const [cols, setCols] = useState<CompactCols>(readCompactCols)
@@ -435,7 +416,7 @@ export function MessageList({
   const rowHeight = density === "standard" ? (standardThreeLines ? 72 : 60) : ROW_HEIGHT[density]
   const showSnippet = !compact && (density === "comfortable" || standardThreeLines)
   const grouped = compact || groupHeadersNonCompact
-  const groupRowHeight = compact ? GROUP_HEIGHT + GROUP_TOP_GAP : GROUP_HEIGHT + GROUP_BOTTOM_GAP
+  const groupRowHeight = compact ? GROUP_HEIGHT : GROUP_HEIGHT + GROUP_BOTTOM_GAP
   // 行高是内容高度，槽位再额外加行间距；紧凑视图是表格，不加
   const rowSlot = compact ? rowHeight : rowHeight + ROW_GAP
 
@@ -533,33 +514,12 @@ export function MessageList({
 
   return (
     <section ref={paneRef} className="flex shrink-0 flex-col bg-card" style={{ width }}>
-      {/* 内边距 8px 三边等距：行高 44 = 8 + 按钮 28 + 8 */}
-      <div className="flex h-11 shrink-0 items-center gap-0.5 px-2">
-        {filters.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onFilterChange(item.id)}
-            className={cn(
-              "h-7 rounded px-2.5 text-[12.5px] transition-colors",
-              filter === item.id
-                ? "bg-row-selected text-foreground"
-                : "text-muted-foreground hover:bg-row-hover hover:text-foreground"
-            )}
-          >
-            {item.label}
-          </button>
-        ))}
-        {countLabel === null ? null : (
-          <span className="ml-auto pr-1 text-[11.5px] tabular-nums text-muted-foreground">{countLabel} 封</span>
-        )}
-      </div>
-
       {/* 紧凑视图是 Foxmail 式表格：列头固定（不随列表滚动），标准/宽松仍是三行卡片，不加列头。
           列头只看「有没有数据」，不能看 loading —— 刷新时卸载列头会让内容整体上移 28px，表现成闪烁 */}
       {compact && messages.length > 0 ? (
         <div
           ref={headerRef}
-          className="flex h-7 shrink-0 items-stretch border-y border-table-line bg-card text-[11.5px] text-muted-foreground"
+          className="flex h-7 shrink-0 items-stretch border-b border-table-line bg-card text-[11.5px] text-muted-foreground"
           style={{ paddingRight: gutter }}
         >
           <span className={cn("col-sep flex shrink-0 items-center justify-center", COL_STATUS)}>
@@ -603,9 +563,9 @@ export function MessageList({
               日期
               {groupBy === "date" ? (
                 groupDir === "desc" ? (
-                  <ChevronDown className="size-3 opacity-70" />
+                  <CaretDown className="size-3 opacity-70" />
                 ) : (
-                  <ChevronUp className="size-3 opacity-70" />
+                  <CaretUp className="size-3 opacity-70" />
                 )
               ) : null}
             </button>
@@ -629,9 +589,9 @@ export function MessageList({
               大小
               {groupBy === "size" ? (
                 groupDir === "desc" ? (
-                  <ChevronDown className="size-3 opacity-70" />
+                  <CaretDown className="size-3 opacity-70" />
                 ) : (
-                  <ChevronUp className="size-3 opacity-70" />
+                  <CaretUp className="size-3 opacity-70" />
                 )
               ) : null}
             </button>
@@ -664,7 +624,7 @@ export function MessageList({
         {loading && messages.length === 0 && !syncing ? (
           <SkeletonRows rowHeight={rowHeight} compact={compact} />
         ) : messages.length === 0 ? (
-          <EmptyList filter={filter} searching={searching} noAccounts={noAccounts} syncing={syncing} syncHint={syncHint} />
+          <EmptyList searching={searching} noAccounts={noAccounts} syncing={syncing} syncHint={syncHint} />
         ) : (
           <>
             {/* 吸顶组头条：高度 0 的 sticky 容器 + 绝对定位的实心条，不参与滚动高度 */}
@@ -722,6 +682,7 @@ export function MessageList({
                   junkFolderId={junkFolderId}
                   onToggleGroup={toggleGroup}
                   onContextSelect={onContextSelect}
+                  onOpenTab={onOpenTab}
                 />
               )
             })}
@@ -766,7 +727,8 @@ const VirtualRow = memo(function VirtualRow({
   onRestore,
   junkFolderId,
   onToggleGroup,
-  onContextSelect
+  onContextSelect,
+  onOpenTab
 }: {
   item: ListRow
   start: number
@@ -794,11 +756,17 @@ const VirtualRow = memo(function VirtualRow({
   junkFolderId?: string
   onToggleGroup: (key: string) => void
   onContextSelect?: (id: string) => void
+  onOpenTab?: (id: string) => void
 }) {
   if (item.kind === "group") {
     return (
       <div
-        className={cn("absolute inset-x-0 top-0", compact ? "pt-2" : "pb-1.5")}
+        className={cn(
+          "absolute inset-x-0 top-0",
+          compact ? "" : "pb-1.5",
+          // 紧凑视图不留间距，组头条下方用 1px 分隔线把它和组内邮件分开（2026-11-27 用户要求）
+          compact && "border-b border-table-line"
+        )}
         style={{ height, transform: `translateY(${start}px)` }}
       >
         <GroupHeader
@@ -832,6 +800,7 @@ const VirtualRow = memo(function VirtualRow({
             onSelect={onSelect}
             onToggleStar={onToggleStar}
             onSetRead={onSetRead}
+            onOpenTab={onOpenTab}
           />
         </div>
       </ContextMenuTrigger>
@@ -882,9 +851,9 @@ function GroupHeader({
         )}
       >
         {collapsed ? (
-          <ChevronRight className="size-3 shrink-0 opacity-70" />
+          <CaretRight className="size-3 shrink-0 opacity-70" />
         ) : (
-          <ChevronDown className="size-3 shrink-0 opacity-70" />
+          <CaretDown className="size-3 shrink-0 opacity-70" />
         )}
         <span>{label}</span>
         <span className="tabular-nums text-muted-foreground/80">({count} 封)</span>
@@ -899,14 +868,15 @@ function GroupHeader({
       aria-expanded={!collapsed}
       title={collapsed ? "展开本组" : "收起本组"}
       className={cn(
-        "flex h-full w-full items-center px-2 text-left text-[11.5px] font-semibold text-foreground/80 transition-colors",
+        "flex h-full w-full items-center gap-1 px-2 text-left text-[11.5px] font-semibold text-foreground/80 transition-colors",
         // 紧凑视图是无底色的纯文字组头条（QQ 邮箱口径，2026-11-24 用户指定）；吸顶时必须实底，否则下方行会透上来
         floating ? "bg-card" : "bg-transparent hover:bg-row-hover",
-        // 折叠状态用左侧的小箭头提示，展开时不画
-        collapsed ? "gap-1" : "gap-0"
+        // 吸顶条自己补一根下缘线：静态组头那根挂在虚拟行容器上，吸顶条是另一个元素（2026-11-27）
+        floating && "border-b border-table-line"
       )}
     >
-      {collapsed ? <ChevronRight className="size-3 shrink-0 opacity-70" /> : null}
+      {/* 展开/折叠都用左侧小箭头提示（2026-11-27 用户要求展开态也画） */}
+      {collapsed ? <CaretRight className="size-3 shrink-0 opacity-70" /> : <CaretDown className="size-3 shrink-0 opacity-70" />}
       <span>
         {label}
         <span className="tabular-nums text-muted-foreground/80">（{count} 封）</span>
@@ -1006,6 +976,8 @@ interface RowProps {
   onToggleStar?: (id: string) => void
   /** 紧凑模式点圆点：read=true 标为已读 */
   onSetRead?: (id: string, read: boolean) => void
+  /** 双击整行：打开 / 激活这封邮件的文档标签页 */
+  onOpenTab?: (id: string) => void
 }
 
 /** 行组件 memo 化：删除一行时其余行的 message 对象身份不变，可以整片跳过重渲染 */
@@ -1022,7 +994,8 @@ const MessageRow = memo(function MessageRow({
   highlightScope,
   onSelect,
   onToggleStar,
-  onSetRead
+  onSetRead,
+  onOpenTab
 }: RowProps) {
   const compact = density === "compact"
   const comfortable = density === "comfortable"
@@ -1049,10 +1022,11 @@ const MessageRow = memo(function MessageRow({
         role="option"
         aria-selected={selected}
         onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey, event.shiftKey)}
+        onDoubleClick={() => onOpenTab?.(message.id)}
         className={cn(
-          // 行分隔线用伪元素并左右各内缩 8px：两端不碰卡片左缘和右侧分隔线（2026-11-24 用户要求）；
-          // hover / 选中底色也是内缩 + 圆角的伪元素，不再铺满整行（2026-11-24 用户要求）
-          "group isolate relative flex h-full w-full cursor-default select-none items-center text-left before:pointer-events-none before:absolute before:-z-10 before:inset-x-2 before:inset-y-[2px] before:rounded-md after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-row-line",
+          // 行分隔线用伪元素，左右铺满到卡片左缘与右侧分隔线（2026-11-27 用户要求，与表头/组头的线对齐）；
+          // hover / 选中底色同样铺满整行（2026-11-27 用户要求，不再内缩 + 圆角）
+          "group isolate relative flex h-full w-full cursor-default select-none items-center text-left before:pointer-events-none before:absolute before:-z-10 before:inset-0 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-row-line",
           selected ? "before:bg-row-selected" : "hover:before:bg-row-hover"
         )}
       >
@@ -1151,6 +1125,7 @@ const MessageRow = memo(function MessageRow({
       role="option"
       aria-selected={selected}
       onClick={(event) => onSelect(message.id, event.ctrlKey || event.metaKey, event.shiftKey)}
+      onDoubleClick={() => onOpenTab?.(message.id)}
       className={cn(
         "group isolate relative flex h-full w-full cursor-default select-none items-center gap-3 pl-2 pr-3 text-left before:pointer-events-none before:absolute before:-z-10 before:inset-x-1 before:inset-y-[2px] before:rounded-lg",
         selected ? "before:bg-row-selected" : "hover:before:bg-row-hover"
@@ -1272,22 +1247,20 @@ function SkeletonRows({ rowHeight, compact }: { rowHeight: number; compact: bool
 }
 
 function EmptyList({
-  filter,
   searching,
   noAccounts,
   syncing = false,
   syncHint
 }: {
-  filter: ListFilter
   searching: boolean
   noAccounts: boolean
   syncing?: boolean
   syncHint?: string
 }) {
-  if (syncing && !searching && filter === "all") {
+  if (syncing && !searching) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
-        <Loader2 className="size-8 animate-spin text-primary/70" />
+        <CircleNotch className="size-8 animate-spin text-primary/70" />
         <span className="text-[13px]">首次同步进行中</span>
         {syncHint ? <span className="text-[12px] opacity-80 tabular-nums">{syncHint}</span> : null}
         <span className="text-[11.5px] opacity-60">首次同步会把整个邮箱下载到本地，可以先做别的</span>
@@ -1297,7 +1270,7 @@ function EmptyList({
   if (noAccounts) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
-        <Inbox className="size-8 opacity-40" />
+        <Tray className="size-8 opacity-40" />
         <span className="text-[13px]">还没有配置账户</span>
         <span className="text-[12px] opacity-70">点标题栏左上角的 ☰ 菜单 →「管理账户…」添加你的 IMAP 邮箱</span>
       </div>
@@ -1305,17 +1278,8 @@ function EmptyList({
   }
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
-      {filter === "all" ? <Inbox className="size-8 opacity-40" /> : <AlignJustify className="size-8 opacity-40" />}
-      <span className="text-[13px]">
-        {searching
-          ? "没有匹配的邮件"
-          : filter === "all" ? "这个文件夹还是空的" : filter === "unread" ? "没有未读邮件" : "没有带附件的邮件"}
-      </span>
-      {filter !== "all" ? (
-        <span className="flex items-center gap-1 text-[12px] opacity-70">
-          <Loader2 className="size-3" /> 试试切换到「全部」
-        </span>
-      ) : null}
+      <Tray className="size-8 opacity-40" />
+      <span className="text-[13px]">{searching ? "没有匹配的邮件" : "这个文件夹还是空的"}</span>
     </div>
   )
 }

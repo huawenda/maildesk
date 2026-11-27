@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify"
-import { ImageOff } from "lucide-react"
+import { ImageBroken } from "@phosphor-icons/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { mail } from "@/lib/ipc"
 import { isDragging, onDragEnd } from "@/lib/drag-pause"
@@ -536,7 +536,7 @@ export function HtmlBody({ html, fontSize = 14, remoteImages, onContextMenu }: H
     <div>
       {prepared.blocked > 0 && !allowed ? (
         <div className="flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5 text-[12px] text-muted-foreground">
-          <ImageOff className="size-3.5 shrink-0" />
+          <ImageBroken className="size-3.5 shrink-0" />
           <span>已拦截 {prepared.blocked} 张远程图片</span>
           <button
             onClick={() => setAllowed(true)}

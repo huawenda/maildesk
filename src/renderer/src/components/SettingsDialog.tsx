@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { Check, Minus, Plus, X } from "lucide-react"
+import { Check, Minus, Plus, X } from "@phosphor-icons/react"
 import type { Account } from "@shared/types"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"

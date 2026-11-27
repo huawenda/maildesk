@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { PanelLeftClose, PanelLeftOpen, Rows3 } from "lucide-react"
+import { SidebarSimple, Rows } from "@phosphor-icons/react"
 import type { Density } from "@/App"
 import type { Account } from "@shared/types"
 import {
@@ -33,7 +33,7 @@ const CLOSE_BUTTON = cn(
   "hover:bg-[#c42b1c] hover:text-white [-webkit-app-region:no-drag]"
 )
 
-/** 10×10 的手绘图标，比 lucide 的 12px 线条更接近 Windows 原生观感。 */
+/** 10×10 的手绘图标，比图标库的 24 网格缩放后更接近 Windows 原生观感。 */
 function MinimizeGlyph() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1">
@@ -118,13 +118,13 @@ export function TitleBar({
           title={collapsed ? "展开侧栏" : "收起侧栏"}
           className={ICON_BUTTON}
         >
-          {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+          {collapsed ? <SidebarSimple className="size-4" /> : <SidebarSimple className="size-4" />}
         </button>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" title="列表密度" className={ICON_BUTTON}>
-              <Rows3 className="size-4" />
+              <Rows className="size-4" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-36">

@@ -4,8 +4,8 @@ name: MailDesk-design
 description: |
   Windows 单平台 IMAP 邮件客户端的浅色设计语言。骨架是"冷中性外壳 + 纯白悬浮画布"：
   标题栏与侧栏共用 `--background`（#F3F3F3，Win11 默认标题栏色），列表与阅读器是一张 1px 描边、
-  无阴影、四角 10px 圆角（上边贴标题栏、右/下各留 7px）的白色卡片，靠明度差分层而不是靠描边堆叠。所有线条只有三档
-  （结构 #DADEE4 / 表格 #E4E7EC / 行 #EDEFF3），hover 与选中全应用只有一套（#F2F4F7 / #E3ECFA）。
+  无阴影、四角 10px 圆角（上边贴标题栏、右/下各留 7px）的白色卡片，靠明度差分层而不是靠描边堆叠。所有线条只有两档
+  （结构 #DADEE4 / 表格与行 #E9EBEF），hover 与选中全应用只有一套（#F2F4F7 / #E3ECFA）。
   唯一的彩色是主色 #2B5FD9，以及同步状态用的绿 #127A4E。浮层（菜单 / 弹窗 / 抽屉）是纯白 +
   两档软投影（elevation-menu / elevation-dialog）；画布本身无阴影，只在外圈有一根 1px `{colors.border}` 描边。
   没有深色主题，没有渐变，没有装饰性插画，动效只动 opacity / transform / width，120–200ms。
@@ -29,8 +29,8 @@ colors:
   destructive: "#c0362c"
   success: "#127a4e"           # 只给同步状态面板的「已同步」
   border: "#dadee4"            # 结构线：画布外框、浮层描边、控件边框
-  table-line: "#e4e7ec"        # 列表表格线、阅读器页头分隔、弹窗内部分隔
-  row-line: "#edeff3"          # 列表行之间的横向分割线（最浅一档）
+  table-line: "#e9ebef"        # 列表表格线、阅读器页头分隔、弹窗内部分隔
+  row-line: "#e9ebef"          # 列表行之间的横向分割线（与 table-line 同值，2026-11-27 统一）
   row-hover: "#f2f4f7"         # 列表行 hover 底
   row-selected: "#e3ecfa"      # 列表行选中底（浅蓝）
   ink-read: "#5f656d"          # 已读行的发件人 / 主题 / 日期 / 大小（实色）
@@ -318,13 +318,13 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 
 视觉上是**三层明度**：冷中性外壳（`{colors.background}`，标题栏 + 侧栏 + 窗口底色）→ 纯白画布（`{colors.card}`，列表 + 阅读器）→ 纯白浮面（`{colors.popover}`，弹窗 / 菜单，靠软投影和一圈发丝线浮起）。层与层之间以明度差为主；整张画布是一张**1px `{colors.border}` 描边、无阴影、四角 10px 圆角**的卡片：上边贴标题栏（描边与标题栏下沿重合）、右/下各留 7px 露出底色（侧栏收起时左侧也补 7px）。
 
-线条只有三档，按重要性排序：**结构 `{colors.border}` → 表格 `{colors.table-line}` → 行 `{colors.row-line}`**。任何「用 `border-border` 加 `/40` `/60` 透明度」的写法都是错的：档位在浅色下几乎看不出差别，只会让线看起来脏。
+线条只有两档：**结构 `{colors.border}`** 与 **表格 / 行 `{colors.table-line}` = `{colors.row-line}`**（2026-11-27 统一为 `#E9EBEF`）。任何「用 `border-border` 加 `/40` `/60` 透明度」的写法都是错的：档位在浅色下几乎看不出差别，只会让线看起来脏。
 
 交互色全应用只有一套：hover `{colors.row-hover}`、选中 `{colors.row-selected}`，侧栏 `{colors.nav-hover}` / `{colors.nav-selected}` 取同值。菜单和按钮的 hover 统一取 `{colors.accent}`（= row-hover），标题栏里的图标键例外，用 `{colors.foreground}/10`——冷灰底上 `#F2F4F7` 几乎看不见。
 
 **Key Characteristics:**
 - 只有浅色主题，没有 `.dark`、没有深浅切换入口
-- 三档线条，禁止在 `border-border` 上套透明度分档
+- 两档线条，禁止在 `border-border` 上套透明度分档
 - 已读/未读先靠字重（400/600），再用实色 ink 阶梯压暗（不用透明度）
 - 选中行文字不变白，只换底色
 - 动效只动 `opacity` / `transform` / `width`，120–200ms `ease-out`，绝不缩放
@@ -338,10 +338,10 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 - **Popover** `{colors.popover}` `#FFFFFF`：弹窗、下拉菜单、Popover、Toast 的表面。与画布同色，靠 `elevation-menu` / `elevation-dialog` 投影 + `{colors.border}` 描边浮起。
 - **Muted** `{colors.muted}` `#ECEEF1`：输入框 / 下拉触发器底色、标准视图组头条底、附件 chip 底。
 
-### 线条（三档，不可扩展）
+### 线条（两档，不可扩展）
 - **Border** `{colors.border}` `#DADEE4`：结构线。画布外框、浮层描边、控件边框、标题栏竖分隔、账户卡片轮廓。
-- **Table line** `{colors.table-line}` `#E4E7EC`：列表内部所有表格线（列头上下的 `border-y`、列分隔、组头/行、列表↔阅读器分隔线），以及**弹窗内部的分隔线**（头部分隔、底部按钮条、设置左侧分栏、设置项之间、同步面板区块线）。
-- **Row line** `{colors.row-line}` `#EDEFF3`：仅列表行之间的横向分割线（紧凑视图，左右各内缩 8px）。
+- **Table line** `{colors.table-line}` `#E9EBEF`：列表内部所有表格线（列头上下的 `border-y`、列分隔、组头/行、列表↔阅读器分隔线），以及**弹窗内部的分隔线**（头部分隔、底部按钮条、设置左侧分栏、设置项之间、同步面板区块线）。
+- **Row line** `{colors.row-line}` `#E9EBEF`：仅列表行之间的横向分割线（紧凑视图，左右各内缩 8px）。
 
 ### 交互
 - **Row hover** `{colors.row-hover}` `#F2F4F7`：列表行 hover；同时是全局 `--accent`（菜单项、普通按钮 hover）。
@@ -443,7 +443,7 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 
 ### Do
 - 颜色只引语义 token（`bg-card` / `text-muted-foreground` / `border-table-line`…），hex 只出现在 `globals.css` 的 `:root`。
-- 线条按三档用：结构 `border`、表格 `table-line`、行 `row-line`。
+- 线条按两档用：结构 `border`、表格与行 `table-line` / `row-line`（同值）。
 - hover/选中用两套现成色（列表 / 侧栏），菜单和普通按钮用 `accent`。
 - 已读/未读先靠字重，再整体压暗——用 `ink-read` / `ink-faint` 实色，不要用透明度（会在 hover/选中底色上二次合成）。
 - 动效只动 `opacity` / `transform` / `width`，120–200ms `ease-out`，并提供 `motion-reduce` 降级。
@@ -479,7 +479,7 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 
 ```
 颜色：背景 #F3F3F3（标题栏/侧栏，Win11 标题栏色）、画布 #FFFFFF、浮面 #FFFFFF（靠 elevation-menu 投影浮起）
-线：结构 #DADEE4、表格 #E4E7EC、行 #EDEFF3 —— 三档，不要用透明度分档
+线：结构 #DADEE4、表格与行 #E9EBEF —— 两档，不要用透明度分档
 交互：全应用一套 #F2F4F7 / #E3ECFA（列表与侧栏同值），标题栏图标 hover foreground/10
 主色：#2B5FD9；危险 #C0362C；已读墨阶 #5F656D / #8B9199 / #C3C8CF
 圆角：6 / 8 / 10 / 16 / full；画布四角 10、上边贴标题栏
@@ -494,4 +494,4 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 - **邮件正文不受本文件约束**：正文是 iframe 里的「原版式」，字体、字号、底色都来自源邮件；本文件只约束应用外壳与阅读器容器。
 - **没有深色主题**，也不打算做；本文件不提供 dark 变体。
 - **图标**：应用图标是双色 M（`docs/icon-proposals/generate.py` 生成），托盘图标按 Windows 任务栏深浅切成白/深灰，属于资产而不是设计 token。
-- **空状态插画**：没有插画体系，只有 32–48px 的 lucide 图标 + 一句文案 + 一个主按钮。
+- **空状态插画**：没有插画体系，只有 32–48px 的 Phosphor 图标 + 一句文案 + 一个主按钮。

@@ -1,4 +1,4 @@
-import { Menu, Settings2 } from "lucide-react"
+import { List, GearSix } from "@phosphor-icons/react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,7 +37,7 @@ export function AccountMenu({ accounts, activeAccountId, onSelect, onManage, tri
           title={active ? `账户：${active.email}` : "添加账户"}
           className={triggerClassName}
         >
-          <Menu className="size-4" />
+          <List className="size-4" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
@@ -60,7 +60,7 @@ export function AccountMenu({ accounts, activeAccountId, onSelect, onManage, tri
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onManage} className="text-[13px]">
-          <Settings2 className="mr-2 size-3.5" />
+          <GearSix className="mr-2 size-3.5" />
           管理账户…
         </DropdownMenuItem>
       </DropdownMenuContent>

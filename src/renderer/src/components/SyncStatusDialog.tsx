@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ClipboardCopy, FolderOpen, RefreshCw } from "lucide-react"
+import { CopySimple, FolderOpen, ArrowsClockwise } from "@phosphor-icons/react"
 import type { AccountSyncSnapshot, SyncEvent, SyncOverview, SyncState } from "@shared/types"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
@@ -182,7 +182,7 @@ function AccountCard({
             onClick={() => void mail.sync.reconnect(account.accountId).catch(() => undefined)}
             className="flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            <RefreshCw className="size-3" /> 重连
+            <ArrowsClockwise className="size-3" /> 重连
           </button>
         ) : null}
       </div>
@@ -443,7 +443,7 @@ export function SyncStatusDialog({ open, onOpenChange, events, folderLabel }: Sy
               onClick={() => void copy()}
               className="flex h-7 items-center gap-1 rounded-md px-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <ClipboardCopy className="size-3" />
+              <CopySimple className="size-3" />
               {copied ? "已复制" : "复制诊断"}
             </button>
             <button
@@ -452,7 +452,7 @@ export function SyncStatusDialog({ open, onOpenChange, events, folderLabel }: Sy
               disabled={busy}
               className="flex h-7 items-center gap-1 rounded-md px-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-default disabled:opacity-40"
             >
-              <RefreshCw className={cn("size-3", busy && "animate-spin text-primary")} />
+              <ArrowsClockwise className={cn("size-3", busy && "animate-spin text-primary")} />
               立即同步
             </button>
           </div>

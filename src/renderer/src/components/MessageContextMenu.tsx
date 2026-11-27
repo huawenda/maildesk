@@ -1,4 +1,4 @@
-import { FolderInput, Mail, MailCheck, MailOpen, Pin, ShieldAlert, Trash2, Undo2 } from "lucide-react"
+import { FolderSimple, Envelope, Checks, EnvelopeOpen, PushPin, ShieldWarning, Trash, ArrowUUpLeft } from "@phosphor-icons/react"
 import {
   ContextMenuContent,
   ContextMenuItem,
@@ -38,32 +38,32 @@ export function MessageContextMenu({
   return (
     <ContextMenuContent>
       <ContextMenuItem onSelect={() => onSetRead?.(message.id, message.unread)}>
-        {message.unread ? <MailOpen className="size-4" /> : <Mail className="size-4" />}
+        {message.unread ? <EnvelopeOpen className="size-4" /> : <Envelope className="size-4" />}
         {message.unread ? "标为已读" : "标为未读"}
         {message.unread ? null : <ContextMenuShortcut>U</ContextMenuShortcut>}
       </ContextMenuItem>
       {onMarkAllRead ? (
         <ContextMenuItem onSelect={onMarkAllRead}>
-          <MailCheck className="size-4" />
+          <Checks className="size-4" />
           全部标为已读
           <ContextMenuShortcut>Shift+U</ContextMenuShortcut>
         </ContextMenuItem>
       ) : null}
       <ContextMenuItem onSelect={() => onToggleStar?.(message.id)}>
-        <Pin className="size-4" fill={message.starred ? "currentColor" : "none"} />
+        <PushPin className="size-4" weight={message.starred ? "fill" : "regular"} />
         {message.starred ? "取消置顶" : "置顶"}
         <ContextMenuShortcut>S</ContextMenuShortcut>
       </ContextMenuItem>
       {junkFolderId ? (
         <ContextMenuItem onSelect={() => onMove?.(message.id, junkFolderId)}>
-          <ShieldAlert className="size-4" />
+          <ShieldWarning className="size-4" />
           标为垃圾邮件
         </ContextMenuItem>
       ) : null}
       {moveTargets && moveTargets.length > 0 && onMove ? (
         <ContextMenuSub>
           <ContextMenuSubTrigger>
-            <FolderInput className="size-4" />
+            <FolderSimple className="size-4" />
             移动到…
           </ContextMenuSubTrigger>
           <ContextMenuSubContent className="max-h-72 overflow-y-auto">
@@ -77,13 +77,13 @@ export function MessageContextMenu({
       ) : null}
       {permanentDelete && onRestore ? (
         <ContextMenuItem onSelect={() => onRestore(message.id)}>
-          <Undo2 className="size-4" />
+          <ArrowUUpLeft className="size-4" />
           复原
         </ContextMenuItem>
       ) : null}
       <ContextMenuSeparator />
       <ContextMenuItem variant="destructive" onSelect={() => onDelete?.(message.id)}>
-        <Trash2 className="size-4" />
+        <Trash className="size-4" />
         {permanentDelete ? "永久删除" : "删除"}
         <ContextMenuShortcut>Delete</ContextMenuShortcut>
       </ContextMenuItem>

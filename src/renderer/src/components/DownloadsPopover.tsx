@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Download, FolderOpen, X } from "lucide-react"
+import { DownloadSimple, FolderOpen, X } from "@phosphor-icons/react"
 import type { DownloadTask } from "@shared/types"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { mail } from "@/lib/ipc"
@@ -48,7 +48,7 @@ export function DownloadsPopover({ triggerClassName }: { triggerClassName: strin
     <Popover>
       <PopoverTrigger asChild>
         <button type="button" title="下载管理" className={cn(triggerClassName, "relative")}>
-          <Download className="size-4" />
+          <DownloadSimple className="size-4" />
           {active.length > 0 ? (
             <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" />
           ) : null}

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react"
-import { ChevronDown, Search, X } from "lucide-react"
+import { CaretDown, MagnifyingGlass, X } from "@phosphor-icons/react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,7 +49,7 @@ export function TitleBarSearch({ query, onQueryChange, scope, onScopeChange, foc
               className="flex h-4 shrink-0 items-center gap-0.5 rounded-full pl-2.5 pr-1.5 text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
             >
               {current.label}
-              <ChevronDown className="size-2.5 opacity-70" />
+              <CaretDown className="size-2.5 opacity-70" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" sideOffset={6} className="w-32">
@@ -96,7 +96,7 @@ export function TitleBarSearch({ query, onQueryChange, scope, onScopeChange, foc
             <X className="size-2.5" />
           </button>
         ) : (
-          <Search className="mr-1.5 size-2.5 shrink-0 text-muted-foreground/70" />
+          <MagnifyingGlass className="mr-1.5 size-2.5 shrink-0 text-muted-foreground/70" />
         )}
       </div>
     </div>

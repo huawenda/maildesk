@@ -1,31 +1,17 @@
 import { useRef, useState } from "react"
-import {
-  Activity,
-  Archive,
-  ChevronDown,
-  ChevronRight,
-  FilePenLine,
-  Folder,
-  FolderCog,
-  Inbox,
-  RefreshCw,
-  Send,
-  Settings,
-  ShieldAlert,
-  Trash2
-} from "lucide-react"
+import { Pulse, Archive, CaretDown, CaretRight, NotePencil, Folder, Folders, Tray, ArrowsClockwise, PaperPlaneTilt, Gear, ShieldWarning, Trash } from "@phosphor-icons/react"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import type { NavFolder } from "@/lib/live"
 import { labels } from "@/lib/mock"
 import { cn } from "@/lib/utils"
 
 const folderIcons = {
-  inbox: Inbox,
+  inbox: Tray,
   archive: Archive,
-  junk: ShieldAlert,
-  trash: Trash2,
-  sent: Send,
-  drafts: FilePenLine,
+  junk: ShieldWarning,
+  trash: Trash,
+  sent: PaperPlaneTilt,
+  drafts: NotePencil,
   folder: Folder
 } as const
 
@@ -108,7 +94,7 @@ export function Sidebar({
                 <Icon className="size-[15px] shrink-0 text-muted-foreground" />
                 <span className="truncate">{folder.label}</span>
                 <span className="ml-auto text-muted-foreground">
-                  {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                  {expanded ? <CaretDown className="size-3.5" /> : <CaretRight className="size-3.5" />}
                 </span>
               </button>
             )
@@ -180,7 +166,7 @@ export function Sidebar({
           title="选择要显示的文件夹"
           className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground"
         >
-          <FolderCog className="size-3.5 shrink-0" />
+          <Folders className="size-3.5 shrink-0" />
           <span className="truncate">选择文件夹</span>
         </button>
         <div className="flex h-7 items-center rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover">
@@ -189,7 +175,7 @@ export function Sidebar({
             title="手动同步 (Ctrl R)"
             className="flex h-7 min-w-0 flex-1 items-center gap-1.5 px-2"
           >
-            <RefreshCw className={cn("size-3 shrink-0", syncing && "animate-spin text-primary")} />
+            <ArrowsClockwise className={cn("size-3 shrink-0", syncing && "animate-spin text-primary")} />
             <span className="truncate">{syncLabel}</span>
           </button>
           <button
@@ -198,7 +184,7 @@ export function Sidebar({
             aria-label="同步详情"
             className="mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
           >
-            <Activity className="size-3" />
+            <Pulse className="size-3" />
           </button>
         </div>
 
@@ -208,7 +194,7 @@ export function Sidebar({
           title="设置 (Ctrl ,)"
           className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground"
         >
-          <Settings className="size-4 shrink-0" />
+          <Gear className="size-4 shrink-0" />
           <span>设置</span>
         </button>
       </div>

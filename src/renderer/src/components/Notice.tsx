@@ -1,4 +1,4 @@
-import { AlertTriangle } from "lucide-react"
+import { Warning } from "@phosphor-icons/react"
 import { cn } from "@/lib/utils"
 
 /**
@@ -17,7 +17,7 @@ export function Notice({ message }: { message: string | null }) {
           "ring-1 ring-destructive/40"
         )}
       >
-        <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
+        <Warning className="size-3.5 shrink-0 text-destructive" />
         <span className="max-w-[60ch] truncate">{message}</span>
       </div>
     </div>

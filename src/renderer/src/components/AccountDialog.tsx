@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ArrowLeft, Check, Loader2, Pencil, Plus, Trash2 } from "lucide-react"
+import { ArrowLeft, Check, CircleNotch, PencilSimple, Plus, Trash } from "@phosphor-icons/react"
 import type { Account, Security } from "@shared/types"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
@@ -191,14 +191,14 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                       title="编辑账户"
                       className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
                     >
-                      <Pencil className="size-3.5" />
+                      <PencilSimple className="size-3.5" />
                     </button>
                     <button
                       onClick={() => remove(account)}
                       title="移除此账户"
                       className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
                     >
-                      <Trash2 className="size-3.5" />
+                      <Trash className="size-3.5" />
                     </button>
                   </div>
                 ))}
@@ -298,7 +298,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                     disabled={test.kind === "testing" || !host || !port}
                     className="flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] text-foreground/90 transition-colors hover:bg-accent disabled:opacity-50"
                   >
-                    {test.kind === "testing" ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                    {test.kind === "testing" ? <CircleNotch className="size-3.5 animate-spin" /> : null}
                     测试连接
                   </button>
                   {test.kind === "ok" ? (
@@ -338,7 +338,7 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
                 disabled={saving || !email || !host || (!editingId && !password)}
                 className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
               >
-                {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                {saving ? <CircleNotch className="size-3.5 animate-spin" /> : null}
                 {editingId ? "保存修改" : "保存账户"}
               </button>
             </div>

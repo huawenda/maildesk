@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { Account, Folder, SyncEvent, SyncState } from "@shared/types"
 import { AccountDialog } from "@/components/AccountDialog"
-import { MessageList, type ListFilter } from "@/components/MessageList"
+import { MessageList } from "@/components/MessageList"
 import { Notice } from "@/components/Notice"
 import { Reader } from "@/components/Reader"
 import { FolderPickerDialog } from "@/components/FolderPickerDialog"
 import { SettingsDialog } from "@/components/SettingsDialog"
 import { SyncStatusDialog, type SyncEventLogEntry } from "@/components/SyncStatusDialog"
 import type { SearchScope } from "@/components/TitleBarSearch"
+import { DocumentTabs } from "@/components/DocumentTabs"
 import { Sidebar } from "@/components/Sidebar"
 import { TitleBar } from "@/components/TitleBar"
 import { useHotkeys } from "@/lib/hotkeys"
@@ -128,11 +129,13 @@ export default function App() {
 
   const [items, setItems] = useState<Message[]>(seedMessages)
   const [folderId, setFolderId] = useState<string>("inbox")
-  const [filter, setFilter] = useState<ListFilter>("all")
   const [activeLabel, setActiveLabel] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // 多选集合：Ctrl+点击逐条增减、Ctrl+A 全选；selectedId 同时是其中的「活动行」
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  // 文档标签页：第一个是当前文件夹（不可关），双击列表里的邮件会追加一个邮件标签
+  const [openTabs, setOpenTabs] = useState<Message[]>([])
+  const [activeTab, setActiveTab] = useState<string>("folder")
   const [detail, setDetail] = useState<Message | null>(null)
   // 标题栏常驻搜索：query 为空的列表就是当前文件夹；有 query 时列表换成跨文件夹的搜索结果
   const [searchQuery, setSearchQuery] = useState("")
@@ -507,38 +510,9 @@ export default function App() {
     return list
   }, [items, folderId, activeLabel, live])
 
-  // 「N 封」用服务器/本地库的总数，不是已加载条数
-  const folderTotal = live
-    ? (liveFolders.find((folder) => folder.id === folderId)?.totalCount ?? folderMessages.length)
-    : folderMessages.length
-
-  // 搜索时列表数据换成跨文件夹的结果，筛选页签仍然作用在这批结果上
+  // 搜索时列表数据换成跨文件夹的结果（2026-11-27 起没有「全部 / 未读 / 有附件」筛选页签，这一栏改成文档标签）
   const baseMessages = searchActive ? searchResults : folderMessages
-
-  const visible = useMemo(() => {
-    switch (filter) {
-      case "unread":
-        return baseMessages.filter((message) => message.unread)
-      case "attachments":
-        return baseMessages.filter((message) => message.hasAttachments)
-      default:
-        return baseMessages
-    }
-  }, [baseMessages, filter])
-
-  // 「N 封」必须给全量数字：未读用库里的未读总数，其余过滤条件没有全量统计就不显示
-  const folderUnread = live
-    ? (unreadCounts[folderId] ?? 0)
-    : folderMessages.filter((message) => message.unread).length
-  const listCount: number | null = searchActive
-    ? visible.length
-    : activeLabel
-      ? null
-      : filter === "all"
-        ? Math.max(folderTotal, folderMessages.length)
-        : filter === "unread"
-          ? folderUnread
-          : null
+  const visible = baseMessages
 
   const selected = useMemo(() => {
     // 搜索结果可能来自别的文件夹，items 里找不到时回落到结果集
@@ -725,6 +699,9 @@ export default function App() {
           setSearchResults((current) => current.filter((message) => !idSet.has(message.id)))
           setSelectedId((current) => (current && idSet.has(current) ? null : current))
           setSelectedIds([])
+          // 删掉的邮件如果开着标签页，一起关掉（否则会留下一个打开就报错的空标签）
+          setOpenTabs((tabs) => tabs.filter((tab) => !idSet.has(tab.id)))
+          setActiveTab((current) => (current !== "folder" && idSet.has(current) ? "folder" : current))
           // 同 moveMessage：全成功就不再重取，只有部分失败才回库对齐
           if (result.failed > 0) setRefreshTick((tick) => tick + 1)
           setFolderTick((tick) => tick + 1)
@@ -811,7 +788,6 @@ export default function App() {
   // Ctrl+A：选中整个当前文件夹（不受过滤页签限制），并切回「全部」让每一行都可见地变蓝
   const selectAll = useCallback(() => {
     if (baseMessages.length === 0) return
-    setFilter("all")
     setSelectedIds(baseMessages.map((message) => message.id))
     setSelectedId((current) =>
       current && baseMessages.some((message) => message.id === current) ? current : baseMessages[0].id
@@ -1022,6 +998,81 @@ export default function App() {
     []
   )
 
+  // 文档标签页（2026-11-27）：第一个固定是当前文件夹，双击邮件追加一个邮件标签
+  const folderTabLabel = searchActive
+    ? "搜索"
+    : (navList.find((item) => item.id === folderId)?.label ?? "邮件")
+  const activeTabMessage = openTabs.find((tab) => tab.id === activeTab) ?? null
+  // 正文是懒加载的（选中后才拉）：标签页里的 message 是列表摘要，要把 detail 合并进来才有正文
+  const activeMessage = activeTabMessage
+    ? detail && detail.id === activeTabMessage.id
+      ? {
+          ...activeTabMessage,
+          attachments: detail.attachments,
+          body: detail.body,
+          bodyHtml: detail.bodyHtml,
+          hasAttachments: detail.hasAttachments
+        }
+      : activeTabMessage
+    : null
+
+  const openMessageTab = useCallback(
+    (id: string) => {
+      const message = items.find((item) => item.id === id) ?? searchResults.find((item) => item.id === id) ?? null
+      if (!message) return
+      setOpenTabs((tabs) => (tabs.some((tab) => tab.id === id) ? tabs : [...tabs, message]))
+      setActiveTab(id)
+      setSelectedId(id)
+      setSelectedIds([id])
+    },
+    [items, searchResults]
+  )
+
+  const closeTab = useCallback((id: string) => {
+    setOpenTabs((tabs) => tabs.filter((tab) => tab.id !== id))
+    setActiveTab((current) => (current === id ? "folder" : current))
+  }, [])
+
+  const activateTab = useCallback((id: string) => {
+    setActiveTab(id)
+    if (id === "folder") return
+    setSelectedId(id)
+    setSelectedIds([id])
+  }, [])
+
+  // 换文件夹 / 进搜索 / 切标签页时回到「文件夹」页签：这几个动作都是导航，不该停在某封邮件的正文里
+  useEffect(() => {
+    setActiveTab("folder")
+  }, [folderId, searchActive, activeLabel])
+
+  // 列表栏与邮件标签共用同一个阅读器：邮件标签模式下让正文独占整块画布
+  const readerFor = (message: Message | null) => (
+    <Reader
+      message={message}
+      fontSize={fontSize}
+      remoteImages={remoteImages}
+      onToggleStar={() => message && toggleStar(message.id)}
+      onToggleUnread={() => message && markRead(message.id, false)}
+      onSetRead={markRead}
+      onMarkAllRead={markAllRead}
+      junkFolderId={junkFolderId}
+      onRestore={inTrash ? restoreMessage : undefined}
+      onNavigate={(target: Message) => {
+        // 抽屉里跳到别的文件夹的邮件：切箱、清搜索、选中并标已读
+        setFolderId(target.folderId)
+        setSearchQuery("")
+        setActiveLabel(null)
+        setSelectedId(target.id)
+        setSelectedIds([target.id])
+        markRead(target.id)
+      }}
+      moveTargets={moveTargets}
+      onMove={(targetFolderId) => message && moveMessage(message.id, targetFolderId)}
+      onDelete={() => message && deleteMessage(message.id)}
+      permanentDelete={inTrash === true}
+    />
+  )
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
       <TitleBar
@@ -1083,94 +1134,90 @@ export default function App() {
             侧栏收起时左边也补 7px，卡片三边对称；外圈 1px --border 勾边（2026-11-27 用户要求） */}
         <div
           className={cn(
-            "mb-[7px] mt-0 mr-[7px] flex min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-card transition-[margin-left] duration-200 ease-out motion-reduce:transition-none",
+            "mb-[7px] mt-0 mr-[7px] flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card transition-[margin-left] duration-200 ease-out motion-reduce:transition-none",
             collapsed ? "ml-[7px]" : "ml-0"
           )}
         >
-          <MessageList
-            folderId={folderId}
-            messages={visible}
-            searching={searchActive}
-            resetKey={searchActive ? searchQuery + "|" + searchScope : undefined}
-            folderNameOf={searchActive ? folderLabelOf : undefined}
-            highlightQuery={searchActive ? searchQuery.trim() : undefined}
-            highlightScope={searchActive ? searchScope : undefined}
-            syncing={syncing}
-            syncHint={syncLabel}
-            noAccounts={!live}
-            countLabel={listCount}
-            selectedId={selectedId}
-            selectedIds={selectedIds}
-            onSelect={select}
-            onToggleStar={toggleStar}
-            onContextSelect={(id) => {
-              setSelectedId(id)
-              setSelectedIds((current) => (current.includes(id) ? current : [id]))
-            }}
-            onSetRead={markRead}
-            onMarkAllRead={markAllRead}
-            onMove={moveMessage}
-            moveTargets={moveTargets}
-            onDelete={deleteMessage}
-            permanentDelete={inTrash === true}
-            onRestore={inTrash ? restoreMessage : undefined}
-            junkFolderId={junkFolderId}
-            density={density}
-            standardThreeLines={standardThreeLines}
-            groupHeadersNonCompact={groupHeadersNonCompact}
-            stickyGroupHeaders={stickyGroupHeaders}
-            showTimeNonCompact={showTimeNonCompact}
-            filter={filter}
-            onFilterChange={setFilter}
-            loading={loading}
-            width={listWidth}
-            paneRef={listPaneRef}
+          <DocumentTabs
+            tabs={[
+              { id: "folder", label: folderTabLabel, title: folderTabLabel, closable: false, kind: "folder" },
+              ...openTabs.map((tab) => ({
+                id: tab.id,
+                label: tab.subject || "(无主题)",
+                title: tab.subject,
+                closable: true,
+                kind: "mail" as const
+              }))
+            ]}
+            active={activeTab}
+            onActivate={activateTab}
+            onClose={closeTab}
           />
-          {/* 1px 分隔线本身就是拖拽把手：5px 命中区，跨在两栏边界上 */}
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="拖动调整列表宽度"
-            title="拖动调整列表宽度，双击复位"
-            onPointerDown={startResize}
-            onDoubleClick={() => {
-              setListWidth(LIST_DEFAULT)
-              store("maildesk.listWidth", LIST_DEFAULT)
-            }}
-            className="group relative z-10 -ml-[2px] mr-[-3px] w-[5px] shrink-0 cursor-col-resize"
-          >
-            {/* 线固定落在整数像素上（left:2px），不能用 -translate-x-1/2，否则半像素会被抗锯齿成 2px */}
-            <span
-              className={cn(
-                "list-divider absolute inset-y-0 left-[2px] w-px transition-colors",
-                "bg-table-line group-hover:bg-primary/70"
-              )}
-            />
-          </div>
-          <Reader
-            message={selected}
-            fontSize={fontSize}
-            remoteImages={remoteImages}
-            onToggleStar={() => selectedId && toggleStar(selectedId)}
-            onToggleUnread={() => selectedId && markRead(selectedId, false)}
-            onSetRead={markRead}
-            onMarkAllRead={markAllRead}
-            junkFolderId={junkFolderId}
-            onRestore={inTrash ? restoreMessage : undefined}
-            onNavigate={(target: Message) => {
-              // 抽屉里跳到别的文件夹的邮件：切箱、清搜索、选中并标已读
-              setFolderId(target.folderId)
-              setSearchQuery("")
-              setActiveLabel(null)
-              setSelectedId(target.id)
-              setSelectedIds([target.id])
-              markRead(target.id)
-            }}
-            moveTargets={moveTargets}
-            onMove={(targetFolderId) => selectedId && moveMessage(selectedId, targetFolderId)}
-            onDelete={() => selectedId && deleteMessage(selectedId)}
-            permanentDelete={inTrash === true}
-          />
+          {activeMessage ? (
+            <div className="flex min-h-0 flex-1">{readerFor(activeMessage)}</div>
+          ) : (
+            <div className="flex min-h-0 flex-1">
+              <MessageList
+                folderId={folderId}
+                messages={visible}
+                searching={searchActive}
+                resetKey={searchActive ? searchQuery + "|" + searchScope : undefined}
+                folderNameOf={searchActive ? folderLabelOf : undefined}
+                highlightQuery={searchActive ? searchQuery.trim() : undefined}
+                highlightScope={searchActive ? searchScope : undefined}
+                syncing={syncing}
+                syncHint={syncLabel}
+                noAccounts={!live}
+                selectedId={selectedId}
+                selectedIds={selectedIds}
+                onSelect={select}
+                onOpenTab={openMessageTab}
+                onToggleStar={toggleStar}
+                onContextSelect={(id) => {
+                  setSelectedId(id)
+                  setSelectedIds((current) => (current.includes(id) ? current : [id]))
+                }}
+                onSetRead={markRead}
+                onMarkAllRead={markAllRead}
+                onMove={moveMessage}
+                moveTargets={moveTargets}
+                onDelete={deleteMessage}
+                permanentDelete={inTrash === true}
+                onRestore={inTrash ? restoreMessage : undefined}
+                junkFolderId={junkFolderId}
+                density={density}
+                standardThreeLines={standardThreeLines}
+                groupHeadersNonCompact={groupHeadersNonCompact}
+                stickyGroupHeaders={stickyGroupHeaders}
+                showTimeNonCompact={showTimeNonCompact}
+                loading={loading}
+                width={listWidth}
+                paneRef={listPaneRef}
+              />
+              {/* 1px 分隔线本身就是拖拽把手：5px 命中区，跨在两栏边界上 */}
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="拖动调整列表宽度"
+                title="拖动调整列表宽度，双击复位"
+                onPointerDown={startResize}
+                onDoubleClick={() => {
+                  setListWidth(LIST_DEFAULT)
+                  store("maildesk.listWidth", LIST_DEFAULT)
+                }}
+                className="group relative z-10 -ml-[2px] mr-[-3px] w-[5px] shrink-0 cursor-col-resize"
+              >
+                {/* 线固定落在整数像素上（left:2px），不能用 -translate-x-1/2，否则半像素会被抗锯齿成 2px */}
+                <span
+                  className={cn(
+                    "list-divider absolute inset-y-0 left-[2px] w-px transition-colors",
+                    "bg-table-line group-hover:bg-primary/70"
+                  )}
+                />
+              </div>
+              {readerFor(selected)}
+            </div>
+          )}
         </div>
       </div>
 

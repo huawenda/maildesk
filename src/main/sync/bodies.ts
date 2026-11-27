@@ -1,3 +1,4 @@
+import { logger } from "../log"
 import type { ImapFlow, MessageStructureObject } from "imapflow"
 import type { Folder, SyncEvent } from "@shared/types"
 import { getFolder } from "../db/folders"
@@ -143,7 +144,7 @@ export class BodySync {
         )
       }
       walk(item.structure)
-      console.warn("[sync] body has no text part", { messageId: id, uid: item.uid, leaves })
+      logger.warn("[sync] body has no text part", { messageId: id, uid: item.uid, leaves })
       const attachments = attachmentsFromParts(collectAttachmentParts(item.structure), id)
       setMessageBody(id, "", null, false, attachments)
     }
@@ -188,7 +189,7 @@ export class BodySync {
             }
             // 纯图片邮件里漏一张就是整封空白：把「为什么跳过」写进日志，免得只能靠猜
             if (skipped > 0) {
-              console.warn("[sync] inline image skipped", {
+              logger.warn("[sync] inline image skipped", {
                 messageId: id,
                 uid,
                 skipped,
@@ -232,7 +233,7 @@ export class BodySync {
       }
       report()
       const finish = () => {
-        console.log("[sync] body backfill done", this.ctx.accountEmail)
+        logger.info("[sync] body backfill done", this.ctx.accountEmail)
         this.current = undefined
         this.ctx.emit({ type: "bodies", accountId: this.ctx.accountId, done: total, total, finished: true })
       }
@@ -286,7 +287,7 @@ export class BodySync {
   /** 后台正文链的懒启动入口：首次同步、历史回溯、增量同步都可能把正文让给它。 */
   kick(): void {
     if (this.running || this.ctx.stopped()) return
-    void this.runBackfill().catch((error) => console.error("[sync] body backfill failed", String(error)))
+    void this.runBackfill().catch((error) => logger.error("[sync] body backfill failed", String(error)))
   }
 
   /**
@@ -317,7 +318,7 @@ export class BodySync {
             onProgress(count)
           }
         } catch (error) {
-          console.error("[sync] body chunk failed", folder.path, String(error))
+          logger.error("[sync] body chunk failed", folder.path, String(error))
           // 连接已经断了就别拿着它继续排队，剩下的块让别的连接接
           if (!client.usable) return
         }
@@ -325,7 +326,7 @@ export class BodySync {
     }
     await Promise.all(clients.map((client) => work(client)))
     if (DEBUG) {
-      console.log("[sync] body batch", folder.path, {
+      logger.info("[sync] body batch", folder.path, {
         messages: list.length,
         workers: clients.length,
         fetched: processed,

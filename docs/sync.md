@@ -459,3 +459,4 @@ FTS5 的触发器挂在 `message` 的 INSERT/DELETE/UPDATE 上；删文件夹必
 | 2026-11-27 | 文件夹清单与收件箱 STATUS 刷新拆到 `sync/folder-refresh.ts`，engine 只接状态回调；engine 2065 → 1730 行 |
 | 2026-11-27 | 正文链（补齐 / 分块并发 / 内嵌图）拆到 `sync/bodies.ts`（`BodySync`），进度与事件通过 `BodySyncContext` 注入；engine 1730 → 1429 行 |
 | 2026-11-27 | 对账扫描拆到 `sync/reconcile.ts`，engine 只保留「何时对账 / 选哪些文件夹 / 快照更新」；engine 1429 → 1273 行 |
+| 2026-11-27 | 同步层日志从 `console.*` 改为 electron-log（`logger.info/warn/error`），事件与错误开始落 `main.log`；`parse.ts` 保持 console（纯模块，单测不引 electron） |

@@ -1,3 +1,4 @@
+import { logger } from "../log"
 /**
  * 附件下载与预取（从 engine.ts 拆出）。
  *
@@ -86,7 +87,7 @@ export class AttachmentDownloader {
       try {
         await this.download(messageId, item.id)
       } catch (error) {
-        console.error("[sync] attachment prefetch failed", messageId, String(error))
+        logger.error("[sync] attachment prefetch failed", messageId, String(error))
       }
     }
   }
@@ -122,7 +123,7 @@ export class AttachmentDownloader {
     const client = (await this.ctx.workerClient()) ?? this.ctx.client()
     if (!client) return null
     if (DEBUG) {
-      console.log("[attach] begin", {
+      logger.info("[attach] begin", {
         messageId,
         attachmentId,
         uid: locator.uid,
@@ -153,7 +154,7 @@ export class AttachmentDownloader {
       })
       if (!download?.content) return null
       if (DEBUG) {
-        console.log("[attach] stream open", {
+        logger.info("[attach] stream open", {
           uid: locator.uid,
           part,
           size: attachment.size,
@@ -192,7 +193,7 @@ export class AttachmentDownloader {
         report(loaded)
       } catch (error) {
         if (this.canceled.has(attachmentId) || /canceled|stalled/i.test(String(error))) {
-          console.error("[sync] attachment download aborted", attachmentId, lastBytes, String(error))
+          logger.error("[sync] attachment download aborted", attachmentId, lastBytes, String(error))
           return null
         }
         throw error

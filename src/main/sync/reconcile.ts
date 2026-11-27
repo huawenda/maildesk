@@ -1,3 +1,4 @@
+import { logger } from "../log"
 /**
  * 双向对账（从 engine.ts 拆出）：枚举服务器 UID/FLAGS 与本地库比对，
  * 认领被移动的邮件（Message-ID）、补拉新邮件、删除服务器已消失的、回写已读态与游标。
@@ -68,7 +69,7 @@ export async function reconcileFolders(ctx: ReconcileContext, opts: ReconcileOpt
       if (folder.uidValidity !== uidValidity) continue
       const exists = Number(mailbox.exists ?? 0)
       if (exists > RECONCILE_MAX_MESSAGES) {
-        console.warn("[sync] reconcile skipped, folder too large", folder.path, exists)
+        logger.warn("[sync] reconcile skipped, folder too large", folder.path, exists)
         continue
       }
       const seen = new Map<number, boolean>()
@@ -89,7 +90,7 @@ export async function reconcileFolders(ctx: ReconcileContext, opts: ReconcileOpt
   if (DEBUG) {
     for (const folder of folders) {
       const server = serverIndex.get(folder.id)
-      console.log(
+      logger.info(
         "[sync] scan",
         folder.path,
         "server",
@@ -150,7 +151,7 @@ export async function reconcileFolders(ctx: ReconcileContext, opts: ReconcileOpt
               claimed.add(previous.id)
               moved += 1
             } catch (error) {
-              console.error("[sync] claim moved message failed", String(error))
+              logger.error("[sync] claim moved message failed", String(error))
               batch.push(incoming)
               bodyItems.push({ uid: incoming.uid, structure: message.bodyStructure })
             }
@@ -211,7 +212,7 @@ export async function reconcileFolders(ctx: ReconcileContext, opts: ReconcileOpt
   // 只删文件夹时 added/moved/flagged 全是 0，但 UI 必须收到事件才会重拉侧栏，
   // 否则启动瞬间取到的旧文件夹清单会一直挂在界面上。
   if (added > 0 || moved > 0 || expired.length > 0 || flagged > 0 || foldersRemoved > 0) {
-    console.log(
+    logger.info(
       "[sync] reconcile",
       ctx.accountEmail,
       "added", added, "moved", moved, "removed", expired.length, "flags", flagged

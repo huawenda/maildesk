@@ -1,3 +1,4 @@
+import { logger } from "../log"
 /**
  * 文件夹清单与收件箱状态刷新（从 engine.ts 拆出）。
  * 只读写数据库与 ctx 提供的状态映射，不碰同步队列。
@@ -88,7 +89,7 @@ export async function refreshFolders(ctx: FolderRefreshContext): Promise<number>
     dropMessageCaches(messageIdsInFolder(folder.id))
     deleteFolder(folder.id)
     removed += 1
-    console.log("[sync] folder removed", ctx.accountEmail, folder.path)
+    logger.info("[sync] folder removed", ctx.accountEmail, folder.path)
   }
   ctx.markRefreshed()
   return removed
@@ -107,6 +108,6 @@ export async function refreshInboxStatus(ctx: FolderRefreshContext): Promise<voi
     if (!status) return
     ctx.setStatus(inbox.id, `${status.messages ?? -1}:${status.unseen ?? -1}:${status.uidNext ?? -1}`)
   } catch (error) {
-    console.error("[sync] inbox status failed", ctx.accountEmail, String(error))
+    logger.error("[sync] inbox status failed", ctx.accountEmail, String(error))
   }
 }

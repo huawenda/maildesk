@@ -1,3 +1,4 @@
+import { logger } from "../log"
 import { BrowserWindow, shell } from "electron"
 import { CH } from "@shared/channels"
 import { ipcError } from "@shared/errors"
@@ -26,7 +27,7 @@ export function emitSync(event: SyncEvent): void {
     try {
       listener(event)
     } catch (error) {
-      console.error("[sync] listener failed", String(error))
+      logger.error("[sync] listener failed", String(error))
     }
   }
   for (const win of BrowserWindow.getAllWindows()) {
@@ -272,7 +273,7 @@ export function markReadRemote(ids: string[], read: boolean): void {
     const engine = engines.get(accountId)
     if (!engine) continue
     void engine.markRead(group, read).catch((error) => {
-      console.error("[sync] push read state failed", accountId, String(error))
+      logger.error("[sync] push read state failed", accountId, String(error))
     })
   }
 }
@@ -315,7 +316,7 @@ export async function deleteMessages(
       deleted += result.deleted
       failed += result.failed
     } catch (error) {
-      console.error("[sync] delete failed", accountId, String(error))
+      logger.error("[sync] delete failed", accountId, String(error))
       failed += group.length
     }
   }
@@ -330,7 +331,7 @@ export async function loadMessageBody(messageId: string): Promise<boolean> {
     if (!engine) return false
     return await engine.fetchBody(messageId)
   } catch (error) {
-    console.error("[sync] load body failed", messageId, String(error))
+    logger.error("[sync] load body failed", messageId, String(error))
     return false
   }
 }

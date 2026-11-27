@@ -1,3 +1,4 @@
+import { logger } from "../log"
 import { ImapFlow } from "imapflow"
 import type { MessageStructureObject } from "imapflow"
 import type {
@@ -366,7 +367,7 @@ export class SyncEngine {
       )
     )
     client.on("error", (error) => {
-      console.error("[sync] body worker error", this.account.email, String(error))
+      logger.error("[sync] body worker error", this.account.email, String(error))
       this.bodyClients[index] = undefined
     })
     client.on("close", () => {
@@ -375,11 +376,11 @@ export class SyncEngine {
     try {
       await client.connect()
     } catch (error) {
-      console.error("[sync] body worker connect failed", this.account.email, String(error))
+      logger.error("[sync] body worker connect failed", this.account.email, String(error))
       return null
     }
     this.bodyClients[index] = client
-    if (DEBUG) console.log("[sync] body worker connected", this.account.email, index + 2)
+    if (DEBUG) logger.info("[sync] body worker connected", this.account.email, index + 2)
     return client
   }
 
@@ -530,7 +531,7 @@ export class SyncEngine {
       this.lastSyncAt = Date.now()
       this.setState("idling")
     } catch (error) {
-      console.error("[sync] poll inbox failed", String(error))
+      logger.error("[sync] poll inbox failed", String(error))
     }
   }
 
@@ -559,7 +560,7 @@ export class SyncEngine {
 
     client.on("error", (error) => {
       if (this.stopped) return
-      console.error("[sync] imap error", this.account.email, String(error))
+      logger.error("[sync] imap error", this.account.email, String(error))
       this.fail("network", String(error))
     })
     client.on("close", () => {
@@ -599,7 +600,7 @@ export class SyncEngine {
   }
 
   private fail(_code: string, message: string): void {
-    console.error("[sync]", this.account.email, message)
+    logger.error("[sync]", this.account.email, message)
     this.setState("error", { error: message })
   }
 
@@ -609,7 +610,7 @@ export class SyncEngine {
    */
   private recover(reason: string, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error)
-    console.error("[sync]", reason, "failed", this.account.email, message)
+    logger.error("[sync]", reason, "failed", this.account.email, message)
     this.setState("error", { error: message })
     if (this.client) {
       this.startPolling()
@@ -670,7 +671,7 @@ export class SyncEngine {
         await this.syncFolder(folder, limit)
       } catch (error) {
         // 单个箱子被服务器拒绝（权限、刚被删）不能让后面的收件箱/其他箱子都停下
-        console.error("[sync] folder sync failed", this.account.email, folder.path, String(error))
+        logger.error("[sync] folder sync failed", this.account.email, folder.path, String(error))
       }
     }
   }
@@ -685,13 +686,13 @@ export class SyncEngine {
   private startBackfill(): void {
     if (this.backfilling || this.stopped) return
     // 连上账户就无条件把邮箱里的邮件全部下载到本地（不做策略截断、不做渐进式）
-    console.log("[sync] backfill start", this.account.email)
+    logger.info("[sync] backfill start", this.account.email)
     this.backfilling = true
     // 顺序：修历史数据 → 先把已有的缺正文补齐（最近优先）→ 再往前翻历史头部。
     // 历史批次的正文由 backfillBatch 里的 kickBodyBackfill() 接力，正文链始终走后台，不挡「已同步」。
     void this.backgroundUpkeep()
       .then(() => this.backfillLoop())
-      .catch((error) => console.error("[sync] backfill failed", String(error)))
+      .catch((error) => logger.error("[sync] backfill failed", String(error)))
       .finally(() => {
         this.backfilling = false
       })
@@ -723,7 +724,7 @@ export class SyncEngine {
     while (!this.stopped) {
       const folder = this.nextBackfillFolder()
       if (!folder) {
-        console.log("[sync] backfill done", this.account.email)
+        logger.info("[sync] backfill done", this.account.email)
         return
       }
       let progressed = false
@@ -731,7 +732,7 @@ export class SyncEngine {
         progressed = await this.backfillBatch(folder)
       } catch (error) {
         // 连接抖动时让出，靠普通同步的重连逻辑恢复，不要把整个循环打死
-        console.error("[sync] backfill batch failed", folder.path, String(error))
+        logger.error("[sync] backfill batch failed", folder.path, String(error))
         await sleep(5000)
       }
       if (!progressed) {
@@ -865,7 +866,7 @@ export class SyncEngine {
       const uidNext = Number(mailbox.uidNext)
       // \Noselect 容器（或异常 SELECT）没有 UID 体系：不要再往下算，否则会把 NaN 写进游标
       if (!Number.isFinite(uidValidity) || !Number.isFinite(uidNext)) {
-        if (DEBUG) console.log("[sync] skip folder without uid space", folder.path)
+        if (DEBUG) logger.info("[sync] skip folder without uid space", folder.path)
         return
       }
       this.serverCounts.set(folder.id, Number(mailbox.exists ?? 0))
@@ -873,7 +874,7 @@ export class SyncEngine {
       let lastSyncedUid = folder.lastSyncedUid
       if (folder.uidValidity !== null && folder.uidValidity !== uidValidity) {
         // PRD FR-05.4：UIDVALIDITY 变了就意味着 UID 全部失效，整箱重来
-        console.log("[sync] UIDVALIDITY changed", folder.path, folder.uidValidity, "->", uidValidity, "清空重拉")
+        logger.info("[sync] UIDVALIDITY changed", folder.path, folder.uidValidity, "->", uidValidity, "清空重拉")
         dropMessageCaches(messageIdsInFolder(folder.id))
         clearFolderMessages(folder.id)
         resetBackfillUid(folder.id)
@@ -932,7 +933,7 @@ export class SyncEngine {
       })
       updateFolderCounts(folder.id, countFolder(folder.id))
       if (DEBUG) {
-        console.log("[sync] folder", folder.path, {
+        logger.info("[sync] folder", folder.path, {
           from,
           highest,
           fetched,
@@ -1055,7 +1056,7 @@ export class SyncEngine {
         }
       } catch (error) {
         failed += group.items.length
-        console.error("[sync] move failed", group.folder.path, "->", target.path, String(error))
+        logger.error("[sync] move failed", group.folder.path, "->", target.path, String(error))
       } finally {
         lock.release()
       }
@@ -1099,7 +1100,7 @@ export class SyncEngine {
             await client.messageDelete(String(uid), { uid: true })
             remaining.delete(uid)
           } catch (error) {
-            console.error("[sync] delete retry failed", group.folder.path, uid, String(error))
+            logger.error("[sync] delete retry failed", group.folder.path, uid, String(error))
           }
         }
         const gone = group.items.filter((item) => !remaining.has(item.uid))
@@ -1111,11 +1112,11 @@ export class SyncEngine {
         deleted += gone.length
         failed += group.items.length - gone.length
         if (remaining.size > 0) {
-          console.error("[sync] delete left", remaining.size, "on server", group.folder.path)
+          logger.error("[sync] delete left", remaining.size, "on server", group.folder.path)
         }
       } catch (error) {
         failed += group.items.length
-        console.error("[sync] delete failed", group.folder.path, String(error))
+        logger.error("[sync] delete failed", group.folder.path, String(error))
       } finally {
         lock.release()
       }
@@ -1173,7 +1174,7 @@ export class SyncEngine {
           lock.release()
         }
       } catch (error) {
-        console.error("[sync] push flags failed", group.folder.path, String(error))
+        logger.error("[sync] push flags failed", group.folder.path, String(error))
       }
     }
   }
@@ -1210,12 +1211,12 @@ export class SyncEngine {
         return !current || current !== previous
       })
       if (DEBUG && targets.length < folders.length) {
-        console.log("[sync] reconcile shallow", this.account.email, `${targets.length}/${folders.length}`)
+        logger.info("[sync] reconcile shallow", this.account.email, `${targets.length}/${folders.length}`)
       }
       if (targets.length === 0) {
         // 只删了文件夹时没有 UID 需要扫，但侧栏必须收到信号重拉清单
         if (foldersRemoved > 0) {
-          console.log("[sync] reconcile " + reason, this.account.email, "folders removed", foldersRemoved)
+          logger.info("[sync] reconcile " + reason, this.account.email, "folders removed", foldersRemoved)
           this.hooks.emit({
             type: "reconcile",
             accountId: this.account.id,
@@ -1253,7 +1254,7 @@ export class SyncEngine {
         }
       )
     } catch (error) {
-      console.error("[sync] reconcile failed", this.account.email, reason, String(error))
+      logger.error("[sync] reconcile failed", this.account.email, reason, String(error))
     } finally {
       this.reconciling = false
     }
@@ -1267,7 +1268,7 @@ export class SyncEngine {
     try {
       await client.mailboxOpen(inbox.path)
     } catch (error) {
-      console.error("[sync] mailboxOpen inbox failed", String(error))
+      logger.error("[sync] mailboxOpen inbox failed", String(error))
     }
   }
 }

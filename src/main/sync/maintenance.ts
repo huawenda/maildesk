@@ -1,3 +1,4 @@
+import { logger } from "../log"
 /**
  * 一次性历史数据修补（从 engine.ts 拆出）：附件标记与收件人姓名。
  * 两者都用 setting 表里的 marker 控制只跑一次；连接与账户信息由 engine 注入。
@@ -69,7 +70,7 @@ export async function refreshAttachmentFlags(ctx: MaintenanceContext): Promise<v
       }
     } catch (error) {
       failed += 1
-      console.error("[sync] attachment flags failed", folder.path, String(error))
+      logger.error("[sync] attachment flags failed", folder.path, String(error))
     }
   }
   // 这一批就把当时的候选全部处理完了才落 marker；超过上限或有文件夹失败就留到下次启动重试
@@ -129,14 +130,14 @@ export async function refreshRecipientNames(ctx: MaintenanceContext): Promise<vo
       }
     } catch (error) {
       failed += 1
-      console.error("[sync] recipient names failed", folder.path, String(error))
+      logger.error("[sync] recipient names failed", folder.path, String(error))
     }
   }
   // 有文件夹失败就不落 marker，下次启动再补，免得这一批漏掉的姓名永远停在旧值
   if (failed === 0) {
     run("INSERT OR REPLACE INTO setting (key, value) VALUES (?, 'true')", markerKey)
   }
-  console.log("[sync] recipient names refreshed", ctx.accountEmail, updated)
+  logger.info("[sync] recipient names refreshed", ctx.accountEmail, updated)
   // 界面可能在修正前就已经把列表读进内存了，补一个刷新信号
   if (updated > 0) ctx.emitRecipients(updated)
 }

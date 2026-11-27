@@ -25,6 +25,8 @@
 | --- | --- |
 | `src/main/sync/engine.ts` | 同步引擎：连接、队列、增量、正文、回溯、对账、本地操作（附件下载已拆到下一个文件） |
 | `src/main/sync/attachment-download.ts` | 附件下载器：缓存优先、流式落盘、去重、取消、预取（`AttachmentDownloader`） |
+| `src/main/sync/bodies.ts` | 正文链：缺正文补齐、分块并发下载、内嵌图嵌入（`BodySync`，进度由 engine 快照读取） |
+| `src/main/sync/reconcile.ts` | 双向对账：枚举 UID/FLAGS、Message-ID 认领移动、补拉/删除/已读回写、游标与计数 |
 | `src/main/sync/maintenance.ts` | 一次性历史修补：附件标记（BODYSTRUCTURE 重算）、收件人姓名（重读 To/Cc 原始头） |
 | `src/main/sync/folder-refresh.ts` | 文件夹清单 / 收件箱 STATUS 刷新（含服务器删除文件夹的本地清理） |
 | `src/main/sync/manager.ts` | 引擎注册表、事件广播、按账户路由、下载管理器、状态聚合 |
@@ -139,6 +141,8 @@ Manager (单例)
 
 ## 7. 正文与内嵌图（`fetchBodies`）
 
+实现集中在 `sync/bodies.ts` 的 `BodySync`（2026-11-27 从 engine 拆出）：engine 的 `fetchBodies` / `bodyBackfillLoop` / `kickBodyBackfill` 只是转发，进度与 `bodies` 事件通过 `BodySyncContext` 注入。
+
 - 只处理 `idsNeedingBody`：`body_text IS NULL` 或（`has_html = 1 AND body_html IS NULL`）。
   **已有正文永不覆盖**，附件行也不会重插（会丢 `local_path`）。
 - 按「part 号组合」分组，把结构相同的邮件合并成一次 `FETCH bodyParts`，每批 50。
@@ -235,6 +239,8 @@ Manager (单例)
 - 连续两轮没进展（各等 2s）就退出；新邮件让 `totalCount` 变大后，下次 `startBackfill` 会再跑。
 
 ## 10. 对账（`reconcileAccount`）
+
+扫描与认领实现在 `sync/reconcile.ts`（2026-11-27 拆出）；engine 只决定「这一轮跑不跑、扫哪些文件夹、什么时候更新 STATUS 快照」。
 
 目标：把服务端的「删除 / 移动 / 已读」对齐到本地，并把文件夹清单也双向同步。
 
@@ -451,3 +457,5 @@ FTS5 的触发器挂在 `message` 的 INSERT/DELETE/UPDATE 上；删文件夹必
 | 2026-11-27 | 附件下载从 `engine.ts` 拆到 `sync/attachment-download.ts`（`AttachmentDownloader`），行为不变；engine 只保留三个转发方法 |
 | 2026-11-27 | 历史修补（附件标记 / 收件人姓名）拆到 `sync/maintenance.ts`；顺手修正附件标记 marker 写错 key（无候选时写成了全局 key，导致每个账户每轮都重跑） |
 | 2026-11-27 | 文件夹清单与收件箱 STATUS 刷新拆到 `sync/folder-refresh.ts`，engine 只接状态回调；engine 2065 → 1730 行 |
+| 2026-11-27 | 正文链（补齐 / 分块并发 / 内嵌图）拆到 `sync/bodies.ts`（`BodySync`），进度与事件通过 `BodySyncContext` 注入；engine 1730 → 1429 行 |
+| 2026-11-27 | 对账扫描拆到 `sync/reconcile.ts`，engine 只保留「何时对账 / 选哪些文件夹 / 快照更新」；engine 1429 → 1273 行 |

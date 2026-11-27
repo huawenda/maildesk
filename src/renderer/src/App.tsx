@@ -12,6 +12,7 @@ import { DocumentTabs } from "@/components/DocumentTabs"
 import { Sidebar } from "@/components/Sidebar"
 import { TitleBar } from "@/components/TitleBar"
 import { useHotkeys } from "@/lib/hotkeys"
+import { useSidebarPeek } from "@/hooks/use-sidebar-peek"
 import { setDragging } from "@/lib/drag-pause"
 import { describeIpcError, mail } from "@/lib/ipc"
 import { clampListWidth, LIST_DEFAULT, listMaxWidth, readStored, store } from "@/lib/preferences"
@@ -116,37 +117,11 @@ export default function App() {
   const [searchFocusToken, setSearchFocusToken] = useState(0)
   const [density, setDensity] = useState<Density>(() => readStored("maildesk.density", "standard"))
   const [collapsed, setCollapsed] = useState<boolean>(() => readStored("maildesk.sidebarCollapsed", false))
-  // 侧栏：**始终绝对定位**的面板 + 一个只占位的 gap。
+  // ��栏：**始终绝对定位**的面板 + 一个只占位的 gap。
   // 面板靠 transform 滑入滑出（合成器动画，列表一帧都不重绘）；gap 的宽度 = 侧栏是否占位，
   // 停靠/展开时 gap 从 0 过渡到 220，画布就是被它推向右的。
   // 参考 shadcn 的 Peek & Pin（gap + absolute panel）与 OpenCode 的 sidebar-peek。
-  const [sidebarPeek, setSidebarPeek] = useState(false)
-  const peekTimer = useRef<number | null>(null)
-  const cancelPeekClose = useCallback(() => {
-    if (peekTimer.current !== null) {
-      window.clearTimeout(peekTimer.current)
-      peekTimer.current = null
-    }
-  }, [])
-  const openSidebarPeek = useCallback(() => {
-    if (!collapsed) return
-    cancelPeekClose()
-    setSidebarPeek(true)
-  }, [cancelPeekClose, collapsed])
-  // 按钮和面板之间隔着标题栏，移出按钮不能立刻收：留 180ms 让指针走进面板
-  const closeSidebarPeekSoon = useCallback(() => {
-    cancelPeekClose()
-    peekTimer.current = window.setTimeout(() => {
-      peekTimer.current = null
-      setSidebarPeek(false)
-    }, 180)
-  }, [cancelPeekClose])
-  useEffect(() => {
-    if (collapsed) return
-    cancelPeekClose()
-    setSidebarPeek(false)
-  }, [collapsed, cancelPeekClose])
-  useEffect(() => () => cancelPeekClose(), [cancelPeekClose])
+  const peek = useSidebarPeek(collapsed)
   const [fontSize, setFontSize] = useState<number>(() => readStored("maildesk.fontSize", 14))
   const [listWidth, setListWidth] = useState<number>(() =>
     clampListWidth(readStored("maildesk.listWidth", LIST_DEFAULT), window.innerWidth)
@@ -998,10 +973,9 @@ export default function App() {
 
     // 抽屉开着时点按钮 = 停靠：面板原地不动（transform 一直是 0），只让 gap 从 0 长到 220，
     // 画布因此向右让位；露出抽屉的那一帧就已经是最终位置，没有交接、没有二次移动（2026-11-27）
-    cancelPeekClose()
-    setSidebarPeek(false)
+    peek.close()
     setCollapsed((value) => !value)
-  }, [cancelPeekClose])
+  }, [peek.close])
 
   useEffect(
     () => () => {
@@ -1105,7 +1079,7 @@ export default function App() {
         onManageAccounts={() => setAccountsOpen(true)}
         collapsed={collapsed}
         onToggleCollapsed={toggleSidebar}
-        onHoverCollapsed={(hovering) => (hovering ? openSidebarPeek() : closeSidebarPeekSoon())}
+        onHoverCollapsed={(hovering) => (hovering ? peek.open() : peek.closeSoon())}
         searchQuery={searchQuery}
         onSearchQueryChange={setSearchQuery}
         searchScope={searchScope}
@@ -1128,14 +1102,14 @@ export default function App() {
           className={cn(
             "absolute inset-y-0 left-0 z-30 w-[220px] overflow-hidden bg-background",
             "transition-transform duration-200 ease-out motion-reduce:transition-none",
-            collapsed && !sidebarPeek ? "-translate-x-full pointer-events-none" : "translate-x-0",
+            collapsed && !peek.peeking ? "-translate-x-full pointer-events-none" : "translate-x-0",
             // 只有浮层态给投影：展开时画布左侧那 1px 由画布自己的边框提供，再画一条会变 2px。
             // 描边不用 border（见下面的绝对定位线），否则抽屉态内容会被边框挤 1px。
-            collapsed && sidebarPeek && "elevation-menu"
+            collapsed && peek.peeking && "elevation-menu"
           )}
-          inert={collapsed && !sidebarPeek}
-          onMouseEnter={cancelPeekClose}
-          onMouseLeave={closeSidebarPeekSoon}
+          inert={collapsed && !peek.peeking}
+          onMouseEnter={peek.cancel}
+          onMouseLeave={peek.closeSoon}
         >
           <Sidebar
             onOpenSettings={() => setSettingsOpen(true)}
@@ -1157,14 +1131,14 @@ export default function App() {
             onSelectFolder={(id) => {
               switchFolder(id)
               // 抽屉式侧栏里选完箱子就收回去，别挡着列表（2026-11-27）
-              if (collapsed) setSidebarPeek(false)
+              if (collapsed) peek.close()
             }}
             onManageFolders={() => setFolderPickerOpen(true)}
             onSelectLabel={(label) => {
               setActiveLabel((current) => (current === label ? null : label))
               setSearchQuery("")
               setSelectedId(null)
-              if (collapsed) setSidebarPeek(false)
+              if (collapsed) peek.close()
             }}
             showLabels={!live}
             syncing={syncing}
@@ -1176,7 +1150,7 @@ export default function App() {
           {/* 浮层态的描边（2026-11-27）：上边把抽屉和标题栏分开、并接上画布顶边那条线，右边把抽屉和列表分开。
               必须用绝对定位的 1px 线而不是 border——border 会占掉面板内侧 1px，从「抽屉」停靠成「展开」时
               这条边框消失，侧栏内容会突然上/右移 1px，看起来就是抖一下（用户实测反馈）。 */}
-          {collapsed && sidebarPeek && (
+          {collapsed && peek.peeking && (
             <>
               <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-border" />
               <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-border" />

@@ -399,7 +399,7 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 
 **规则**
 - 所有数字（日期、时间、未读数、大小、进度百分比）加 `tabular-nums`。
-- 已读/未读先靠字重（400/600），再让已读行整体压暗。**压暗用实色 token，不用透明度**（2026-11-27）：发件人 / 主题 / 日期 / 大小用 `{colors.ink-read}`（#6b6b6b），摘要与时间用 `{colors.ink-faint}`（#979797），状态圆点用 `{colors.dot-read}`（#c6c6c6，hover 提到 ink-faint），头像仍 `opacity-60`。原来的 `foreground/65`–`/70` 会在 hover / 选中底色上二次合成，同一行在不同底色下颜色不一致。
+- 已读/未读先靠字重（400/600），再让已读行整体压暗。**压暗用实色 token，不用透明度**（2026-11-27）：发件人 / 主题 / 日期 / 大小用 `{colors.ink-read}`，摘要与时间用 `{colors.ink-faint}`，状态圆点用 `{colors.dot-read}`（hover 提到 ink-faint），头像仍 `opacity-60`。具体色值只在上面的 token 表里出现，正文不再复述，避免两边漂移。原来的 `foreground/65`–`/70` 会在 hover / 选中底色上二次合成，同一行在不同底色下颜色不一致。
 - 邮件正文**不改字号、字重、字体族**：正文是 iframe 里的原版式，`fontSize` 设置只决定纯文本视图与最小字号兜底。
 
 ## Layout

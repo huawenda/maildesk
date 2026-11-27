@@ -1,12 +1,12 @@
 # MailDesk
 
 Windows 单平台的桌面邮件客户端：**只收信（IMAP，不发信、不碰 SMTP）**，核心目标是可自由重构的 UI。
-产品与设计规格见 [docs/PRD.md](docs/PRD.md)，同步链路细节见 [docs/sync.md](docs/sync.md)，UI 参考图见 [docs/ui-refs/gallery.html](docs/ui-refs/gallery.html)。
+产品与设计规格见 [docs/PRD.md](docs/PRD.md)，同步链路细节见 [docs/sync.md](docs/sync.md)，设计 token 与组件规格见 [DESIGN.md](DESIGN.md)。
 
 ## 已具备的功能
 
-- **三栏布局**：侧栏（220 / 折叠 50）· 列表（宽度可拖，320 ～ 窗口一半）· 阅读器；自绘标题栏，浅色主题对齐 Windows 文件资源管理器。
-- **列表**：紧凑 / 标准 / 宽松三种密度；按日期或体积分组（可切换升降序、折叠、组头吸顶）；未读/已读圆点（紧凑模式可点击切换）、星标、附件回形针、搜索时多一列所在文件夹。
+- **三栏布局**：侧栏 220（整块收起为 0，悬停折叠按钮弹出抽屉）· 列表（宽度可拖，320 ～ 窗口一半）· 阅读器；自绘标题栏，浅色主题对齐 Windows 文件资源管理器。
+- **列表**：紧凑 / 标准 / 宽松三种密度；按日期或体积分组（可切换升降序、折叠、组头吸顶）；未读/已读圆点（紧凑模式可点击切换）、置顶、附件回形针、搜索时多一列所在文件夹。
 - **搜索**：标题栏常驻组合胶囊，范围可选 发件人 / 收件人 / 标题 / 正文，结果直接作为列表数据（跨文件夹），命中关键词高亮。
 - **阅读器**：HTML 正文文本优先渲染（保留源邮件字体、远程图片拦截、引用折叠、失效图片占位、不整页缩放，内嵌截图随同步落库）、纯文本直排；附件双击打开，右键 打开 / 保存 / 保存全部；下载有进度与下载管理面板（可取消、可打开所在文件夹）。
 - **邮件操作**：标已读/未读（含全部已读）、星标、移动到文件夹、删除/永久删除、复原；右键菜单在列表与正文通用；Shift 范围多选、Ctrl+A 全选。
@@ -20,6 +20,8 @@ Windows 单平台的桌面邮件客户端：**只收信（IMAP，不发信、不
     npm install
     npm run dev        # electron-vite dev，主进程 + 渲染进程 HMR
     npm run typecheck  # node + web 两侧类型检查
+    npm run check:docs # 文档一致性（链接 / token / IPC 通道）
+    npm test           # 纯逻辑单测（解析 / 分组 / 格式化 / 迁移与事务）
     npm run build      # 类型检查后构建到 out/
 
 ## 打包
@@ -54,7 +56,7 @@ electron-builder 二进制建议走镜像：
     resources      运行时资源（托盘图标，打包走 extraResources）
     build          打包图标（icon.ico / icon.png）
     fixtures       手写演示邮件，仅 dev 构建使用
-    docs           PRD、UI 参考、图标方案
+    docs           PRD、同步说明、图标脚本
 
 ## 技术栈
 
@@ -68,4 +70,4 @@ Electron 45 · electron-vite 6 · Vite 8 · React 19 · TypeScript 5.9 · Tailwi
 - [x] M2 数据层：SQLite schema + 迁移、IPC 契约、设置持久化
 - [x] M3 IMAP 同步：IDLE、增量、双向对账、历史补全
 - [x] M4 打磨与打包：附件与下载管理、搜索、托盘/通知、日志、安装包 + 绿色版
-- [ ] 后续：按发件人聚合、流式落盘与并发下载、更多无障碍细节
+- [ ] 后续：按发件人聚合、更多无障碍细节

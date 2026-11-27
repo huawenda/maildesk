@@ -1,12 +1,12 @@
 import { app } from "electron"
-import { createAccount, listAccounts, removeAccount, updateAccount } from "./db/accounts"
-import { listFolders } from "./db/folders"
-import { getMessage, listMessages, searchMessages } from "./db/messages"
-import { getSettings, setSettings } from "./db/settings"
-import { openPassword } from "./security/credentials"
-import { all, get } from "./db"
-import { probeImap } from "./net/probe"
-import { buildImapOptions } from "./sync/connection"
+import { createAccount, listAccounts, removeAccount, updateAccount } from "../db/accounts"
+import { listFolders } from "../db/folders"
+import { getMessage, listMessages, searchMessages } from "../db/messages"
+import { getSettings, setSettings } from "../db/settings"
+import { openPassword } from "../security/credentials"
+import { all, get } from "../db"
+import { probeImap } from "../net/probe"
+import { buildImapOptions } from "../sync/connection"
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -470,7 +470,7 @@ export async function runSelfTest(): Promise<void> {
     if (syncEmail) {
       const account = listAccounts().find((item) => item.email === syncEmail)
       if (account) {
-        const manager = await import("./sync/manager")
+        const manager = await import("../sync/manager")
         const started = Date.now()
         await manager.syncNow(account.id)
         const folders = listFolders(account.id)
@@ -503,7 +503,7 @@ export async function runSelfTest(): Promise<void> {
     }
     // 可选：验证附件按需下载——挑最新一封带附件的信，拉正文（解析出附件行），再逐个下载
     if (process.env.MAILDESK_TEST_ATTACHMENT) {
-      const manager = await import("./sync/manager")
+      const manager = await import("../sync/manager")
       const target = get<{ id: string; subject: string | null }>(
         "SELECT id, subject FROM message WHERE has_attachments = 1 ORDER BY sent_at DESC LIMIT 1"
       )

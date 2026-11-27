@@ -55,3 +55,21 @@ export function get<T>(sql: string, ...params: (string | number | null | Uint8Ar
 export function run(sql: string, ...params: (string | number | null | Uint8Array)[]): void {
   getDb().prepare(sql).run(...params)
 }
+
+/**
+ * 把一个多语句写入包进事务：中途抛错整批回滚，避免「正文写进去了、附件元数据没写全」
+ * 这类半截状态；批量插入时也省掉逐条提交的开销。
+ * 不支持嵌套（SQLite 默认不允许嵌套 BEGIN），只能在最外层调用。
+ */
+export function transaction<T>(fn: () => T): T {
+  const instance = getDb()
+  instance.exec("BEGIN")
+  try {
+    const result = fn()
+    instance.exec("COMMIT")
+    return result
+  } catch (error) {
+    instance.exec("ROLLBACK")
+    throw error
+  }
+}

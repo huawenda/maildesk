@@ -1,5 +1,5 @@
 import type { Folder, FolderRole, MessageDetail, MessageSummary } from "@shared/types"
-import type { Attachment, AttachmentKind, Message } from "@/lib/mock"
+import type { Attachment, AttachmentKind, Message } from "@/lib/message"
 
 export type FolderIcon = "inbox" | "archive" | "junk" | "trash" | "sent" | "drafts" | "folder"
 

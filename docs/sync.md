@@ -23,7 +23,8 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/main/sync/engine.ts` | 同步引擎：连接、队列、增量、正文、回溯、对账、本地操作、附件下载 |
+| `src/main/sync/engine.ts` | 同步引擎：连接、队列、增量、正文、回溯、对账、本地操作（附件下载已拆到下一个文件） |
+| `src/main/sync/attachment-download.ts` | 附件下载器：缓存优先、流式落盘、去重、取消、预取（`AttachmentDownloader`） |
 | `src/main/sync/manager.ts` | 引擎注册表、事件广播、按账户路由、下载管理器、状态聚合 |
 | `src/main/sync/parse.ts` | BODYSTRUCTURE 解析、正文/内嵌图/附件收集、MIME 解码与尺寸折算 |
 | `src/main/sync/connection.ts` | `buildImapOptions`：测试连接与真实同步共用的连接参数 |
@@ -116,7 +117,11 @@ Manager (单例)
    - 增量：`from = lastSyncedUid + 1`；
    - 首次：`from = max(1, highest - limit + 1)`（`highest = uidNext - 1`）。
 5. 一次 `FETCH from:*` 取 `ENVELOPE / FLAGS / INTERNALDATE / SIZE / BODYSTRUCTURE / To / Cc`。
-   - 每 50 封（`BATCH_SIZE`）`saveIncoming` 落库并推 `progress` 事件。
+   - 每 50 封（`BATCH_SIZE`）`saveIncoming` 落库并推 `progress` 事件；
+     这一批 upsert 包在**一个事务**里（`db/index.ts` 的 `transaction()`），要么整批进要么整批丢，
+     也省掉逐条提交的 fsync 开销。
+   - `setMessageBody`（正文 + 附件元数据）同样在事务里写：先 `UPDATE message` 再重建 `attachment`，
+     中途失败不会留下「正文有了、附件没了」的半截状态。
    - `To/Cc` 必须取原始头：QQ 的 ENVELOPE 只给地址本地部分。
    - 进度分母先用 `min(UID 跨度, mailbox.exists)` 夹一次；UID 有空洞时跨度大于实际封数，
      fetch 结束再补一发 `fetched / fetched`，不会停在 183/200。
@@ -168,6 +173,9 @@ Manager (单例)
 ## 7.1 附件（缓存 + 预取 + 流式落盘）
 
 目标是「点保存几乎立刻落盘」（对标 Foxmail）：**打开邮件时附件就已经在本地**。
+
+实现集中在 `src/main/sync/attachment-download.ts` 的 `AttachmentDownloader`（2026-11-27 从 engine 拆出）：
+连接与 `stopped` 状态通过回调注入，engine 只保留 `downloadAttachment` / `prefetchMessageAttachments` / `cancelDownload` 三个转发方法。
 
 - 缓存目录：`<userData>/attachments/<messageId>/<attachmentId>/<原文件名>`（`src/main/attachments.ts`）。
   按 mtime 做 LRU，超过 `CACHE_LIMIT`（1GB）从最旧的删；启动时与每次下载完成后各 prune 一次。
@@ -437,3 +445,5 @@ FTS5 的触发器挂在 `message` 的 INSERT/DELETE/UPDATE 上；删文件夹必
 | 2026-11-26 | 附件下载显式 `chunkSize: 32MB`（imapflow 默认 64KB，50MB 附件要 ~1000 次往返，实测 6 分钟只走 286KB → 改后 17.6 秒）；加 60s 无字节的卡死兜底 |
 | 2026-11-27 | 清理 dead code：删除已无人调用的 `parseBody()` / `ParsedBody`（正文早已统一走 BODYSTRUCTURE + part）与 `mailparser` 依赖，行为不变 |
 | 2026-11-27 | 附件缓存随删除清理：永久删除邮件 / 删除文件夹 / 删除账户 / UIDVALIDITY 清空重拉时 `dropMessageCaches(ids)` 删除 `<messageId>` 目录，不再只靠 1GB LRU 兜底 |
+| 2026-11-27 | 批量写入改事务：`saveIncoming` 的每批 upsert 与 `setMessageBody`（正文 + 附件元数据）都在 `transaction()` 里，避免半截状态并减少提交开销 |
+| 2026-11-27 | 附件下载从 `engine.ts` 拆到 `sync/attachment-download.ts`（`AttachmentDownloader`），行为不变；engine 只保留三个转发方法 |

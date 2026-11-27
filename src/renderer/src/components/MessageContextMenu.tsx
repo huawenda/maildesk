@@ -9,7 +9,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger
 } from "@/components/ui/context-menu"
-import type { Message } from "@/lib/mock"
+import type { Message } from "@/lib/message"
 
 /** 邮件行右键菜单：标为未读 / 置顶 / 标为垃圾邮件 / 移动到… / 删除（置顶复用 starred 标记） */
 export function MessageContextMenu({

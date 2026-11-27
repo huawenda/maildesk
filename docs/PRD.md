@@ -2,12 +2,12 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 文档版本 | v0.2（视觉方向已定） |
-| 日期 | 2026-11-21 |
-| 状态 | 待评审 |
+| 文档版本 | v0.3（视觉方向已定，M4 已落地） |
+| 日期 | 2026-11-21 起草，2026-11-27 更新 |
+| 状态 | 实现中（界面仍按用户验收迭代） |
 | 产品代号 | MailDesk（暂定，待命名） |
 | 作者 | lead |
-| 关联文档 | 技术方案见本文第 7 章；视觉稿待补 |
+| 关联文档 | 技术方案见本文第 7 章；设计 token 见 DESIGN.md；同步实现见 docs/sync.md |
 
 ---
 
@@ -566,7 +566,7 @@
 | 日志 | electron-log | 落盘到 `%APPDATA%/maildesk/logs/main.log`（5MB 轮转），`errorHandler` 兜住未捕获异常 |
 | 打包 | electron-builder（NSIS） | Windows 安装包 |
 | HTML 清洗 | dompurify | 渲染前清洗 |
-| 代码质量 | TypeScript strict + `npm run typecheck` | 未配置 ESLint / Prettier，靠 tsc 与构建兜底 |
+| 代码质量 | TypeScript strict + `npm run typecheck` + vitest（解析 / 分组 / 格式化 / 迁移） | 未配置 ESLint / Prettier，靠 tsc、单测与构建兜底 |
 
 ### 7.2 关键取舍与 shadcn 适配注意
 

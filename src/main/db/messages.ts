@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
+import { ipcError } from "@shared/errors"
 import type { Address, Attachment, MessageDetail, MessageSummary, SearchOptions } from "@shared/types"
-import { all, get, run } from "./index"
+import { all, get, run, transaction } from "./index"
 
 /** 同步层交给数据层的原始字段，id / folder_id 由这里补齐。 */
 export interface IncomingMessage {
@@ -107,7 +108,7 @@ export function listMessages(folderId: string): MessageSummary[] {
 
 export function getMessage(id: string): MessageDetail {
   const row = get<MessageRow>("SELECT * FROM message WHERE id = ?", id)
-  if (!row) throw new Error("not-found: message")
+  if (!row) throw ipcError("not-found", "message")
   const attachments = all<AttachmentRow>(
     "SELECT * FROM attachment WHERE message_id = ? ORDER BY filename ASC",
     id
@@ -158,37 +159,39 @@ const INSERT_INCOMING =
  */
 export function saveIncoming(folderId: string, items: IncomingMessage[]): number {
   if (items.length === 0) return 0
-  const uids = items.map((item) => item.uid)
-  const placeholders = uids.map(() => "?").join(",")
-  const existing = new Set(
-    all<{ uid: number }>(
-      "SELECT uid FROM message WHERE folder_id = ? AND uid IN (" + placeholders + ")",
-      folderId,
-      ...uids
-    ).map((row) => row.uid)
-  )
-  for (const item of items) {
-    run(
-      INSERT_INCOMING,
-      randomUUID(),
-      folderId,
-      item.uid,
-      item.messageId,
-      item.subject,
-      item.fromName,
-      item.fromAddr,
-      JSON.stringify(item.to),
-      JSON.stringify(item.cc),
-      item.sentAt,
-      item.size,
-      boolean(item.isRead),
-      boolean(item.isFlagged),
-      boolean(item.hasHtml),
-      boolean(item.hasAttachments),
-      item.snippet
+  return transaction(() => {
+    const uids = items.map((item) => item.uid)
+    const placeholders = uids.map(() => "?").join(",")
+    const existing = new Set(
+      all<{ uid: number }>(
+        "SELECT uid FROM message WHERE folder_id = ? AND uid IN (" + placeholders + ")",
+        folderId,
+        ...uids
+      ).map((row) => row.uid)
     )
-  }
-  return items.filter((item) => !existing.has(item.uid)).length
+    for (const item of items) {
+      run(
+        INSERT_INCOMING,
+        randomUUID(),
+        folderId,
+        item.uid,
+        item.messageId,
+        item.subject,
+        item.fromName,
+        item.fromAddr,
+        JSON.stringify(item.to),
+        JSON.stringify(item.cc),
+        item.sentAt,
+        item.size,
+        boolean(item.isRead),
+        boolean(item.isFlagged),
+        boolean(item.hasHtml),
+        boolean(item.hasAttachments),
+        item.snippet
+      )
+    }
+    return items.filter((item) => !existing.has(item.uid)).length
+  })
 }
 
 /** 对账用：把文件夹里所有已落库邮件的 UID 索引出来，key 是 UID。 */
@@ -334,7 +337,7 @@ export function getMessageLocator(id: string): { folderId: string; uid: number; 
     "SELECT folder_id, uid, body_text, body_html, has_html FROM message WHERE id = ?",
     id
   )
-  if (!row) throw new Error("not-found: message")
+  if (!row) throw ipcError("not-found", "message")
   // 声明为 HTML 却只有纯文本，说明是加 body_html 列之前缓存的老邮件，再取一次
   const missingHtml = row.has_html === 1 && row.body_html === null
   return { folderId: row.folder_id, uid: row.uid, hasBody: row.body_text !== null && !missingHtml }
@@ -459,30 +462,32 @@ export function setMessageBody(
   attachments: Attachment[] = [],
   snippet?: string | null
 ): void {
-  run(
-    "UPDATE message SET body_text = ?, body_html = ?, has_html = ?, has_attachments = ?, snippet = COALESCE(?, snippet) WHERE id = ?",
-    bodyText,
-    bodyHtml,
-    boolean(hasHtml),
-    boolean(attachments.length > 0),
-    snippet?.trim() ? snippet : null,
-    id
-  )
-  if (attachments.length === 0) return
-  run("DELETE FROM attachment WHERE message_id = ?", id)
-  for (const item of attachments) {
+  transaction(() => {
     run(
-      "INSERT INTO attachment (id, message_id, filename, mime, size, content_id, local_path, part) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      item.id || randomUUID(),
-      id,
-      item.filename,
-      item.mime,
-      item.size,
-      item.contentId,
-      item.localPath,
-      item.part
+      "UPDATE message SET body_text = ?, body_html = ?, has_html = ?, has_attachments = ?, snippet = COALESCE(?, snippet) WHERE id = ?",
+      bodyText,
+      bodyHtml,
+      boolean(hasHtml),
+      boolean(attachments.length > 0),
+      snippet?.trim() ? snippet : null,
+      id
     )
-  }
+    if (attachments.length === 0) return
+    run("DELETE FROM attachment WHERE message_id = ?", id)
+    for (const item of attachments) {
+      run(
+        "INSERT INTO attachment (id, message_id, filename, mime, size, content_id, local_path, part) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        item.id || randomUUID(),
+        id,
+        item.filename,
+        item.mime,
+        item.size,
+        item.contentId,
+        item.localPath,
+        item.part
+      )
+    }
+  })
 }
 
 /** FTS5 查询串按字面量匹配，避免用户输入被当成语法（未闭合引号会直接报错）。 */

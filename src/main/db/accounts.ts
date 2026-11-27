@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { ipcError } from "@shared/errors"
 import type { Account, AccountInput } from "@shared/types"
 import { all, get, run } from "./index"
 import { savePassword } from "../security/credentials"
@@ -57,7 +58,7 @@ export async function createAccount(input: AccountInput): Promise<Account> {
 
 export async function updateAccount(id: string, patch: Partial<AccountInput>): Promise<Account> {
   const current = getAccount(id)
-  if (!current) throw new Error("not-found: account")
+  if (!current) throw ipcError("not-found", "account")
   const next = {
     email: patch.email ?? current.email,
     displayName: patch.displayName !== undefined ? patch.displayName.trim() || null : current.displayName,

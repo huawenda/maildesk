@@ -21,7 +21,7 @@ import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { ipcErrorMessage, mail } from "@/lib/ipc"
 import { summaryToMessage } from "@/lib/live"
 import { avatarColor, formatFullTime, formatSize, initials } from "@/lib/format"
-import type { Attachment, Message } from "@/lib/mock"
+import type { Attachment, Message } from "@/lib/message"
 import { cn } from "@/lib/utils"
 
 const attachmentIcons = {

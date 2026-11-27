@@ -1,5 +1,6 @@
 import { BrowserWindow, shell } from "electron"
 import { CH } from "@shared/channels"
+import { ipcError } from "@shared/errors"
 import { existsSync } from "node:fs"
 import type { DownloadTask, Folder, SyncEvent, SyncOverview, SyncState, SyncStatus } from "@shared/types"
 import { listAccounts } from "../db/accounts"
@@ -282,9 +283,9 @@ export async function moveMessages(
   targetFolderId: string
 ): Promise<{ moved: number; failed: number }> {
   const target = getFolder(targetFolderId)
-  if (!target) throw new Error("not-found: folder")
+  if (!target) throw ipcError("not-found", "folder")
   const engine = engines.get(target.accountId)
-  if (!engine) throw new Error("network: 未连接")
+  if (!engine) throw ipcError("network", "未连接")
   const idsInAccount = ids.filter((id) => {
     try {
       return accountIdOfMessage(id) === target.accountId

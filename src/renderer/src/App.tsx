@@ -13,9 +13,11 @@ import { Sidebar } from "@/components/Sidebar"
 import { TitleBar } from "@/components/TitleBar"
 import { useHotkeys } from "@/lib/hotkeys"
 import { setDragging } from "@/lib/drag-pause"
-import { mail } from "@/lib/ipc"
+import { describeIpcError, mail } from "@/lib/ipc"
+import { clampListWidth, LIST_DEFAULT, listMaxWidth, readStored, store } from "@/lib/preferences"
 import { detailToMessage, navFolders, summaryToMessage, type NavFolder } from "@/lib/live"
-import { folders as demoFolders, messages as seedMessages, type Message } from "@/lib/mock"
+import { folders as demoFolders, messages as seedMessages } from "@/lib/mock"
+import type { Message } from "@/lib/message"
 import { applyChrome } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -30,42 +32,8 @@ const DEMO_NAV: NavFolder[] = demoFolders.map((folder) => ({
   parentId: null
 }))
 
-const readStored = <T,>(key: string, fallback: T): T => {
-  try {
-    const value = window.localStorage.getItem(key)
-    return value ? (JSON.parse(value) as T) : fallback
-  } catch {
-    return fallback
-  }
-}
-
-/** 主进程抛回来的 IPC 错误 → 一句用户能看懂的话（renderer 拿到的 message 带 "Error invoking remote method" 前缀） */
-const describeError = (error: unknown): string => {
-  const raw = error instanceof Error ? error.message : String(error)
-  if (raw.includes("network")) return "网络未连接，请稍后重试"
-  if (raw.includes("auth")) return "账户授权失效，请重新填写密码"
-  if (raw.includes("not-found")) return "目标文件夹已不存在"
-  const tail = raw.split(/Error:s*/).pop()
-  return (tail ?? raw).trim() || "未知错误"
-}
-
-/** 列表宽度：PRD 4.1 定的可拖范围 */
-const LIST_MIN = 320
-const LIST_DEFAULT = 380
 /** 侧栏宽度：白卡左边距、gap 宽度、面板宽度都用它 */
 const SIDEBAR_WIDTH = 220
-// 上限跟着窗口走：最多占窗口宽度的一半，窗口放大后列表也能跟着拉宽
-const listMaxWidth = (viewport: number) => Math.max(LIST_MIN, Math.floor(viewport / 2))
-const clampListWidth = (value: number, viewport: number) =>
-  Math.min(listMaxWidth(viewport), Math.max(LIST_MIN, Math.round(value)))
-
-const store = (key: string, value: unknown) => {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value))
-  } catch {
-    /* 隐私模式等场景忽略持久化失败 */
-  }
-}
 
 const timeAgo = (timestamp: number): string => {
   const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000))
@@ -707,7 +675,7 @@ export default function App() {
           setFolderTick((tick) => tick + 1)
           setUnreadTick((tick) => tick + 1)
         })
-        .catch((error) => showNotice("移动失败 · " + describeError(error)))
+        .catch((error) => showNotice("移动失败 · " + describeIpcError(error)))
     },
     [live, selectedIds, showNotice]
   )
@@ -746,7 +714,7 @@ export default function App() {
           setFolderTick((tick) => tick + 1)
           setUnreadTick((tick) => tick + 1)
         })
-        .catch((error) => showNotice("删除失败 · " + describeError(error)))
+        .catch((error) => showNotice("删除失败 · " + describeIpcError(error)))
     },
     [live, inTrash, selectedIds, showNotice]
   )
@@ -770,7 +738,7 @@ export default function App() {
         setFolderTick((tick) => tick + 1)
         setUnreadTick((tick) => tick + 1)
       })
-      .catch((error) => showNotice("删除失败 · " + describeError(error)))
+      .catch((error) => showNotice("删除失败 · " + describeIpcError(error)))
   }, [selectedIds, selectedId, live, inTrash, showNotice])
 
   const select = useCallback(

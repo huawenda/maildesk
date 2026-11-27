@@ -1,8 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron"
-import { mkdir, copyFile, readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { app, BrowserWindow, ipcMain, shell } from "electron"
 import { z, type ZodType } from "zod"
 import { CH } from "@shared/channels"
+import { ipcError } from "@shared/errors"
 import {
   accountInputSchema,
   accountPatchSchema,
@@ -15,15 +14,14 @@ import {
 import type { Account, TestResult } from "@shared/types"
 import { listAccounts, createAccount, updateAccount, removeAccount } from "../db/accounts"
 import { dropMessageCaches } from "../attachments"
+import { saveAttachmentTo, previewAttachment, openAttachment, saveAllAttachments } from "../attachments-export"
 import { listFolders, setFolderSelection } from "../db/folders"
 import {
-  getAttachment,
   getMessage,
   needsBody,
   listMessages,
   messageIdsInAccount,
   searchMessages,
-  setAttachmentPath,
   setFlagged,
   setRead,
   unreadCountsByFolder
@@ -33,9 +31,7 @@ import { probeImap } from "../net/probe"
 import {
   cancelAttachmentDownload,
   clearAttachmentDownloads,
-  downloadAttachment,
   listAttachmentDownloads,
-  recordDownloadPath,
   revealAttachment,
   loadMessageBody,
   markReadRemote,
@@ -64,34 +60,9 @@ function windowOf(event: Electron.IpcMainInvokeEvent): BrowserWindow | null {
 function parse<T>(schema: ZodType<T>, raw: unknown): T {
   const result = schema.safeParse(raw)
   if (!result.success) {
-    throw new Error("bad-request: " + result.error.issues.map((issue) => issue.message).join("; "))
+    throw ipcError("bad-request", result.error.issues.map((issue) => issue.message).join("; "))
   }
   return result.data
-}
-
-/** 文件名里不能出现路径分隔符与 Windows 保留字符，否则写盘会失败。 */
-function safeFilename(name: string): string {
-  const cleaned = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim()
-  return cleaned.length > 0 ? cleaned.slice(0, 180) : "附件"
-}
-
-/** 同目录重名时追加 (1)(2)，不覆盖已有文件。 */
-async function uniquePath(dir: string, name: string): Promise<string> {
-  const { access } = await import("node:fs/promises")
-  const dot = name.lastIndexOf(".")
-  const stem = dot > 0 ? name.slice(0, dot) : name
-  const ext = dot > 0 ? name.slice(dot) : ""
-  let candidate = join(dir, name)
-  let index = 1
-  while (true) {
-    try {
-      await access(candidate)
-      candidate = join(dir, `${stem} (${index})${ext}`)
-      index += 1
-    } catch {
-      return candidate
-    }
-  }
 }
 
 const readPayloadSchema = z.object({ ids: z.array(idSchema).min(1).max(500), read: z.boolean() })
@@ -116,7 +87,7 @@ export function registerIpc(): void {
   ipcMain.handle(CH.appOpenExternal, async (_event, raw: unknown) => {
     const url = parse(z.string().url().max(2048), raw)
     // 邮件里的链接：网页外链与 mailto/tel 交给系统；file:/javascript: 等一律拒绝
-    if (!/^(https?:\/\/|mailto:|tel:)/i.test(url)) throw new Error("bad-request: 仅允许 http/https/mailto/tel 链接")
+    if (!/^(https?:\/\/|mailto:|tel:)/i.test(url)) throw ipcError("bad-request", "仅允许 http/https/mailto/tel 链接")
     await shell.openExternal(url)
   })
 
@@ -256,83 +227,25 @@ export function registerIpc(): void {
 
   ipcMain.handle(CH.messagesUnreadCounts, () => unreadCountsByFolder())
 
-  // 附件不落库，点保存时才回 IMAP 取那一段（PRD FR-04.5）
+  // 附件不落库，点保存时才回 IMAP 取那一段（PRD FR-04.5）；文件侧逻辑在 attachments-export.ts
   ipcMain.handle(CH.attachmentsSave, async (event, raw: unknown) => {
     const { messageId, attachmentId } = parse(attachmentRefSchema, raw)
-    const meta = getAttachment(attachmentId)
-    if (!meta) return { saved: false, error: "not-found: attachment" }
-    const win = windowOf(event)
-    const filename = safeFilename(meta.filename ?? "附件")
-    const saveOptions = {
-      title: "保存附件",
-      defaultPath: join(app.getPath("downloads"), filename)
-    }
-    const picked = win ? await dialog.showSaveDialog(win, saveOptions) : await dialog.showSaveDialog(saveOptions)
-    if (picked.canceled || !picked.filePath) return { saved: false }
-    const file = await downloadAttachment(messageId, attachmentId)
-    if (!file) return { saved: false, error: "network: 拉取附件失败，请先同步这封邮件" }
-    // 缓存命中时这里只是一次本地拷贝，大附件也是秒落盘
-    await copyFile(file.path, picked.filePath)
-    setAttachmentPath(attachmentId, picked.filePath)
-    recordDownloadPath(attachmentId, picked.filePath)
-    return { saved: true, path: picked.filePath }
+    return saveAttachmentTo(windowOf(event), messageId, attachmentId)
   })
 
   ipcMain.handle(CH.attachmentsPreview, async (_event, raw: unknown) => {
     const { messageId, attachmentId } = parse(attachmentRefSchema, raw)
-    const meta = getAttachment(attachmentId)
-    if (!meta) return { ok: false, error: "not-found: attachment" }
-    const mime = meta.mime ?? ""
-    if (!mime.startsWith("image/")) return { ok: false, error: "unsupported: 只有图片可以预览" }
-    if ((meta.size ?? 0) > 8 * 1024 * 1024) return { ok: false, error: "unsupported: 图片超过 8MB" }
-    const file = await downloadAttachment(messageId, attachmentId)
-    if (!file) return { ok: false, error: "network: 拉取附件失败" }
-    const buffer = await readFile(file.path)
-    if (buffer.length > 8 * 1024 * 1024) return { ok: false, error: "unsupported: 图片超过 8MB" }
-    return {
-      ok: true,
-      dataUrl: "data:" + (file.mime ?? mime) + ";base64," + buffer.toString("base64"),
-      mime: file.mime ?? mime,
-      name: file.filename
-    }
+    return previewAttachment(messageId, attachmentId)
   })
 
-  // 打开附件：缓存文件就是最终文件，直接交给系统默认程序（不再复制到 temp）
   ipcMain.handle(CH.attachmentsOpen, async (_event, raw: unknown) => {
     const { messageId, attachmentId } = parse(attachmentRefSchema, raw)
-    const meta = getAttachment(attachmentId)
-    if (!meta) return { ok: false, error: "not-found: attachment" }
-    const file = await downloadAttachment(messageId, attachmentId)
-    if (!file) return { ok: false, error: "network: 拉取附件失败，请先同步这封邮件" }
-    const failure = await shell.openPath(file.path)
-    if (!failure) recordDownloadPath(attachmentId, file.path)
-    return failure ? { ok: false, error: failure } : { ok: true, path: file.path }
+    return openAttachment(messageId, attachmentId)
   })
 
   ipcMain.handle(CH.attachmentsSaveAll, async (event, raw: unknown) => {
     const messageId = parse(idSchema, raw)
-    const detail = getMessage(messageId)
-    if (detail.attachments.length === 0) return { saved: 0 }
-    const win = windowOf(event)
-    const dirOptions = {
-      title: "选择保存附件的文件夹",
-      properties: ["openDirectory" as const, "createDirectory" as const]
-    }
-    const picked = win ? await dialog.showOpenDialog(win, dirOptions) : await dialog.showOpenDialog(dirOptions)
-    if (picked.canceled || picked.filePaths.length === 0) return { saved: 0 }
-    const dir = picked.filePaths[0]
-    await mkdir(dir, { recursive: true })
-    let saved = 0
-    for (const item of detail.attachments) {
-      const file = await downloadAttachment(messageId, item.id)
-      if (!file) continue
-      const target = await uniquePath(dir, safeFilename(item.filename ?? "附件"))
-      await copyFile(file.path, target)
-      setAttachmentPath(item.id, target)
-      recordDownloadPath(item.id, target)
-      saved += 1
-    }
-    return { saved, dir }
+    return saveAllAttachments(windowOf(event), messageId)
   })
 
   ipcMain.handle(CH.attachmentsDownloads, () => listAttachmentDownloads())

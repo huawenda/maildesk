@@ -10,6 +10,7 @@ import type {
   SyncState,
   SyncStatus
 } from "@shared/types"
+import { ipcError } from "@shared/errors"
 import {
   findFolderByPath,
   deleteFolder,
@@ -28,8 +29,6 @@ import {
   countMessagesNeedingBody,
   deleteMessages as deleteMessageRows,
   folderUidIndex,
-  getAttachment,
-  getMessage,
   getMessageLocator,
   idsNeedingBody,
   messageIdsByUids,
@@ -50,16 +49,12 @@ import {
 import type { IncomingMessage, LocalUidRow } from "../db/messages"
 import { getSettings } from "../db/settings"
 import {
-  attachmentCachePath,
-  cachedFile,
   dropMessageCaches,
-  pruneAttachmentCache,
-  streamToFile,
-  touchCacheFile,
   type CachedAttachment
 } from "../attachments"
 import { openPassword } from "../security/credentials"
 import { buildImapOptions } from "./connection"
+import { AttachmentDownloader } from "./attachment-download"
 import {
   attachmentsFromParts,
   bodyFromParts,
@@ -104,17 +99,6 @@ const BODY_CONCURRENCY = (() => {
  * 别让首次同步 / 一次补几百封历史时卡在「已同步」之前。
  */
 const INLINE_BODY_LIMIT = 150
-/** 打开邮件时预取附件的单封上限：超过这个大小的附件（视频/镜像）不自动下载。 */
-const PREFETCH_MAX_BYTES = 200 * 1024 * 1024
-/**
- * 单个附件每次 FETCH 的窗口大小。imapflow 默认 64KB —— 对 50MB 的视频就是 1000 次往返，
- * 慢链路/慢服务器上要几分钟（用户实测「点保存要等很久」，实测 64KB 窗口 6 分钟只走到 286KB）。
- * 32MB 窗口下同一个 48MB 附件约 19 秒（约 2.7MB/s，已接近单连接上限），
- * 64MB 只快 2 秒但峰值内存翻倍，不值得。
- */
-const ATTACHMENT_CHUNK = 32 * 1024 * 1024
-/** 附件下载「一个字节都不来」多久算卡死（服务器偶尔会挂住一条 FETCH 流）。 */
-const ATTACHMENT_STALL_MS = 60_000
 /**
  * 正文内嵌图（cid:）随同步落库时的上限。**判的是 BODYSTRUCTURE 里的传输编码尺寸**，
  * base64 比原图大 1/3，所以以前 2MB 的上限会让「整封 2MB 以上」的宣传邮件整张图被跳过，
@@ -230,18 +214,18 @@ export class SyncEngine {
   private client: ImapFlow | null = null
   /** 正文下载的额外连接（下标 0 起，主连接不算）；服务端拒绝会话时留空。 */
   private bodyClients: (ImapFlow | undefined)[] = []
-  /** 正在下载的附件（同一附件被预取与手动保存同时触发时共用一次下载）。 */
-  private readonly attachmentJobs = new Map<
-    string,
-    { promise: Promise<CachedAttachment | null>; listeners: Set<(loaded: number, total: number | null) => void> }
-  >()
   /** 后台正文链是否已在跑（避免并发启动多条链抢同一批邮件）。 */
   private bodyRunning = false
   private queue: Promise<unknown> = Promise.resolve()
-  /** 正在下载的附件：attachmentId → 中止函数（销毁 IMAP 下载流） */
-  private activeDownloads = new Map<string, () => void>()
-  private canceled = new Set<string>()
   private stopped = false
+
+  /** 附件下载器：连接与状态通过回调注入，下载去重/取消/预取都在它内部。 */
+  private readonly attachments = new AttachmentDownloader({
+    client: () => this.client,
+    ensureConnected: () => this.ensureConnected(),
+    workerClient: () => this.ensureWorkerClient(BODY_CONCURRENCY),
+    stopped: () => this.stopped
+  })
   private state: SyncState = "disconnected"
   private folderPath?: string
   private error?: string
@@ -758,174 +742,22 @@ export class SyncEngine {
     })
   }
 
-  /**
-   * 按需下载单个附件：解析正文时已经记下 part 号就直接取那一段，省掉一次结构查询。
-   *
-   * 现在是「缓存优先 + 流式落盘」：命中 `attachments/<messageId>/<attachmentId>/<文件名>`
-   * 就直接返回路径（点保存只是 copyFile，和 Foxmail 一样一点就落盘）；没命中才连服务器，
-   * 边下边写文件，不再把 40MB 整包读进内存。同一个附件被预取和手动保存同时触发时共用一次下载。
-   */
+  /** 附件下载交给 AttachmentDownloader（见 sync/attachment-download.ts），这里只保留对外 API。 */
   downloadAttachment(
     messageId: string,
     attachmentId: string,
     onProgress?: (loaded: number, total: number | null) => void
   ): Promise<CachedAttachment | null> {
-    const job = this.attachmentJobs.get(attachmentId)
-    if (job) {
-      if (onProgress) job.listeners.add(onProgress)
-      return job.promise
-    }
-    const listeners = new Set<(loaded: number, total: number | null) => void>()
-    if (onProgress) listeners.add(onProgress)
-    const promise = this.runAttachmentDownload(messageId, attachmentId, listeners).finally(() => {
-      this.attachmentJobs.delete(attachmentId)
-    })
-    this.attachmentJobs.set(attachmentId, { promise, listeners })
-    return promise
+    return this.attachments.download(messageId, attachmentId, onProgress)
   }
 
-  /**
-   * 打开邮件后静默预取它的附件（用户选中一封邮件，下一步多半就是保存/预览附件）。
-   * 走同一个 downloadAttachment，所以手动保存会复用正在进行的预取，不会重复下载。
-   */
   prefetchMessageAttachments(messageId: string): Promise<void> {
-    return (async () => {
-      let detail
-      try {
-        detail = getMessage(messageId)
-      } catch {
-        return
-      }
-      for (const item of detail.attachments) {
-        if (this.stopped) return
-        // 超大附件（视频/镜像）不预取，避免开一封邮件就吃掉几百 MB 流量
-        if ((item.size ?? 0) > PREFETCH_MAX_BYTES) continue
-        try {
-          await this.downloadAttachment(messageId, item.id)
-        } catch (error) {
-          console.error("[sync] attachment prefetch failed", messageId, String(error))
-        }
-      }
-    })()
-  }
-
-  private async runAttachmentDownload(
-    messageId: string,
-    attachmentId: string,
-    listeners: Set<(loaded: number, total: number | null) => void>
-  ): Promise<CachedAttachment | null> {
-    const locator = getMessageLocator(messageId)
-    const folder = getFolder(locator.folderId)
-    const attachment = getAttachment(attachmentId)
-    if (!folder || !attachment) return null
-    const name = attachment.filename ?? "附件"
-    const target = attachmentCachePath(messageId, attachmentId, name)
-    if (await cachedFile(target)) {
-      await touchCacheFile(target)
-      const size = Number(attachment.size ?? 0)
-      for (const listener of listeners) listener(size, size || null)
-      return { filename: name, mime: attachment.mime, path: target }
-    }
-    await this.ensureConnected()
-    // 附件走独立连接：不再排在正文补齐/历史回溯那条串行队列后面
-    const client = (await this.ensureWorkerClient(BODY_CONCURRENCY)) ?? this.client
-    if (!client) return null
-    if (DEBUG) {
-      console.log("[attach] begin", {
-        messageId,
-        attachmentId,
-        uid: locator.uid,
-        part: attachment.part,
-        size: attachment.size,
-        filename: attachment.filename
-      })
-    }
-    const lock = await client.getMailboxLock(folder.path)
-    try {
-      let part = attachment.part
-      let fallbackName: string | null = null
-      let fallbackMime: string | null = null
-      if (!part) {
-        // 老数据没记 part：退回取一次 BODYSTRUCTURE（按文件名匹配，取不到就第一个）
-        const found = await client.fetchOne(String(locator.uid), { bodyStructure: true }, { uid: true })
-        if (!found || !found.bodyStructure) return null
-        const parts = collectAttachmentParts(found.bodyStructure)
-        const match = parts.find((item) => item.filename === attachment.filename) ?? parts[0]
-        if (!match) return null
-        part = match.part
-        fallbackName = match.filename
-        fallbackMime = match.mime
-      }
-      const download = await client.download(String(locator.uid), part, {
-        uid: true,
-        chunkSize: ATTACHMENT_CHUNK
-      })
-      if (!download?.content) return null
-      if (DEBUG) {
-        console.log("[attach] stream open", {
-          uid: locator.uid,
-          part,
-          size: attachment.size,
-          meta: download.meta ? { filename: download.meta.filename, expectedSize: download.meta.expectedSize } : null
-        })
-      }
-      // 允许下载管理器取消：销毁流，写盘中断后按 canceled 返回 null
-      this.activeDownloads.set(attachmentId, () => download.content?.destroy(new Error("canceled")))
-      this.canceled.delete(attachmentId)
-      const total = attachment.size ?? download.meta?.expectedSize ?? null
-      const report = (loaded: number) => {
-        for (const listener of listeners) listener(loaded, total)
-      }
-      let lastReport = 0
-      let lastBytes = 0
-      let lastBytesAt = Date.now()
-      // 服务器半路不吐数据时别无限等：60s 没有任何新字节就销毁流，按失败上报
-      const watchdog = setInterval(() => {
-        if (Date.now() - lastBytesAt > ATTACHMENT_STALL_MS) {
-          download.content?.destroy(new Error("stalled"))
-        }
-      }, 5_000)
-      try {
-        const loaded = await streamToFile(download.content, target, (bytes) => {
-          lastBytes = bytes
-          lastBytesAt = Date.now()
-          // 进度最多 8 次/秒：IPC 太密没必要，chip 上的百分比够用
-          const now = Date.now()
-          if (now - lastReport > 120) {
-            lastReport = now
-            report(bytes)
-          }
-        })
-        if (this.canceled.has(attachmentId)) return null
-        report(loaded)
-      } catch (error) {
-        if (this.canceled.has(attachmentId) || /canceled|stalled/i.test(String(error))) {
-          console.error("[sync] attachment download aborted", attachmentId, lastBytes, String(error))
-          return null
-        }
-        throw error
-      } finally {
-        clearInterval(watchdog)
-      }
-      void pruneAttachmentCache()
-      return {
-        filename: attachment.filename ?? download.meta?.filename ?? fallbackName ?? "附件",
-        mime: attachment.mime ?? download.meta?.contentType ?? fallbackMime,
-        path: target
-      }
-    } finally {
-      this.activeDownloads.delete(attachmentId)
-      lock.release()
-    }
+    return this.attachments.prefetch(messageId)
   }
 
   /** 取消正在进行的附件下载（下载管理器用）。 */
   cancelDownload(attachmentId: string): boolean {
-    const abort = this.activeDownloads.get(attachmentId)
-    if (!abort) return false
-    this.canceled.add(attachmentId)
-    abort()
-    return true
+    return this.attachments.cancel(attachmentId)
   }
 
   private schedule<T>(task: () => Promise<T>): Promise<T> {
@@ -1134,7 +966,7 @@ export class SyncEngine {
     const password = await openPassword(this.account.id)
     if (!password) {
       this.fail("auth", "账户缺少授权码，请重新在账户设置里填写")
-      throw new Error("auth: missing password")
+      throw ipcError("auth", "missing password")
     }
     const client = new ImapFlow(
       buildImapOptions(
@@ -1627,7 +1459,7 @@ export class SyncEngine {
     return this.schedule(async () => {
       await this.ensureConnected()
       const target = getFolder(targetFolderId)
-      if (!target) throw new Error("not-found: folder")
+      if (!target) throw ipcError("not-found", "folder")
       const locators = messageLocators(ids)
       const result = await this.moveByFolder(locators, target)
       this.afterLocalChange(locators.map((item) => item.folderId).concat(target.id))
@@ -1662,7 +1494,7 @@ export class SyncEngine {
     target: Folder
   ): Promise<{ moved: number; failed: number }> {
     const client = this.client
-    if (!client) throw new Error("network: 未连接")
+    if (!client) throw ipcError("network", "未连接")
     const groups = new Map<string, { folder: Folder; items: typeof locators }>()
     for (const item of locators) {
       if (item.folderId === target.id) continue
@@ -1708,7 +1540,7 @@ export class SyncEngine {
     locators: { id: string; folderId: string; uid: number }[]
   ): Promise<{ deleted: number; failed: number }> {
     const client = this.client
-    if (!client) throw new Error("network: 未连接")
+    if (!client) throw ipcError("network", "未连接")
     const groups = new Map<string, { folder: Folder; items: typeof locators }>()
     for (const item of locators) {
       const folder = getFolder(item.folderId)

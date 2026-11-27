@@ -4,10 +4,10 @@ Windows 单平台的桌面邮件客户端，只走 IMAP 收信，不发信、不
 
 ## 事实来源
 
-- `docs/PRD.md` 是唯一规格来源（当前 v0.2）。改布局、交互、文案、颜色之前先改 PRD，再改代码；PRD 里没写的，先补一节再动手。
+- `docs/PRD.md` 是唯一规格来源（当前 v0.3）。改布局、交互、文案、颜色之前先改 PRD，再改代码；PRD 里没写的，先补一节再动手。
 - `docs/sync.md` 是同步链路的实现说明书（生命周期、串行/并行、游标、事件、已知坑）。改 `src/main/sync/` 或同步相关的数据写入时必须同步更新它，并在文末「变更记录」追加一条；只改代码不改文档视为未完成。
-- `docs/ui-refs/` 是视觉参考：`gallery.html` 是 7 款产品的对照页，`canary.jpg` 是早期暗色参考（现已不用，仅留档），`docs/palette-compare.png` 是调色前后对照。
-- `DESIGN.md` 是设计语言的机器可读摘要（Stitch DESIGN.md 格式，给设计 agent 读：token / 字号 / 圆角 / 组件 / Do's & Don'ts）。**它只是镜像**：token 的唯一事实来源仍然是 `globals.css` 的 `:root`，改颜色、字号、圆角、间距时必须同时更新 `globals.css`、`DESIGN.md` 和本文件「设计约束」小节这三处，否则会漂。
+- 早期视觉参考（`docs/ui-refs/` 的对比页与产品截图、`docs/palette-compare.png` 调色对照）已于 2026-11-27 由用户删除，不要再引用或恢复；设计依据以 `DESIGN.md` 与实际 token 为准。
+- `DESIGN.md` 是设计语言的机器可读摘要（Stitch DESIGN.md 格式，给设计 agent 读：token / 字号 / 圆角 / 组件 / Do's & Don'ts）。**它只是镜像**：token 的唯一事实来源仍然是 `globals.css` 的 `:root`，改颜色、字号、圆角、间距时必须同时更新 `globals.css`、`DESIGN.md` 和本文件「设计约束」小节这三处，否则会漂。`npm run check:docs` 只能核对前两处（DESIGN 的 colors 块 ↔ CSS），正文与 AGENTS 里的描述仍需人工更新，**不要在正文里复述 hex**，写 token 名。
 - 有疑问不要猜产品意图，直接问用户；但实现细节（组件拆分、命名、状态管理）自己定，不要反问。
 
 ## 技术栈（已锁定，不要替换）
@@ -24,6 +24,8 @@ M4 已落地：`dompurify`（正文清洗）、`electron-log`（`src/main/log.ts
 ```bash
 npm run dev        # 主进程 + 渲染进程 HMR
 npm run typecheck  # node 与 web 两侧；改完代码必须跑
+npm run check:docs # 文档一致性：相对链接、DESIGN token 镜像、IPC 通道对齐
+npm test           # vitest：解析 / 分组 / 格式化 / 迁移与事务（不需要 Electron）
 npm run build      # typecheck + 构建到 out/
 npm run package    # Windows NSIS 安装包到 release/
 ```
@@ -34,17 +36,18 @@ npm run package    # Windows NSIS 安装包到 release/
 ## 目录
 
 ```
-src/main/            主进程：窗口、IPC 注册（ipc/）、数据层（db/）、同步引擎（sync/）、探测（net/）、凭据（security/）、托盘（tray.ts）、日志（log.ts）
+src/main/            主进程：窗口、IPC 注册（ipc/）、数据层（db/）、同步引擎（sync/）、探测（net/）、凭据（security/）、附件缓存与导出（attachments.ts / attachments-export.ts）、托盘（tray.ts）、日志（log.ts）
+src/main/dev/        截图脚本（capture.ts）与自检（selftest.ts），只在 MAILDESK_CAPTURE / MAILDESK_SELFTEST 下运行
 resources/           运行时资源（托盘图标），打包走 electron-builder 的 extraResources，不进 asar
 build/               打包图标（icon.ico / icon.png），electron-builder 的 buildResources
 src/preload/         contextBridge，唯一对外出口 window.mail
 src/renderer/src/     React UI（唯一的重构区域）
   components/        业务组件（TitleBar/Sidebar/MessageList/Reader）
   components/ui/     shadcn 生成物，除必要调整外不要手改
-                     现有 button / context-menu / dropdown-menu / input / select / dialog / popover；
+                     现有 context-menu / dropdown-menu / input / select / dialog / popover；
                      input 与 select 的 trigger 已改成项目口径（bg-muted、border-input、rounded-lg、13px、focus 只换边框色），
                      新增表单不要再写 fieldClass，直接用 <Input> / <Select>；账户、设置、文件夹选择三个弹窗都已切到 ui/dialog 封装；`DialogOverlay` **透明**（不加暗色、不做 blur），只保留一层透明命中区接「点弹层外关闭」，不要改回 `bg-black/40`
-  lib/               theme / mock / utils
+  lib/               message（视图模型类型）/ mock（demo 数据）/ grouping（列表分组）/ theme / preferences / utils
   styles/globals.css 设计 token 唯一落地处
 src/shared/          主/渲染共用类型与 zod schema
 fixtures/            开发期假数据
@@ -56,7 +59,7 @@ docs/                PRD、UI 参考、截图
 - 渲染进程**永远不碰 Node / IMAP**，所有数据走 `window.mail`（preload 暴露的 `MailApi`）。新增能力先加 `src/shared/types.ts` 的类型，再加 IPC，最后接 UI。
 - **全局禁选**：`body` 上 `user-select: none`，阅读器 `article` 用 `select-text` 放开，iframe 里的邮件正文天然可选中，表单控件单独 `user-select: text`；`img/a` 加 `-webkit-user-drag: none`。不要为了省事在根节点放开选择，列表拖动会刷出一片蓝色文字（用户实测）。
 - 颜色只能引用语义 token（`bg-card`、`text-muted-foreground`、`border-border`…），不要在组件里写死 hex；token 只在 `globals.css` 的 `:root` 里定义（**只维护浅色主题，没有 `.dark`**）。**静态叠层（列头、分组条）用 `foreground/[0.0x]`，不要用 `white/[0.0x]`；hover 与选中全应用只有一套 `--row-hover` `#F2F4F7` / `--row-selected` `#E3ECFA`（`--accent` 取 `#F2F4F7`，菜单/按钮的 `hover:bg-accent` 与列表一致；侧栏 `--nav-hover`/`--nav-selected` 也取同值，2026-11-27 起不再单独维护一套蓝。例外：标题栏控件——☰ 账户菜单、折叠/密度/下载/窗口三键——hover 用 `hover:bg-foreground/10`）**：白色叠层在浅色主题下等于没画，用户会反馈"浅色没法用/看着累"（2026-11-22 实测）。配色（2026-11-27 定稿 A 方案：冷中性 + 单一蓝，取代 QQ 浅蓝灰）：外壳 `#F3F3F3`（Win11 默认标题栏色）、列表/阅读器画布纯白 `#FFFFFF`、墨阶 `#16181B` / `#5B6169` / `#8B9199`、结构线 `--border: #DADEE4`、表格与行 `--table-line` / `--row-line` 同为 `#E9EBEF`、浮面 `--muted: #ECEEF1`、主色 `#2B5FD9`；不要再回到带蓝调的 `#E6EDF5` 外壳或 `#F3F4F6`/`#DBEBFD` 那套交互色。`--background` 同时用于窗口底色（`src/main/index.ts` 的 `backgroundColor` 要跟着改）。
-- 列表与正文都在本地：同步时把正文一并落库（点开不再请求服务器），列表只读 header + snippet；UI 开发期一律用 `fixtures/messages.json` + `lib/mock.ts` 的 fillers，不要为了“看着像真的”偷偷接网络。**演示数据只在 dev 构建存在**（`mock.ts` 用 `import.meta.env.DEV` 门控 `folders` / `labels` / `messages` / fillers，Vite 生产构建会常量折叠成空数组并把 fixtures JSON 摇掉）：正式包没有账户时列表显示「还没有配置账户」引导、侧栏不出现「标签」，绝不能出现演示邮件或「已同步 · 1 分钟前」这类假状态。
+- 列表与正文都在本地：同步时把正文一并落库（点开不再请求服务器），列表只读 header + snippet；UI 开发期一律用 `fixtures/messages.json` + `lib/mock.ts` 的 fillers（**类型定义在 `lib/message.ts`，mock 只造数据**，业务组件不要从 mock 引类型），不要为了“看着像真的”偷偷接网络。**演示数据只在 dev 构建存在**（`mock.ts` 用 `import.meta.env.DEV` 门控 `folders` / `labels` / `messages` / fillers，Vite 生产构建会常量折叠成空数组并把 fixtures JSON 摇掉）：正式包没有账户时列表显示「还没有配置账户」引导、侧栏不出现「标签」，绝不能出现演示邮件或「已同步 · 1 分钟前」这类假状态。
 - 类名合并用 `cn()`；组件文件一个导出组件 + 局部常量，不用默认导出。
 - 文案中文、标识符英文；时间与未读数用 `tabular-nums`。
 
@@ -92,12 +95,14 @@ docs/                PRD、UI 参考、截图
 - **UI 改动由用户肉眼验收**：小改动不要跑自动截图，改完告知“已生效、请看窗口”即可。
 - 只有这三种情况才用自动化截图（`MAILDESK_CAPTURE` / `MAILDESK_CAPTURE_LIGHT`）：需要像素级比对、用户肉眼无法确认、以及 debug（白屏/溢出/渲染错误）。
 - 每次改完跑 `npm run typecheck`；结构性改动再跑 `npm run build`。
+- 改到纯逻辑（`src/main/sync/parse.ts`、`lib/grouping.ts`、`lib/format.ts`、数据库迁移/事务）时先补或改 `*.test.ts` 再跑 `npm test`，别只靠真实邮箱手测。
+- 改过 `PRD.md` / `DESIGN.md` / `AGENTS.md` / `README.md` / `sync.md` 或 `channels.ts` / `ipc/index.ts` 后，跑 `npm run check:docs`（相对链接、DESIGN token 与 `globals.css` 的一致性、通道与 handler 对齐）。
 - 改同步层（`src/main/sync/**`、`src/main/db/messages.ts` 的同步相关函数、`SyncEvent` 契约）后，除 typecheck 外必须更新 `docs/sync.md`：改对应行为小节，并在「变更记录」追加一条。
 - 后台 `npm run dev` 属于用户资产：不要随手 kill。截图脚本与 dev 冲突（单实例锁），需要时先停 dev，截完立即重启并告知用户。
 - **提交与推送必须由用户明确指令触发**：不要自作主张 `git commit` / `git push`，改完代码停在“工作区脏”的状态等用户说提交。用户说“提交”只做 commit，说“推送”才 push。
 - **出包（`npm run package`）同样是明确指令才做**：改了主进程、图标、`resources/` 或配置都不算授权，不要顺手重打安装包；改完就停在源码/资产状态，等用户说“出包”再打。
 - 仓库分支 `main`。提交信息用中文 Conventional Commits（`feat:` / `fix:` / `docs:` / `chore:` / `refactor:`），一次提交只做一件事，body 写清“为什么”。
-- 不要提交 `node_modules/`、`out/`、`release/`、`.capture/`；`docs/ui-refs/` 与截图属于设计依据，要提交。
+- 不要提交 `node_modules/`、`out/`、`release/`、`.capture/`。
 - 不新增依赖前先说明理由；能用一个现成库解决的不要手写。
 
 ## 已知坑
@@ -193,7 +198,7 @@ docs/                PRD、UI 参考、截图
 - **图片预览浮层的关闭状态**：浮层由 `preview || previewBusy || previewError` 三个状态驱动，关闭必须走 `Reader.tsx` 的 `closePreview()` 一起清三个 state。只 `setPreview(null)` 时失败态（`previewError` 有值、`preview` 为 null）会永远留在屏幕上，用户会以为整个窗口卡死。判断「能不能预览」只用 `attachment.mime` 的 `image/` 前缀或图片扩展名（`isPreviewable`），不要用 `Attachment.type`——那是图标分类，压缩包会被送进预览接口然后报 `unsupported`。
 - **附件尺寸一律取自 BODYSTRUCTURE**：正文预下载只取正文 part，附件二进制不同步传输；`fetchBody` 现在走同一条「结构 + part」路径，尺寸同样取 part octets（旧实现取整封前 512KB，解析器对截断附件给出的 `item.size` 只是残片，实测 40 MB 的附件报 369 KB）。两条路径都用 `collectAttachmentParts()` 的 part octets 覆盖尺寸，base64 按 76 字符 + CRLF 折行折算：`(size − ceil(size/78)×2) × 3/4`（直接乘 0.75 会偏大 3%，40 MB 显示成 41.1 MB）。
 - 列表「大小」列是整封信的 RFC822 字节（`envelope.size`，含 base64 膨胀），附件 chip 是解码后的文件大小——两者本来就不相等，别当成 bug 去「对齐」。
-- 移动/删除是「服务器先行」，断线时本地不变——渲染层**不能 `.catch(() => undefined)` 静默吞错**，否则用户看到「点了没反应」。统一走 `App.tsx` 的 `showNotice()` + `src/renderer/src/components/Notice.tsx`（底部居中，3.5 s 自动消失），错误串用 `describeError()` 把 `network`/`auth`/`not-found` 归一成人话。
+- 移动/删除是「服务器先行」，断线时本地不变——渲染层**不能 `.catch(() => undefined)` 静默吞错**，否则用户看到「点了没反应」。统一走 `App.tsx` 的 `showNotice()` + `src/renderer/src/components/Notice.tsx`（底部居中，3.5 s 自动消失），错误串统一用 `src/renderer/src/lib/ipc.ts` 的 `describeIpcError()`（按 `code` 精确匹配，别再用 `includes("network")` 那种子串判断；原始说明用同文件的 `ipcErrorMessage()`，两者共用 `parseIpcError()`）。主进程侧一律 `throw ipcError("network", "…")`（`src/shared/errors.ts`，错误码只在那里维护），不要手拼 `code: message`。
 - **邮件行右键菜单**用 Radix `ContextMenu`（聚合包 `radix-ui`，shadcn 风格的 `src/renderer/src/components/ui/context-menu.tsx` 已补齐）：`MessageList` 在虚拟行外层包 `<ContextMenu onOpenChange={open => open && onContextSelect?.(item.message.id)}>` + `<ContextMenuTrigger asChild>`，**分组行（GroupHeader）不要包**。右键只调 `setSelectedId`（高亮 + 切阅读器），**绝不能调 `select()`**——那会顺手标已读，右键扫一眼就丢未读。菜单项复用 `markRead/toggleStar/moveMessage/deleteMessage`，别在菜单里另写一套；「标为垃圾邮件」= 移动到 `role === "junk"` 的文件夹，当前已在垃圾箱/垃圾邮件时 `junkFolderId` 传 `undefined` 隐藏该项。垃圾箱里额外有「复原」（onRestore，走 moveMessage 回收件箱，role === "inbox"）：非垃圾箱时 App 传 undefined，组件再按 permanentDelete 兜一层隐藏；本项目不记录原始文件夹，复原一律回收件箱，别在 UI 上暗示能回到原子文件夹。没有标签系统，菜单里没有「标签」，不能造一个假的。
 - **多选与 Ctrl+A**：选中集合是 `App.tsx` 的 `selectedIds: string[]`，`selectedId` 只是其中的「活动行」（决定阅读器与滚动定位）。`Ctrl/⌘+点击` 由 `MessageRow` 传 `event.ctrlKey || event.metaKey` 给 `onSelect(id, additive)`，**只增减集合、不标已读**；`Ctrl+A` 无条件全选整个当前文件夹（用 `folderMessages` 而不是 `visible`，并 `setFilter("all")` 让被过滤掉的行也显示出来变成蓝底），同样不标已读，并且不触发「停留 1.5s 自动已读」那个 effect（有多选时直接 return）。`useHotkeys` 里对输入框内的 `ctrl+a` 单独放行，否则搜索框/账户表单里按 Ctrl+A 会被列表全选吃掉。`Delete`/`Backspace` 走 `deleteSelected()` 批量删（垃圾箱内 `permanent`），`J/K` 移动会收敛回单行。`Shift+点击` 是范围选择（`select(id, additive, range)`，anchor 取 `selectedId`，在当前 `visible` 里切片），不标已读；`Shift+U` 走 `markAllRead()` 一次 `setRead(ids, true)` 批量标记，同时乐观更新 `items` 与 `searchResults`（搜索态跨文件夹时不直接改 `unreadCounts`，靠 `unreadTick` 回读）。**行底色必须由 `selectedIds` 决定**（`MessageList` 里 `selectedSet = useMemo(() => new Set(selectedIds ?? []))`，只有集合为空时才回落到 `selectedId`）——只比 `selectedId` 会让 `Ctrl+A` 看起来「没反应」，其实集合已全选、只是只亮了一行（实测 `aria-selected` 从 0 到 36）。
 

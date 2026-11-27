@@ -72,7 +72,7 @@ docs/                PRD、UI 参考、截图
   - peek：只把 transform 归 0，gap 仍是 0 → **画布一帧都不动**，而且 transform 走合成器，列表不重绘（这解决了「收起时列表抖一下」）。
   - 停靠（抽屉开着点按钮）：`collapsed` 变 false → gap 0→220 过渡、面板 transform 本来就是 0 → 画布从面板下方平滑右移，结束时两者恰好重合，**没有二次交接**。
   - 收起：gap 220→0 与 transform → -100% 同时跑，两个边缘始终重合。
-  - 描边/投影只在 `collapsed && sidebarPeek` 时加：**上边 + 右边各 1px `--border`**（上边把抽屉和标题栏分开、并与画布顶边接成一条；右边把抽屉和列表分开）+ `elevation-menu`。展开时只靠画布自己的左边框，面板再画一条会变 2px（实测过）。
+  - 描边/投影只在 `collapsed && sidebarPeek` 时加：**上边 + 右边各 1px `--border`**（上边把抽屉和标题栏分开、并与画布顶边接成一条；右边把抽屉和列表分开）+ `elevation-menu`。这两条线必须用**面板内绝对定位的 1px div**（`inset-x-0 top-0 h-px` / `inset-y-0 right-0 w-px`，`pointer-events-none`）画，**不能用 `border-t border-r`**：border 会占掉面板内侧 1px，从抽屉停靠成展开时边框消失、侧栏内容会突然上移+右移 1px，用户会看到「抖一下」（2026-11-27 实测反馈）。展开时只靠画布自己的左边框，面板再画一条会变 2px（实测过）。
   - 面板滚动条用 `showScrollbar={!collapsed}`：收起/peek 时它的浮层滚动条是 `fixed` + portal，会停在原地扫过列表。
   - 指针离开按钮后 180ms 再收（按钮在标题栏、面板在内容行，中间隔着几像素），面板自己的 `onMouseEnter` 取消定时器；在面板里选文件夹/标签会直接收起。**不要再加 `w-[50px]` 的窄栏**，也不要恢复「只显示系统文件夹」这类折叠分支（`Sidebar` 没有 `collapsed` prop）。画布左边距恒为 0（收起时也不再补 7px，2026-11-27 用户要求），所以不存在 `margin-left` 过渡。标题栏左段同时 `220 → 170`（固定值，宽度可过渡；胶囊 `truncate`），别留 220px 空档、也别用 `width:auto`（不可过渡）。动画期间（260ms 兜底定时器）调 `drag-pause` 的 `setDragging(true)` 冻结正文测量，结束后自动补量一次——否则 iframe 宽度每帧都变，长邮件会整篇重排。侧栏底部的同步状态行、设置、选择文件夹随侧栏一起隐藏，手动同步走 `Ctrl+R`。持久化 key 仍是 `maildesk.sidebarCollapsed`（语义从「窄栏」变成「整块隐藏」）。
 - **只有浅色一个主题**（2026-11-24 决定，深色模式已删除）：侧栏/标题栏 `--background: #F3F3F3`、列表/阅读器画布 `--card: #FFFFFF`、浮面 `--muted: #ECEEF1`、hover `--accent: #F2F4F7`、选中 `--row-selected: #E3ECFA`、结构线 `#DADEE4`、主色 `#2B5FD9`。不要再添加 `.dark` token、`dark:` 分支或深浅切换入口；`theme.tsx` 只负责把 `--background/--foreground` 同步给窗口底色。

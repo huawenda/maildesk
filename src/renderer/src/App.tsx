@@ -1161,9 +1161,9 @@ export default function App() {
             "absolute inset-y-0 left-0 z-30 w-[220px] overflow-hidden bg-background",
             "transition-transform duration-200 ease-out motion-reduce:transition-none",
             collapsed && !sidebarPeek ? "-translate-x-full pointer-events-none" : "translate-x-0",
-            // 只有浮层态自己画描边和投影：展开时画布左侧那 1px 由画布自己的边框提供，画两条会变成 2px。
-            // 上边那道线让抽屉和标题栏分开，同时接上画布顶边那根线（2026-11-27 用户要求）。
-            collapsed && sidebarPeek && "border-t border-r border-border elevation-menu"
+            // 只有浮层态给投影：展开时画布左侧那 1px 由画布自己的边框提供，再画一条会变 2px。
+            // 描边不用 border（见下面的绝对定位线），否则抽屉态内容会被边框挤 1px。
+            collapsed && sidebarPeek && "elevation-menu"
           )}
           inert={collapsed && !sidebarPeek}
           onMouseEnter={cancelPeekClose}
@@ -1205,6 +1205,15 @@ export default function App() {
             onOpenSyncStatus={() => setSyncStatusOpen(true)}
             showScrollbar={!collapsed}
           />
+          {/* 浮层态的描边（2026-11-27）：上边把抽屉和标题栏分开、并接上画布顶边那条线，右边把抽屉和列表分开。
+              必须用绝对定位的 1px 线而不是 border——border 会占掉面板内侧 1px，从「抽屉」停靠成「展开」时
+              这条边框消失，侧栏内容会突然上/右移 1px，看起来就是抖一下（用户实测反馈）。 */}
+          {collapsed && sidebarPeek && (
+            <>
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-border" />
+              <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-border" />
+            </>
+          )}
         </div>
         {/* 画布区（列表 + 阅读器）：白卡贴住窗口右、下、左三条边（2026-11-27 用户要求边距全部收成 0），
             只保留 1px --border 勾边；侧栏展开时左上角保留圆角（贴着侧栏，圆角露背景不突兀），

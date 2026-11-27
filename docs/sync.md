@@ -26,6 +26,7 @@
 | `src/main/sync/engine.ts` | 同步引擎：连接、队列、增量、正文、回溯、对账、本地操作（附件下载已拆到下一个文件） |
 | `src/main/sync/attachment-download.ts` | 附件下载器：缓存优先、流式落盘、去重、取消、预取（`AttachmentDownloader`） |
 | `src/main/sync/bodies.ts` | 正文链：缺正文补齐、分块并发下载、内嵌图嵌入（`BodySync`，进度由 engine 快照读取） |
+| `src/main/sync/body-chunks.ts` | 正文 FETCH 分块（按封数与估算字节预算切块，纯函数） |
 | `src/main/sync/reconcile.ts` | 双向对账：枚举 UID/FLAGS、Message-ID 认领移动、补拉/删除/已读回写、游标与计数 |
 | `src/main/sync/maintenance.ts` | 一次性历史修补：附件标记（BODYSTRUCTURE 重算）、收件人姓名（重读 To/Cc 原始头） |
 | `src/main/sync/folder-refresh.ts` | 文件夹清单 / 收件箱 STATUS 刷新（含服务器删除文件夹的本地清理） |
@@ -460,3 +461,4 @@ FTS5 的触发器挂在 `message` 的 INSERT/DELETE/UPDATE 上；删文件夹必
 | 2026-11-27 | 正文链（补齐 / 分块并发 / 内嵌图）拆到 `sync/bodies.ts`（`BodySync`），进度与事件通过 `BodySyncContext` 注入；engine 1730 → 1429 行 |
 | 2026-11-27 | 对账扫描拆到 `sync/reconcile.ts`，engine 只保留「何时对账 / 选哪些文件夹 / 快照更新」；engine 1429 → 1273 行 |
 | 2026-11-27 | 同步层日志从 `console.*` 改为 electron-log（`logger.info/warn/error`），事件与错误开始落 `main.log`；`parse.ts` 保持 console（纯模块，单测不引 electron） |
+| 2026-11-27 | 正文分块逻辑抽到 `sync/body-chunks.ts` 并补单测；新增搜索单测（LIKE 转义 `%` `_`、中文子串、cc 命中、时间倒序），测试总数 24 → 33 |

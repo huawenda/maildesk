@@ -19,6 +19,7 @@ import {
   embedCidImages,
   toSnippet
 } from "./parse"
+import { bodyChunks } from "./body-chunks"
 
 /**
  * 正文同步（从 engine.ts 拆出）：首次同步后的正文补齐、正文分块并发下载、内嵌图嵌入。
@@ -30,42 +31,9 @@ const BODY_CHUNK = 100
 /** 单封内嵌图上限（编码尺寸）与整封合计上限；2MB 会卡死整封 2MB+ 的纯图片邮件。 */
 const MAX_INLINE_IMAGE = 10 * 1024 * 1024
 const MAX_INLINE_TOTAL = 16 * 1024 * 1024
-const FETCH_BATCH = 50
 
 const DEBUG = process.env.MAILDESK_SYNC_DEBUG === "1"
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
-
-/** 一次 FETCH 里正文 part（含内嵌图）的估算字节上限。 */
-const BODY_FETCH_BUDGET = 32 * 1024 * 1024
-
-/**
- * 把同一组 part 的邮件切成 FETCH 批次。内嵌图上限放开到 10MB 之后，50 封大图邮件一次
- * 拉回来能吃掉几百 MB 内存，所以按「图片编码尺寸 + 每块正文 64KB」估个字节数并卡预算。
- */
-function bodyChunks(
-  uids: number[],
-  byUid: Map<number, { uid: number; structure?: MessageStructureObject }>
-): number[][] {
-  const chunks: number[][] = []
-  let current: number[] = []
-  let bytes = 0
-  for (const uid of uids) {
-    const structure = byUid.get(uid)?.structure
-    const images = structure ? collectInlineImages(structure) : []
-    const estimate =
-      images.reduce((sum, image) => sum + (image.size ?? 0), 0) +
-      (structure ? collectTextParts(structure).length : 0) * 64 * 1024
-    if (current.length > 0 && (current.length >= FETCH_BATCH || bytes + estimate > BODY_FETCH_BUDGET)) {
-      chunks.push(current)
-      current = []
-      bytes = 0
-    }
-    current.push(uid)
-    bytes += estimate
-  }
-  if (current.length > 0) chunks.push(current)
-  return chunks
-}
 
 export interface BodySyncContext {
   accountId: string

@@ -19,7 +19,7 @@ import { useDocumentTabs } from "@/hooks/use-document-tabs"
 import { useSettings } from "@/hooks/use-settings"
 import { setDragging } from "@/lib/drag-pause"
 import { describeIpcError, mail } from "@/lib/ipc"
-import { detailToMessage, navFolders, summaryToMessage, type NavFolder } from "@/lib/live"
+import { detailToMessage, summaryToMessage, visibleNavList, type NavFolder } from "@/lib/live"
 import { folders as demoFolders, messages as seedMessages } from "@/lib/mock"
 import type { Message } from "@/lib/message"
 import { applyChrome } from "@/lib/theme"
@@ -47,29 +47,6 @@ const timeAgo = (timestamp: number): string => {
   return hours < 24 ? `${hours} 小时前` : `${Math.round(hours / 24)} 天前`
 }
 
-
-/**
- * 侧栏可见项：先用**完整**文件夹清单算出层级（否则只剩容器时会被误判成可选中文件夹，
- * 从而多出一个「其他文件夹 > 其他文件夹」），再丢掉未启用项，并保留启用项的祖先容器。
- */
-function visibleNavList(folders: Folder[]): NavFolder[] {
-  const all = navFolders(folders)
-  const enabledIds = new Set(folders.filter((folder) => folder.enabled).map((folder) => folder.id))
-  const keep = new Set(enabledIds)
-  const byId = new Map(all.map((item) => [item.id, item]))
-  for (const item of all) {
-    if (!item.selectable || !enabledIds.has(item.id)) continue
-    let parentId = item.parentId
-    while (parentId) {
-      keep.add(parentId)
-      parentId = byId.get(parentId)?.parentId ?? null
-    }
-  }
-  const filtered = all.filter((item) => keep.has(item.id))
-  // 容器本身不可选中：没有可见子项时连同空分组一起收掉，避免只剩一个空的「其他文件夹」
-  const parents = new Set(filtered.map((item) => item.parentId).filter(Boolean))
-  return filtered.filter((item) => item.selectable || parents.has(item.id))
-}
 
 export default function App() {
   const [version, setVersion] = useState<string>()

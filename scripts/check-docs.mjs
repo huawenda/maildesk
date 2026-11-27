@@ -14,7 +14,15 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const DOC_FILES = ["AGENTS.md", "DESIGN.md", "README.md", "docs/PRD.md", "docs/sync.md"]
+const DOC_FILES = [
+  "AGENTS.md",
+  "DESIGN.md",
+  "README.md",
+  "docs/PRD.md",
+  "docs/sync.md",
+  "docs/design-rules.md",
+  "docs/pitfalls.md"
+]
 
 const problems = []
 const warnings = []
@@ -32,6 +40,38 @@ for (const file of DOC_FILES) {
     linkCount += 1
     const abs = resolve(ROOT, dirname(file), clean)
     if (!existsSync(abs)) problems.push(`${file}: 链接指向不存在的文件 → ${target}`)
+  }
+}
+
+// 1b. AGENTS / design-rules 里引用的仓库路径必须存在 --------------------------
+// 拆分文档后最容易出现的错：引用了一个已经改名/删除的文件。
+const PATH_DOCS = ["AGENTS.md", "docs/design-rules.md"]
+const PATH_ROOTS = ["src/", "docs/", "resources/", "build/", "fixtures/", "scripts/"]
+const KNOWN_FILES = new Set([
+  "AGENTS.md",
+  "DESIGN.md",
+  "README.md",
+  "package.json",
+  "package-lock.json",
+  "electron-builder.yml",
+  "electron.vite.config.ts",
+  "vitest.config.mts",
+  "tsconfig.json",
+  "tsconfig.node.json",
+  "tsconfig.web.json",
+  "components.json"
+])
+// 已由用户删除、但文档需要提到「不要再恢复」的路径
+const PATH_EXEMPT = new Set(["docs/ui-refs/", "docs/palette-compare.png"])
+let pathRefs = 0
+for (const file of PATH_DOCS) {
+  for (const match of read(file).matchAll(/`([^`\n]+)`/g)) {
+    const token = match[1].trim().replace(/[.,;:)]+$/, "")
+    if (!token || /[\s*<>$]/.test(token)) continue
+    if (PATH_EXEMPT.has(token)) continue
+    if (!KNOWN_FILES.has(token) && !PATH_ROOTS.some((root) => token.startsWith(root))) continue
+    pathRefs += 1
+    if (!existsSync(join(ROOT, token))) problems.push(`${file}: 引用的路径不存在 → ${token}`)
   }
 }
 
@@ -72,6 +112,25 @@ for (const [name, hex] of designTokens) {
   }
 }
 
+// 2b. DESIGN 正文里出现 hex 时，必须是 CSS 里存在的色值（防止正文复述旧值造成漂移）
+const PROSE_HEX_ALLOW = new Set(["#c42b1c"]) // close-hover：只写在窗口关闭键组件里
+const cssHexValues = new Set(cssTokens.values())
+let inColorsBlock = false
+for (const line of read("DESIGN.md").split(/\r?\n/)) {
+  if (/^colors:\s*$/.test(line)) {
+    inColorsBlock = true
+    continue
+  }
+  if (inColorsBlock && /^[a-zA-Z][\w-]*:\s*$/.test(line)) inColorsBlock = false
+  if (inColorsBlock) continue
+  for (const match of line.matchAll(/#[0-9a-fA-F]{6}/g)) {
+    const hex = match[0].toLowerCase()
+    if (!cssHexValues.has(hex) && !PROSE_HEX_ALLOW.has(hex)) {
+      problems.push(`DESIGN.md: 正文色值 ${hex} 在 globals.css 里不存在（写 token 名，别复述色值）`)
+    }
+  }
+}
+
 // 3. IPC 通道 ↔ handler -----------------------------------------------------
 const channelKeys = new Set(
   [...read("src/shared/channels.ts").matchAll(/^\s+([a-zA-Z0-9]+):\s*"/gm)].map((m) => m[1])
@@ -108,7 +167,7 @@ function walk(dir) {
 
 // 输出 ----------------------------------------------------------------------
 console.log(
-  `check:docs — 链接 ${linkCount} 个 · token ${designTokens.size}/${cssTokens.size} · 通道 ${channelKeys.size}/${handled.size}`
+  `check:docs — 链接 ${linkCount} 个 · 路径 ${pathRefs} 个 · token ${designTokens.size}/${cssTokens.size} · 通道 ${channelKeys.size}/${handled.size}`
 )
 for (const warning of warnings) console.warn(`warn  ${warning}`)
 for (const problem of problems) console.error(`error ${problem}`)

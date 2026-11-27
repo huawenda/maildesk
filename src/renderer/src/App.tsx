@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { Account, Folder, SyncEvent, SyncState } from "@shared/types"
+import type { Account, Folder } from "@shared/types"
 import { AccountDialog } from "@/components/AccountDialog"
 import { MessageList } from "@/components/MessageList"
 import { Notice } from "@/components/Notice"
 import { Reader } from "@/components/Reader"
 import { FolderPickerDialog } from "@/components/FolderPickerDialog"
 import { SettingsDialog } from "@/components/SettingsDialog"
-import { SyncStatusDialog, type SyncEventLogEntry } from "@/components/SyncStatusDialog"
+import { SyncStatusDialog } from "@/components/SyncStatusDialog"
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { Sidebar } from "@/components/Sidebar"
 import { TitleBar } from "@/components/TitleBar"
@@ -14,16 +14,18 @@ import { useHotkeys } from "@/lib/hotkeys"
 import { useSidebarPeek } from "@/hooks/use-sidebar-peek"
 import { useListWidth } from "@/hooks/use-list-width"
 import { useSearch } from "@/hooks/use-search"
+import { useSyncFeed } from "@/hooks/use-sync-feed"
+import { useDocumentTabs } from "@/hooks/use-document-tabs"
+import { useSettings } from "@/hooks/use-settings"
 import { setDragging } from "@/lib/drag-pause"
 import { describeIpcError, mail } from "@/lib/ipc"
-import { readStored, store } from "@/lib/preferences"
 import { detailToMessage, navFolders, summaryToMessage, type NavFolder } from "@/lib/live"
 import { folders as demoFolders, messages as seedMessages } from "@/lib/mock"
 import type { Message } from "@/lib/message"
 import { applyChrome } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
-export type Density = "compact" | "standard" | "comfortable"
+export type { Density } from "@/lib/preferences"
 
 const DEMO_NAV: NavFolder[] = demoFolders.map((folder) => ({
   id: folder.id,
@@ -45,17 +47,6 @@ const timeAgo = (timestamp: number): string => {
   return hours < 24 ? `${hours} 小时前` : `${Math.round(hours / 24)} 天前`
 }
 
-/** 时间线里的同类进度可以合并成一行（只保留最新的值）。 */
-const sameProgress = (a: SyncEvent, b: SyncEvent): boolean => {
-  if (a.type === "progress" && b.type === "progress") {
-    return a.folder === b.folder && a.accountId === b.accountId
-  }
-  if (a.type === "bodies" && b.type === "bodies") return a.accountId === b.accountId
-  if (a.type === "backfill" && b.type === "backfill") {
-    return a.folderId === b.folderId && a.accountId === b.accountId
-  }
-  return false
-}
 
 /**
  * 侧栏可见项：先用**完整**文件夹清单算出层级（否则只剩容器时会被误判成可选中文件夹，
@@ -106,126 +97,64 @@ export default function App() {
   // 多选集合：Ctrl+点击逐条增减、Ctrl+A 全选；selectedId 同时是其中的「活动行」
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   // 文档标签页：第一个是当前文件夹（不可关），双击列表里的邮件会追加一个邮件标签
-  const [openTabs, setOpenTabs] = useState<Message[]>([])
-  const [activeTab, setActiveTab] = useState<string>("folder")
   const [detail, setDetail] = useState<Message | null>(null)
   // 列表滚动位置：页签模式下列表被卸载，切回文件夹页签时用它把位置还原（不触发渲染）
   const listScrollRef = useRef(0)
   // 标题栏常驻搜索：query 为空的列表就是当前文件夹；有 query 时列表换成跨文件夹的搜索结果
-  const [density, setDensity] = useState<Density>(() => readStored("maildesk.density", "standard"))
-  const [collapsed, setCollapsed] = useState<boolean>(() => readStored("maildesk.sidebarCollapsed", false))
   // ��栏：**始终绝对定位**的面板 + 一个只占位的 gap。
   // 面板靠 transform 滑入滑出（合成器动画，列表一帧都不重绘）；gap 的宽度 = 侧栏是否占位，
   // 停靠/展开时 gap 从 0 过渡到 220，画布就是被它推向右的。
   // 参考 shadcn 的 Peek & Pin（gap + absolute panel）与 OpenCode 的 sidebar-peek。
+  const {
+    density,
+    setDensity,
+    collapsed,
+    setCollapsed,
+    fontSize,
+    setFontSize,
+    remoteImages,
+    setRemoteImages,
+    standardThreeLines,
+    setStandardThreeLines,
+    groupHeadersNonCompact,
+    setGroupHeadersNonCompact,
+    stickyGroupHeaders,
+    setStickyGroupHeaders,
+    showTimeNonCompact,
+    setShowTimeNonCompact,
+    folderCount,
+    setFolderCount,
+    closeToTray,
+    setCloseToTray
+  } = useSettings()
   const peek = useSidebarPeek(collapsed)
   const { width: listWidth, paneRef: listPaneRef, startResize, reset: resetListWidth } = useListWidth()
-  const [fontSize, setFontSize] = useState<number>(() => readStored("maildesk.fontSize", 14))
-  const [backfill, setBackfill] = useState<{ done: number; total: number } | null>(null)
-  const [remoteImages, setRemoteImages] = useState<boolean>(true)
-  const [standardThreeLines, setStandardThreeLines] = useState<boolean>(false)
-  const [groupHeadersNonCompact, setGroupHeadersNonCompact] = useState<boolean>(true)
-  const [stickyGroupHeaders, setStickyGroupHeaders] = useState<boolean>(true)
-  const [showTimeNonCompact, setShowTimeNonCompact] = useState<boolean>(true)
-  const [folderCount, setFolderCount] = useState<"unread" | "total">("unread")
-  const [closeToTray, setCloseToTray] = useState<boolean>(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [syncStatusOpen, setSyncStatusOpen] = useState(false)
-  // 「同步状态」面板的事件时间线：只保留本次会话最近 200 条
-  const [syncEventLog, setSyncEventLog] = useState<SyncEventLogEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
-  const [syncState, setSyncState] = useState<SyncState>("disconnected")
-  // 首次同步/增量同步的可观测进度：正在取哪个文件夹、取到第几封
-  const [syncProgress, setSyncProgress] = useState<{ folder: string; fetched: number; total: number } | null>(null)
-  const [bodyProgress, setBodyProgress] = useState<{ done: number; total: number } | null>(null)
-  const [syncStartedAt, setSyncStartedAt] = useState<number | null>(null)
-  const [syncError, setSyncError] = useState<string | undefined>()
-  const [lastSyncAt, setLastSyncAt] = useState<number | undefined>()
-  // 只为了让「已同步 · N 分钟前」随时间自己走，不参与业务逻辑
-  const [clock, setClock] = useState(0)
 
   const live = accounts.length > 0
   const search = useSearch({ live, items })
-
-  // 设置以 SQLite 为准；localStorage 只做首帧防闪的缓存。
-  const settingsReady = useRef(false)
-
-  useEffect(() => {
-    let cancelled = false
-    mail.settings
-      .get()
-      .then((settings) => {
-        if (cancelled) return
-        setDensity(settings.density)
-        setCollapsed(settings.sidebarCollapsed)
-        setFontSize(settings.fontSize)
-        setRemoteImages(settings.remoteImages)
-        setStandardThreeLines(settings.standardThreeLines)
-        setGroupHeadersNonCompact(settings.groupHeadersNonCompact)
-        setStickyGroupHeaders(settings.stickyGroupHeaders)
-        setShowTimeNonCompact(settings.showTimeNonCompact)
-        setFolderCount(settings.folderCount)
-        setCloseToTray(settings.closeToTray)
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        settingsReady.current = true
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  useEffect(() => {
-    store("maildesk.density", density)
-    if (settingsReady.current) void mail.settings.set({ density }).catch(() => undefined)
-  }, [density])
-
-  useEffect(() => {
-    store("maildesk.sidebarCollapsed", collapsed)
-    if (settingsReady.current) void mail.settings.set({ sidebarCollapsed: collapsed }).catch(() => undefined)
-  }, [collapsed])
-
-  useEffect(() => {
-    store("maildesk.fontSize", fontSize)
-    if (settingsReady.current) void mail.settings.set({ fontSize }).catch(() => undefined)
-  }, [fontSize])
-
-  useEffect(() => {
-    if (!settingsReady.current) return
-    void mail.settings.set({ remoteImages }).catch(() => undefined)
-  }, [remoteImages])
-
-  useEffect(() => {
-    if (!settingsReady.current) return
-    void mail.settings.set({ standardThreeLines }).catch(() => undefined)
-  }, [standardThreeLines])
-
-  useEffect(() => {
-    if (!settingsReady.current) return
-    void mail.settings.set({ groupHeadersNonCompact }).catch(() => undefined)
-  }, [groupHeadersNonCompact])
-
-  useEffect(() => {
-    if (!settingsReady.current) return
-    void mail.settings.set({ stickyGroupHeaders }).catch(() => undefined)
-  }, [stickyGroupHeaders])
-
-  useEffect(() => {
-    if (!settingsReady.current) return
-    void mail.settings.set({ showTimeNonCompact }).catch(() => undefined)
-  }, [showTimeNonCompact])
-
-  useEffect(() => {
-    if (!settingsReady.current) return
-    void mail.settings.set({ folderCount }).catch(() => undefined)
-  }, [folderCount])
-
-  useEffect(() => {
-    if (!settingsReady.current) return
-    void mail.settings.set({ closeToTray }).catch(() => undefined)
-  }, [closeToTray])
+  const tabs = useDocumentTabs()
+  const {
+    state: syncState,
+    error: syncError,
+    lastSyncAt,
+    startedAt: syncStartedAt,
+    progress: syncProgress,
+    bodies: bodyProgress,
+    backfill,
+    log: syncEventLog,
+    clock,
+    setState: setSyncState,
+    setLastSyncAt
+  } = useSyncFeed({
+    live,
+    onFolderTick: () => setFolderTick((tick) => tick + 1),
+    onRefresh: () => setRefreshTick((tick) => tick + 1),
+    onUnread: () => setUnreadTick((tick) => tick + 1)
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -315,90 +244,6 @@ export default function App() {
   }, [live, activeAccountId, folderTick, refreshTick, unreadTick])
 
   // 同步事件：状态灯 + 新邮件到达后刷新
-  useEffect(() => {
-    if (!live) return
-    const off = mail.sync.onEvent((event) => {
-      setSyncEventLog((log) => {
-        // 0 / N 的开始进度没有信息量，不进时间线
-        if (event.type === "progress" && event.fetched === 0) return log
-        const last = log[log.length - 1]
-        // 同一状态连续重复（例如逐个文件夹「正在打开」）不刷屏
-        if (
-          event.type === "state" &&
-          last?.event.type === "state" &&
-          last.event.status.state === event.status.state &&
-          last.event.status.folder === event.status.folder &&
-          last.event.status.error === event.status.error
-        ) {
-          return log
-        }
-        const entry = { at: Date.now(), event }
-        // 同类进度只保留最新一条：进度每 50 封发一次，全部记下来会刷屏
-        if (last && sameProgress(last.event, event)) {
-          const next = log.slice(0, -1)
-          next.push(entry)
-          return next
-        }
-        return log.length >= 200 ? [...log.slice(1), entry] : [...log, entry]
-      })
-      if (event.type === "state") {
-        setSyncState(event.status.state)
-        setSyncError(event.status.error)
-        if (event.status.lastSyncAt) setLastSyncAt(event.status.lastSyncAt)
-        // 状态里带完整快照：事件订阅晚于同步启动时也能立刻显示出进度
-        setSyncStartedAt(event.status.startedAt ?? null)
-        setSyncProgress(event.status.progress ?? null)
-        setBodyProgress(event.status.bodies ?? null)
-      } else if (event.type === "progress") {
-        setSyncProgress({ folder: event.folder, fetched: event.fetched, total: event.total ?? 0 })
-      } else if (event.type === "bodies") {
-        setBodyProgress(event.finished ? null : { done: event.done, total: event.total })
-      } else if (event.type === "messages") {
-        setFolderTick((tick) => tick + 1)
-        // 主进程的本地变更回执（移动/删除/已读）added 恒为 0，界面已经改好了，
-        // 再整箱重取就是白白闪一下；只有真来了新邮件（added > 0）或正文刚下完
-        // （bodiesDone，摘要/附件标记已写库）才重拉列表
-        if (event.added > 0 || event.bodiesDone) setRefreshTick((tick) => tick + 1)
-      } else if (event.type === "reconcile") {
-        // 服务器侧的删除/移动/已读/文件夹增删已被本地对齐，重拉列表与计数
-        if (event.added + event.removed + event.moved + event.flags + (event.folders ?? 0) > 0) {
-          setFolderTick((tick) => tick + 1)
-          setRefreshTick((tick) => tick + 1)
-          setUnreadTick((tick) => tick + 1)
-        }
-      } else if (event.type === "recipients") {
-        // 收件人姓名被原始头修正：列表项里的 to/cc 是旧的，重拉一次即可
-        if (event.updated > 0) setRefreshTick((tick) => tick + 1)
-      } else if (event.type === "backfill") {
-        setBackfill(event.finished ? null : { done: event.done, total: event.total })
-      }
-    })
-    mail.sync
-      .status()
-      .then((status) => {
-        setSyncState(status.state)
-        setSyncError(status.error)
-        if (status.lastSyncAt) setLastSyncAt(status.lastSyncAt)
-        setSyncStartedAt(status.startedAt ?? null)
-        setSyncProgress(status.progress ?? null)
-        setBodyProgress(status.bodies ?? null)
-      })
-      .catch(() => undefined)
-    return off
-  }, [live])
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setClock((value) => value + 1), 30_000)
-    return () => window.clearInterval(timer)
-  }, [])
-
-  // 连接/下载期间每秒刷新一次耗时，用户能确认「还在动」而不是卡住
-  useEffect(() => {
-    if (!syncStartedAt) return
-    const timer = window.setInterval(() => setClock((value) => value + 1), 1_000)
-    return () => window.clearInterval(timer)
-  }, [syncStartedAt])
-
   // 选中邮件后才拉正文（PRD 7.6 懒加载）
   useEffect(() => {
     if (!live || !selectedId) {
@@ -630,8 +475,7 @@ export default function App() {
           setSelectedId((current) => (current && idSet.has(current) ? null : current))
           setSelectedIds([])
           // 删掉的邮件如果开着标签页，一起关掉（否则会留下一个打开就报错的空标签）
-          setOpenTabs((tabs) => tabs.filter((tab) => !idSet.has(tab.id)))
-          setActiveTab((current) => (current !== "folder" && idSet.has(current) ? "folder" : current))
+          tabs.remove(idSet)
           // 同 moveMessage：全成功就不再重取，只有部分失败才回库对齐
           if (result.failed > 0) setRefreshTick((tick) => tick + 1)
           setFolderTick((tick) => tick + 1)
@@ -854,7 +698,7 @@ export default function App() {
   const folderTabLabel = search.active
     ? "搜索"
     : (navList.find((item) => item.id === folderId)?.label ?? "邮件")
-  const activeTabMessage = openTabs.find((tab) => tab.id === activeTab) ?? null
+  const activeTabMessage = tabs.activeMessage
   // 正文是懒加载的（选中后才拉）：标签页里的 message 是列表摘要，要把 detail 合并进来才有正文
   const activeMessage = activeTabMessage
     ? detail && detail.id === activeTabMessage.id
@@ -872,8 +716,7 @@ export default function App() {
     (id: string) => {
       const message = items.find((item) => item.id === id) ?? search.results.find((item) => item.id === id) ?? null
       if (!message) return
-      setOpenTabs((tabs) => (tabs.some((tab) => tab.id === id) ? tabs : [...tabs, message]))
-      setActiveTab(id)
+      tabs.open(message)
       setSelectedId(id)
       setSelectedIds([id])
     },
@@ -881,12 +724,11 @@ export default function App() {
   )
 
   const closeTab = useCallback((id: string) => {
-    setOpenTabs((tabs) => tabs.filter((tab) => tab.id !== id))
-    setActiveTab((current) => (current === id ? "folder" : current))
+    tabs.close(id)
   }, [])
 
   const activateTab = useCallback((id: string) => {
-    setActiveTab(id)
+    tabs.activate(id)
     if (id === "folder") return
     setSelectedId(id)
     setSelectedIds([id])
@@ -894,8 +736,8 @@ export default function App() {
 
   // 换文件夹 / 进搜索 / 切标签页时回到「文件夹」页签：这几个动作都是导航，不该停在某封邮件的正文里
   useEffect(() => {
-    setActiveTab("folder")
-  }, [folderId, search.active, activeLabel])
+    tabs.reset()
+  }, [folderId, search.active, activeLabel, tabs.reset])
 
   // 列表滚动位置只对「同一个列表」有效：换箱 / 换搜索时清零，避免把上一箱的位置带到新列表上
   // （在 render 期比这里做，MessageList 才能在同一次渲染里拿到正确的 initialScrollTop）
@@ -1037,7 +879,7 @@ export default function App() {
           <DocumentTabs
             tabs={[
               { id: "folder", label: folderTabLabel, title: folderTabLabel, closable: false, kind: "folder" },
-              ...openTabs.map((tab) => ({
+              ...tabs.tabs.map((tab) => ({
                 id: tab.id,
                 label: tab.subject || "(无主题)",
                 title: tab.subject,
@@ -1045,7 +887,7 @@ export default function App() {
                 kind: "mail" as const
               }))
             ]}
-            active={activeTab}
+            active={tabs.activeId}
             onActivate={activateTab}
             onClose={closeTab}
           />

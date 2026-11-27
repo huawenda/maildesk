@@ -47,7 +47,7 @@ src/renderer/src/     React UI（唯一的重构区域）
                      现有 context-menu / dropdown-menu / input / select / dialog / popover；
                      input 与 select 的 trigger 已改成项目口径（bg-muted、border-input、rounded-lg、13px、focus 只换边框色），
                      新增表单不要再写 fieldClass，直接用 <Input> / <Select>；账户、设置、文件夹选择三个弹窗都已切到 ui/dialog 封装；`DialogOverlay` **透明**（不加暗色、不做 blur），只保留一层透明命中区接「点弹层外关闭」，不要改回 `bg-black/40`
-  hooks/             renderer 侧有状态逻辑（useSidebarPeek：抽屉；useListWidth：列表宽度与拖拽；useSearch：关键词/范围/结果）
+  hooks/             renderer 侧有状态逻辑（useSidebarPeek 抽屉 / useListWidth 列表宽度 / useSearch 搜索 / useSyncFeed 同步事件 / useDocumentTabs 页签 / useSettings 设置读写）
   lib/               message（视图模型类型）/ mock（demo 数据）/ grouping（列表分组）/ theme / preferences / utils
   styles/globals.css 设计 token 唯一落地处
 src/shared/          主/渲染共用类型与 zod schema

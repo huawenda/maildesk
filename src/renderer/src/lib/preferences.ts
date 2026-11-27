@@ -1,3 +1,5 @@
+export type Density = "compact" | "standard" | "comfortable"
+
 /** 渲染层的本地偏好：localStorage 读写与列表宽度的取值范围。 */
 
 /** 列表宽度：PRD 4.1 定的可拖范围 */

@@ -613,6 +613,9 @@ export function MessageList({
         </div>
       ) : null}
 
+      {/* 标准/宽松：列表顶部留 6px，避免第一个组头贴住上方横线（2026-11-27）。
+          放在滚动容器外面，不动虚拟滚动的坐标系与吸顶锚点。 */}
+      {compact ? null : <div className="h-1.5 shrink-0" aria-hidden />}
       <div
         ref={scrollRef}
         role="listbox"

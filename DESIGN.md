@@ -3,8 +3,8 @@ version: alpha
 name: MailDesk-design
 description: |
   Windows 单平台 IMAP 邮件客户端的浅色设计语言。骨架是"冷中性外壳 + 纯白悬浮画布"：
-  标题栏与侧栏共用 `--background`（#F3F3F3，Win11 默认标题栏色），列表与阅读器是一张 1px 描边、
-  无阴影、四角 10px 圆角（上边贴标题栏、右/下各留 7px）的白色卡片，靠明度差分层而不是靠描边堆叠。所有线条只有两档
+  标题栏与侧栏共用 `--background`（#F3F3F3，Win11 默认标题栏色），列表与阅读器是一整块 1px 描边、
+  无阴影的白色画布（上边贴标题栏、左/右/下均贴窗口边缘，零边距；仅侧栏展开时左上角带 10px 圆角），靠明度差分层而不是靠描边堆叠。所有线条只有两档
   （结构 #DADEE4 / 表格与行 #E9EBEF），hover 与选中全应用只有一套（#F2F4F7 / #E3ECFA）。
   唯一的彩色是主色 #2B5FD9，以及同步状态用的绿 #127A4E。浮层（菜单 / 弹窗 / 抽屉）是纯白 +
   两档软投影（elevation-menu / elevation-dialog）；画布本身无阴影，只在外圈有一根 1px `{colors.border}` 描边。
@@ -36,7 +36,7 @@ colors:
   ink-read: "#5f656d"          # 已读行的发件人 / 主题 / 日期 / 大小（实色）
   ink-faint: "#8b9199"         # 已读行的摘要 / 时间
   dot-read: "#c3c8cf"          # 已读行的状态圆点（hover 提到 ink-faint）
-  nav-hover: "#f2f4f7"         # 侧栏文件夹项 hover（= row-hover）
+  nav-hover: "#e9e9e9"         # 侧栏文件夹项 hover（中性灰，不用 row-hover）
   nav-selected: "#e3ecfa"      # 侧栏文件夹项选中（= row-selected）
   nav-count-active: "#2b5fd9"  # 侧栏选中项的计数角标（= primary）
   input: "#dadee4"             # 输入框 / 下拉触发器边框
@@ -107,7 +107,7 @@ spacing:
   xl: 12px
   xxl: 16px
   section: 24px      # 阅读器 / 弹窗内的区块间距
-  titlebar: 44px
+  titlebar: 36px      # 2026-11-27 从 44px 减小
   sidebar: 220px
   sidebar-item: 28px
   list-default: 380px
@@ -134,13 +134,13 @@ components:
   window-button:
     backgroundColor: transparent
     textColor: "{colors.muted-foreground}"
-    height: 44px
+    height: "{spacing.titlebar}"
     width: 46px
     hover: "background {colors.foreground}/10"
   window-close-button:
     backgroundColor: transparent
     textColor: "{colors.muted-foreground}"
-    height: 44px
+    height: "{spacing.titlebar}"
     width: 46px
     hover: "background {colors.close-hover}, text #ffffff"
   sidebar:
@@ -173,9 +173,9 @@ components:
     note: 数字统一 tabular-nums
   canvas:
     backgroundColor: "{colors.card}"
-    rounded: "{rounded.lg}"
-    margin: "0 7px 7px 0"     # 侧栏收起时 7px 7px 7px 7px（四边对称）
-    border: none
+    rounded: "top-left {rounded.lg}（侧栏展开）/ none（侧栏收起）"   # 右上、右下始终直角
+    margin: "0"                # 四边全贴窗口/侧栏/标题栏（2026-11-27 从 7px 收成 0）
+    border: "1px {colors.border}"
     shadow: none
   list-filter-tab:
     backgroundColor: transparent
@@ -320,7 +320,7 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 
 线条只有两档：**结构 `{colors.border}`** 与 **表格 / 行 `{colors.table-line}` = `{colors.row-line}`**（2026-11-27 统一为 `#E9EBEF`）。任何「用 `border-border` 加 `/40` `/60` 透明度」的写法都是错的：档位在浅色下几乎看不出差别，只会让线看起来脏。
 
-交互色全应用只有一套：hover `{colors.row-hover}`、选中 `{colors.row-selected}`，侧栏 `{colors.nav-hover}` / `{colors.nav-selected}` 取同值。菜单和按钮的 hover 统一取 `{colors.accent}`（= row-hover），标题栏里的图标键例外，用 `{colors.foreground}/10`——冷灰底上 `#F2F4F7` 几乎看不见。
+交互色基本只有一套：列表/菜单/按钮的 hover `{colors.row-hover}`、选中 `{colors.row-selected}`；**侧栏文件夹项是唯一例外**——hover 用中性灰 `{colors.nav-hover}`（`#E9E9E9`，2026-11-27 用户要求：灰底上 `#F2F4F7` 既几乎看不出又偏蓝），选中仍取 `{colors.nav-selected}`（= row-selected）。标题栏里的图标键例外，用 `{colors.foreground}/10`。
 
 **Key Characteristics:**
 - 只有浅色主题，没有 `.dark`、没有深浅切换入口
@@ -380,8 +380,8 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 ## Layout
 
 - **三栏固定结构**：侧栏 220 / 列表 380（可拖 320 ~ 窗口宽度一半，上限随窗口缩放）/ 阅读器吃掉剩余宽度，正文容器 `max-w-[900px]` 且不居中。
-- **标题栏 44px**，自绘（`frame: false`），整条同色、无下边框。从左到右：☰ 账户菜单 → 侧栏开关 → 密度 →（中段搜索胶囊 `absolute left-1/2`）→ 下载 → 窗口三键。标题栏里不放列表标题、未读数，也不把列表分隔线延伸上来。
-- **侧栏可整块收起**：宽度 220 → 0（200ms），内容保持 220 宽不重排、只被裁掉；收起后不保留图标栏，画布三边各留 7px。
+- **标题栏 36px**（`h-9`，2026-11-27 从 44px 减小），自绘（`frame: false`），整条同色、无下边框。从左到右：☰ 账户菜单 → 侧栏开关 → 密度 →（中段搜索胶囊 `absolute left-1/2`）→ 下载 → 窗口三键。标题栏里不放列表标题、未读数，也不把列表分隔线延伸上来。
+- **侧栏可整块收起**：宽度 220 → 0（200ms），内容保持 220 宽不重排、只被裁掉；收起后不保留图标栏，画布左边距恒为 0（贴着窗口左缘）。
 - **列表宽度可拖**：分隔线本身是 5px 命中区（`-mx-[2.5px]` 跨在边界上），拖动时直接改 DOM 宽度（零 React 渲染），松手才提交并持久化；双击复位 380。
 - **列表不分页**：整箱邮件都在本地，虚拟滚动。分组顺序：置顶组 → 今天 / 昨天 / 本周 / 上周 / 两周前 / 三周前 / 上个月 / 更早（周起点是周一）。
 - **阅读器**：页头（主题 → 发件人两行 → chip 行）与正文之间只有 1px `{colors.table-line}` 分隔线；正文外面只有一个直角矩形容器，不画边框、不圆角、不 `mx-auto`。
@@ -452,7 +452,7 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 ### Don't
 - 不要新增 `.dark` token、`dark:` 分支或深浅切换入口（只有浅色主题）。
 - 不要在 `border-border` 上套 `/40` `/60` 分档，也不要用 `white/[0.0x]` 做叠层（浅色下等于没画）。
-- 不要给画布、列表 `section` 加边框 / 阴影 / 圆角（会和卡片叠成双份）。
+- 不要给列表 `section` 加边框 / 阴影 / 圆角（会和画布叠成双份）；画布本身也不加阴影，除「侧栏展开时的左上角」外不加圆角。
 - 不要给弹窗加暗色遮罩或 blur。
 - 不要把选中行文字改成白色，也不要给已读行加新的颜色（只调深浅：`ink-read` / `ink-faint` 两个 token）。
 - 不要用透明度做已读压暗或线条分档（`foreground/65`、`border-border/60` 这类）——叠在 hover / 选中底色上会二次合成。
@@ -471,7 +471,7 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 | 窗口变宽/换显示器 | `listMaxWidth(window.innerWidth)` 实时夹一次；窗口尺寸与位置持久化，启动时按工作区夹回 |
 | 界面缩放 | **已删除**（2026-11-27）：整条 UI 固定 100%，不提供缩放开关 |
 | 列表密度 | 紧凑 26 / 标准 60（三行时 72）/ 宽松 88，切换即时生效 |
-| 侧栏收起 | 220 → 0 宽度动画 200ms，画布三边各留 7px |
+| 侧栏收起 | 220 → 0 宽度动画 200ms，画布左边距恒为 0（无 margin 过渡） |
 
 ## Agent Prompt Guide
 
@@ -480,11 +480,11 @@ MailDesk 是一个 Windows 单平台的 IMAP 邮件客户端，设计目标是�
 ```
 颜色：背景 #F3F3F3（标题栏/侧栏，Win11 标题栏色）、画布 #FFFFFF、浮面 #FFFFFF（靠 elevation-menu 投影浮起）
 线：结构 #DADEE4、表格与行 #E9EBEF —— 两档，不要用透明度分档
-交互：全应用一套 #F2F4F7 / #E3ECFA（列表与侧栏同值），标题栏图标 hover foreground/10
+交互：列表/菜单 #F2F4F7 / #E3ECFA；侧栏 hover 用中性灰 #E9E9E9（选中同 #E3ECFA）；标题栏图标 hover foreground/10
 主色：#2B5FD9；危险 #C0362C；已读墨阶 #5F656D / #8B9199 / #C3C8CF
 圆角：6 / 8 / 10 / 16 / full；画布四角 10、上边贴标题栏
 字号：主题 22/30·600，列表 12.5，元信息 11.5，侧栏 12，弹窗标题 13.5
-行高：紧凑 26 / 标准 60 / 宽松 88；侧栏项 28；标题栏 44
+行高：紧凑 26 / 标准 60 / 宽松 88；侧栏项 28；标题栏 36
 动效：120–200ms ease-out，只动 opacity / transform / width
 禁止：深色主题、白色叠层、画布边框与阴影、弹窗暗色遮罩、正文 zoom/scale
 ```

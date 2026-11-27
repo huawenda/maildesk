@@ -1130,12 +1130,13 @@ export default function App() {
             onOpenSyncStatus={() => setSyncStatusOpen(true)}
           />
         </div>
-        {/* 画布区（列表 + 阅读器）：整块抠成一张悬浮卡片，四周留出背景色（2026-11-24 用户要求）；
-            侧栏收起时左边也补 7px，卡片三边对称；外圈 1px --border 勾边（2026-11-27 用户要求） */}
+        {/* 画布区（列表 + 阅读器）：白卡贴住窗口右、下、左三条边（2026-11-27 用户要求边距全部收成 0），
+            只保留 1px --border 勾边；侧栏展开时左上角保留圆角（贴着侧栏，圆角露背景不突兀），
+            收起时左边贴窗口，四角都取直角 */}
         <div
           className={cn(
-            "mb-[7px] mt-0 mr-[7px] flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card transition-[margin-left] duration-200 ease-out motion-reduce:transition-none",
-            collapsed ? "ml-[7px]" : "ml-0"
+            "mb-0 ml-0 mr-0 mt-0 flex min-w-0 flex-1 flex-col overflow-hidden border border-border bg-card",
+            collapsed ? "rounded-none" : "rounded-tl-lg"
           )}
         >
           <DocumentTabs

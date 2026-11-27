@@ -84,8 +84,9 @@
   /* 列表行交互色：hover 冷灰、选中淡蓝；选中行文字仍用正常深浅 */
   --row-hover: #f2f4f7;
   --row-selected: #e3ecfa;
-  /* 侧栏文件夹项与列表共用同一套交互色（不再单独维护一套蓝） */
-  --nav-hover: #f2f4f7;
+  /* 侧栏文件夹项：hover 用中性灰（2026-11-27 用户要求 —— 灰底上 #F2F4F7 既看不出又偏蓝），
+     选中仍与列表同色 */
+  --nav-hover: #e9e9e9;
   --nav-selected: #e3ecfa;
   --nav-count-active: #2b5fd9;
   --input: #dadee4;
@@ -99,8 +100,9 @@
 .col-sep-l::before {
   content: "";
   position: absolute;
-  top: 6px;
-  bottom: 6px;
+  /* 2026-11-27 用户要求：竖线上下贯通，与列头的上/下横线相交（原来内缩 6px） */
+  top: 0;
+  bottom: 0;
   width: 1px;
   background: var(--table-line);
   pointer-events: none;

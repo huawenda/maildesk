@@ -59,7 +59,7 @@ electron-builder 二进制建议走镜像：
 ## 技术栈
 
 Electron 45 · electron-vite 6 · Vite 8 · React 19 · TypeScript 5.9 · Tailwind v4 · shadcn/ui（Radix）
-· `node:sqlite` · zod · imapflow · mailparser · DOMPurify · electron-log
+· `node:sqlite` · zod · imapflow · iconv-lite · libmime · DOMPurify · electron-log
 
 ## 进度
 

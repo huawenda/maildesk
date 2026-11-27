@@ -55,15 +55,3 @@ export function get<T>(sql: string, ...params: (string | number | null | Uint8Ar
 export function run(sql: string, ...params: (string | number | null | Uint8Array)[]): void {
   getDb().prepare(sql).run(...params)
 }
-
-export function tx(fn: () => void): void {
-  const instance = getDb()
-  instance.exec("BEGIN")
-  try {
-    fn()
-    instance.exec("COMMIT")
-  } catch (error) {
-    instance.exec("ROLLBACK")
-    throw error
-  }
-}

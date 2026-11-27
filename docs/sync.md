@@ -161,7 +161,7 @@ Manager (单例)
   - 每完成一块才推 `bodies { done, total }`（只按真正落库的封数前进），整轮结束再发一次
     `messages { added: 0, bodiesDone: true }` 让摘要刷新。
 - 兜底 `fetchBody(messageId)`：点开缺正文的邮件时走同一条 BODYSTRUCTURE + part 路径
-  （不再用 mailparser 解析前 2MB，内嵌图也能拿到）。
+  （旧实现只取整封前 2MB 的 MIME 源，内嵌图拿不到）。
 - 单批 `FETCH` 的估算字节上限 `BODY_FETCH_BUDGET=32MB`（图片编码尺寸 + 每块正文 64KB），
   内嵌图上限放到 10MB 后 50 封大图邮件一次拉回来会吃几百 MB 内存。
 
@@ -171,6 +171,9 @@ Manager (单例)
 
 - 缓存目录：`<userData>/attachments/<messageId>/<attachmentId>/<原文件名>`（`src/main/attachments.ts`）。
   按 mtime 做 LRU，超过 `CACHE_LIMIT`（1GB）从最旧的删；启动时与每次下载完成后各 prune 一次。
+- 删除随库走：永久删除邮件、删除文件夹、删除账户、`UIDVALIDITY` 变化清空重拉时，
+  先用 `messageIdsInFolder()` / `messageIdsInAccount()` 取 id，再 `dropMessageCaches(ids)`
+  把 `<messageId>` 目录整个删掉，不等 LRU 兜底（账户删除走外键级联，必须在 `removeAccount()` 之前取）。
 - 下载：`client.download(uid, part, { chunkSize: 32MB })` 的流直接 `pipeline` 进 `createWriteStream`，
   先写 `.part` 再 `rename`（中断不会留下能被当成缓存的半截文件），进度按已写字节节流 120ms 推给渲染层。
   **`chunkSize` 必须显式给**：imapflow 默认 64KB，一个 50MB 的视频就是 ~1000 次往返，
@@ -432,3 +435,5 @@ FTS5 的触发器挂在 `message` 的 INSERT/DELETE/UPDATE 上；删文件夹必
 | 2026-11-26 | 同步提速：历史回溯批次 200 → 500；正文移出关键路径（>150 封走后台链）；正文链最多 3 条连接并行（`MAILDESK_BODY_CONCURRENCY`，默认 3，失败退回单连接）；`fetchBody` 改走 BODYSTRUCTURE + part，内嵌图不再丢；手动同步不再强制全量 UID+FLAGS 扫描；`[sync] folder` 加 `selectMs/fetchMs`、`[sync] body batch` 打印并发与耗时 |
 | 2026-11-26 | 附件系统重做：落 `attachments/<messageId>/<attachmentId>/<文件名>` 缓存（1GB LRU）、流式写盘、独立连接且不进 `schedule()` 队列、打开邮件即静默预取（>200MB 跳过）；保存/打开/预览全部走缓存（`copyFile` / `openPath` / `readFile`），不再重新联网 |
 | 2026-11-26 | 附件下载显式 `chunkSize: 32MB`（imapflow 默认 64KB，50MB 附件要 ~1000 次往返，实测 6 分钟只走 286KB → 改后 17.6 秒）；加 60s 无字节的卡死兜底 |
+| 2026-11-27 | 清理 dead code：删除已无人调用的 `parseBody()` / `ParsedBody`（正文早已统一走 BODYSTRUCTURE + part）与 `mailparser` 依赖，行为不变 |
+| 2026-11-27 | 附件缓存随删除清理：永久删除邮件 / 删除文件夹 / 删除账户 / UIDVALIDITY 清空重拉时 `dropMessageCaches(ids)` 删除 `<messageId>` 目录，不再只靠 1GB LRU 兜底 |

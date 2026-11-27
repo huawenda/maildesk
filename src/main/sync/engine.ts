@@ -36,6 +36,7 @@ import {
   messageLocators,
   messagesMissingSnippet,
   moveMessageRow,
+  messageIdsInFolder,
   messagesNeedingBody,
   oldestUid,
   messagesNeedingAttachmentFlags,
@@ -51,6 +52,7 @@ import { getSettings } from "../db/settings"
 import {
   attachmentCachePath,
   cachedFile,
+  dropMessageCaches,
   pruneAttachmentCache,
   streamToFile,
   touchCacheFile,
@@ -733,7 +735,7 @@ export class SyncEngine {
 
   /**
    * 点开邮件时补正文：走和同步同一条 BODYSTRUCTURE + part 路径，
-   * 内嵌截图也一并取回（旧实现用 mailparser 解析前 2MB，无正文内嵌图）。
+   * 内嵌截图也一并取回（旧实现只取整封前 2MB 的 MIME 源，拿不到内嵌图）。
    */
   fetchBody(messageId: string): Promise<boolean> {
     return this.schedule(async () => {
@@ -1267,6 +1269,8 @@ export class SyncEngine {
     let removed = 0
     for (const folder of listFolders(this.account.id)) {
       if (seen.has(folder.path)) continue
+      // 附件缓存按 messageId 建目录：删文件夹时先取 id，库删完再把目录清掉
+      dropMessageCaches(messageIdsInFolder(folder.id))
       deleteFolder(folder.id)
       removed += 1
       console.log("[sync] folder removed", this.account.email, folder.path)
@@ -1511,6 +1515,7 @@ export class SyncEngine {
       if (folder.uidValidity !== null && folder.uidValidity !== uidValidity) {
         // PRD FR-05.4：UIDVALIDITY 变了就意味着 UID 全部失效，整箱重来
         console.log("[sync] UIDVALIDITY changed", folder.path, folder.uidValidity, "->", uidValidity, "清空重拉")
+        dropMessageCaches(messageIdsInFolder(folder.id))
         clearFolderMessages(folder.id)
         resetBackfillUid(folder.id)
         lastSyncedUid = 0
@@ -1684,6 +1689,7 @@ export class SyncEngine {
             moveMessageRow(item.id, target.id, nextUid)
           } else {
             // 服务器没给 COPYUID：先删本地，目标文件夹下次对账会重新拉回来
+            dropMessageCaches([item.id])
             deleteMessageRows([item.id])
           }
           moved += 1
@@ -1738,7 +1744,11 @@ export class SyncEngine {
           }
         }
         const gone = group.items.filter((item) => !remaining.has(item.uid))
-        if (gone.length > 0) deleteMessageRows(gone.map((item) => item.id))
+        if (gone.length > 0) {
+          const goneIds = gone.map((item) => item.id)
+          dropMessageCaches(goneIds)
+          deleteMessageRows(goneIds)
+        }
         deleted += gone.length
         failed += group.items.length - gone.length
         if (remaining.size > 0) {
@@ -1981,7 +1991,10 @@ export class SyncEngine {
         if (added > 0) this.hooks.emit({ type: "messages", accountId: this.account.id, folderId: arrival.folder.id, added })
       }
       const expired = vanished.filter((row) => !claimed.has(row.id)).map((row) => row.id)
-      if (expired.length > 0) deleteMessageRows(expired)
+      if (expired.length > 0) {
+        dropMessageCaches(expired)
+        deleteMessageRows(expired)
+      }
       let flagged = 0
       for (const folder of folders) {
         const server = serverIndex.get(folder.id)

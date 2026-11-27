@@ -299,7 +299,7 @@
 10. **启动顺序**：`refreshFolders → reconcileAccount → syncAll`。必须先对账再增量，否则被网页版/手机 MOVE 走的邮件会被 `syncAll` 当新邮件重新插一行、旧行再被对账删掉（实测丢过 id）。
 11. **文件夹也双向**：`refreshFolders` 放在 `reconcileAccount` 开头，所以启动、手动同步、每 3 分钟对账都会重读服务器文件夹清单；服务器上已经不存在的文件夹（网页版/手机端删除）连同本地邮件一起删掉（`deleteFolder` 先显式 `DELETE FROM message WHERE folder_id = ?`，因为外键级联删除不触发 message 的 `AFTER DELETE` 触发器，FTS 会留残影），并打 `[sync] folder removed <email> <path>`。侧栏当前选中的文件夹若被删掉，文件夹清单刷新后自动落回收件箱。**删掉文件夹时必须让 `reconcile` 事件照常发出**（`added/moved/removed/flags` 全是 0 也要发），否则渲染层收不到刷新信号，启动瞬间拉到的旧文件夹清单会一直挂在侧栏上（实测）。
 12. 增量拉取偶发取不到某封的头部时（QQ 存在这种"幽灵 UID"），`last_synced_uid` 仍会推进；该封由下一轮对账补回，不靠游标回退。
-13. **附件尺寸必须取自 BODYSTRUCTURE，不能取自被截断的正文**：正文预下载只取正文与内嵌图片 part，真正的附件二进制不在同步时传输；兜底路径 `fetchBody` 只取整封前 512 KB，mailparser 对截断的附件给出的 `size` 只是残片长度（实测 40 MB 的附件报 369 KB），所以两条路径都用 `collectAttachmentParts()` 各 part 的 octets 覆盖尺寸；base64 要按 76 字符一行折算（`(size − 行数×2) × 3/4`），直接乘 0.75 会偏大 3%（40 MB 显示成 41.1 MB）。
+13. **附件尺寸必须取自 BODYSTRUCTURE，不能取自被截断的正文**：正文预下载只取正文与内嵌图片 part，真正的附件二进制不在同步时传输；兜底路径 `fetchBody` 只取整封前 512 KB，截断后的附件 `size` 只是残片长度（实测 40 MB 的附件报 369 KB），所以两条路径都用 `collectAttachmentParts()` 各 part 的 octets 覆盖尺寸；base64 要按 76 字符一行折算（`(size − 行数×2) × 3/4`），直接乘 0.75 会偏大 3%（40 MB 显示成 41.1 MB）。
     - 口径差异（不是 bug）：列表「大小」列是整封信的 RFC822 字节数（`envelope.size`，含 base64 膨胀与全部头部），附件 chip 是解码后的文件大小，两处数字本来就不会相等。
 14. **永久删除（EXPUNGE）必须复查结果**：QQ 对多 UID 的 `UID STORE +FLAGS \Deleted` / `EXPUNGE` 不可靠——实测一次删 3 封只掉 1 封，函数不报错，剩下 2 封留在服务器上；本地行却已经删掉，下一轮对账又把它们拉回来，用户看到的就是「全选后只删了一条」。所以 `purgeByFolder` 先整批 `messageDelete`，再按 UID `fetch` 复查一次，把剩下的**逐封补删**，最后只对确认消失的邮件删本地行，并把没删掉的数量计入 `failed`（界面据此提示「删除失败 · 服务器拒绝了其中 N 封」）。
 
@@ -551,22 +551,22 @@
 | 构建 | **Vite 8** + `electron-vite` 6（或 vite + 自建 main/preload 构建） | 三进程统一构建、HMR |
 | UI 框架 | **React 19** + TypeScript 5.x | shadcn 的硬性前提 |
 | 样式 | **Tailwind CSS v4**（`@tailwindcss/vite`） | shadcn 官方支持 |
-| 组件库 | **shadcn/ui**（Radix UI + CVA + tailwind-merge） | 组件源码进仓库，可任意改样式——契合"重构 UI"目标 |
+| 组件库 | **shadcn/ui**（Radix UI + tailwind-merge） | 组件源码进仓库，可任意改样式——契合"重构 UI"目标 |
 | 图标 | @phosphor-icons/react | 多字重（regular / bold / fill），替换掉 lucide |
 | 列表虚拟化 | @tanstack/react-virtual | 必选 |
-| 服务端状态 | @tanstack/react-query | 包装 IPC 调用，负责缓存/重试/失效 |
-| 客户端状态 | zustand | UI 状态（选中项、栏宽、面板开关） |
-| 表单校验 | react-hook-form + zod | 账户表单；zod 同时用于 IPC 入参校验 |
-| 路由 | react-router（**HashRouter**） | Electron `file://` 下必须用 hash 模式 |
+| 服务端状态 | 无（直接走 `window.mail` IPC + 本地乐观更新） | 数据只有一个来源（SQLite），不需要缓存层 |
+| 客户端状态 | React `useState` / `useRef` | 三栏共用同一份状态，没有跨页面共享需求 |
+| 表单校验 | zod | IPC 入参校验；账户表单用受控 state |
+| 路由 | 无 | 单窗口三栏，不引入 router |
 | IMAP | **imapflow** | Promise API、IDLE、QRESYNC、Gmail/网易兼容 |
-| MIME 解析 | **mailparser**（simpleParser） | 成熟稳定 |
+| MIME 解析 | 自建 BODYSTRUCTURE / part 解析（`src/main/sync/parse.ts`） | 按 part 精确取正文与附件，尺寸直接取 octets |
 | 编码兜底 | iconv-lite | GBK/GB2312/GB18030 |
 | 本地库 | **node:sqlite**（Electron 内置 Node 24）+ FTS5 | 同步 API、零原生依赖，不需要 electron-rebuild / asarUnpack；FTS5 已实测可用（SQLite 3.54） |
 | 配置存储 | SQLite `setting` 表 | 窗口位置、偏好设置；不引 electron-store，减少一层抽象 |
 | 日志 | electron-log | 落盘到 `%APPDATA%/maildesk/logs/main.log`（5MB 轮转），`errorHandler` 兜住未捕获异常 |
 | 打包 | electron-builder（NSIS） | Windows 安装包 |
 | HTML 清洗 | dompurify | 渲染前清洗 |
-| 代码质量 | ESLint + Prettier + TypeScript strict | — |
+| 代码质量 | TypeScript strict + `npm run typecheck` | 未配置 ESLint / Prettier，靠 tsc 与构建兜底 |
 
 ### 7.2 关键取舍与 shadcn 适配注意
 

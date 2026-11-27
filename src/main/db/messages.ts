@@ -257,6 +257,19 @@ export function deleteMessages(ids: string[]): void {
   run("DELETE FROM message WHERE id IN (" + placeholders + ")", ...ids)
 }
 
+/** 删除文件夹 / UIDVALIDITY 变化前先取 id：附件缓存按 messageId 建目录，要跟着删。 */
+export function messageIdsInFolder(folderId: string): string[] {
+  return all<{ id: string }>("SELECT id FROM message WHERE folder_id = ?", folderId).map((row) => row.id)
+}
+
+/** 删除账户前先取 id（账户删除靠外键级联，不会走上面的删除路径）。 */
+export function messageIdsInAccount(accountId: string): string[] {
+  return all<{ id: string }>(
+    "SELECT m.id FROM message m JOIN folder f ON f.id = m.folder_id WHERE f.account_id = ?",
+    accountId
+  ).map((row) => row.id)
+}
+
 export function setReadById(id: string, read: boolean): void {
   run("UPDATE message SET is_read = ? WHERE id = ?", boolean(read), id)
 }

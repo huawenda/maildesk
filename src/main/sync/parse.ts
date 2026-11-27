@@ -1,6 +1,5 @@
 import iconv from "iconv-lite"
 import libmime from "libmime"
-import { simpleParser } from "mailparser"
 import type { FetchMessageObject, MessageStructureObject } from "imapflow"
 import type { Address, Attachment } from "@shared/types"
 import type { IncomingMessage } from "../db/messages"
@@ -12,7 +11,7 @@ const toAddresses = (list?: EnvelopeAddress[]): Address[] =>
     .filter((item) => Boolean(item.address))
     .map((item) => ({ name: item.name ?? "", address: item.address ?? "" }))
 
-/** RFC 2047 encoded-word 解码；libmime 已经是 mailparser 的依赖，不额外引包。 */
+/** RFC 2047 encoded-word 解码；libmime 已作为直接依赖，不额外引包。 */
 const decodeHeaderWords = (value: string): string => {
   try {
     return libmime.decodeWords(value)
@@ -458,15 +457,8 @@ export function toIncoming(msg: FetchMessageObject): IncomingMessage {
   }
 }
 
-export interface ParsedBody {
-  text: string
-  html: string | null
-  hasHtml: boolean
-  attachments: Attachment[]
-}
-
 /**
- * BODYSTRUCTURE 的 size 是「传输编码后」的 octets，mailparser 的 item.size 是解码后的字节数。
+ * BODYSTRUCTURE 的 size 是「传输编码后」的 octets，解码后的字节数要按行折算。
  * base64 除了 4/3 膨胀，每 76 个字符还跟一个 CRLF（78 字节对应 57 字节原文），
  * 直接乘 0.75 会偏大约 3%（40MB 的附件会显示成 41.1MB），所以按行折算。
  */
@@ -475,67 +467,4 @@ const codedToDecoded = (size: number | null, encoding: string | null): number | 
   if ((encoding ?? "").toLowerCase() !== "base64") return size
   const lines = Math.ceil(size / 78)
   return Math.round((Math.max(0, size - lines * 2) * 3) / 4)
-}
-
-/**
- * 点开邮件时解析全文：优先 text，没有就退到 html 去标签。
- * parts 来自 BODYSTRUCTURE：正文只取前 MAX_SOURCE 字节，附件内容会被截断，
- * mailparser 给出的 item.size 只是残片长度（40MB 的附件可能报 369KB），必须用结构里的真实尺寸覆盖。
- */
-export async function parseBody(
-  id: string,
-  source: Buffer,
-  parts?: AttachmentPart[]
-): Promise<ParsedBody> {
-  const mail = await simpleParser(source)
-  const rawText = (mail.text || "").trim()
-  const text = rawText || (typeof mail.html === "string" ? mail.html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n\n").replace(/<[^>]+>/g, "").trim() : "")
-  const attachments: Attachment[] = mail.attachments
-    // mailparser 会把 cid 内嵌图也放进 attachments（related = true），这些是正文的一部分
-    .filter(
-      (item) =>
-        !item.related && !isInlineBodyImage(item.contentType, item.contentDisposition, item.cid ?? item.contentId)
-    )
-    .map((item) => ({
-      id: "",
-      messageId: id,
-      filename: item.filename ?? null,
-      mime: item.contentType ?? null,
-      size: item.size ?? null,
-      contentId: item.contentId ?? null,
-      localPath: null,
-      // mailparser 的 partId 就是 IMAP 的 part 号；后续会用 BODYSTRUCTURE 的匹配结果覆盖
-      part: item.partId ?? null
-    }))
-  if (parts && parts.length > 0) {
-    const pool = [...parts]
-    const take = (filename: string | null): AttachmentPart | null => {
-      const key = (filename ?? "").toLowerCase()
-      let index = key ? pool.findIndex((part) => (part.filename ?? "").toLowerCase() === key) : -1
-      if (index < 0) index = 0
-      return pool.length > 0 ? (pool.splice(index, 1)[0] ?? null) : null
-    }
-    for (const attachment of attachments) {
-      const part = take(attachment.filename)
-      const size = codedToDecoded(part?.size ?? null, part?.encoding ?? null)
-      if (size !== null) attachment.size = size
-      // 记下分配到的 part 号：保存/预览直接按它下载，不必再取一次 BODYSTRUCTURE
-      if (part?.part) attachment.part = part.part
-    }
-    // 截断位置之后的附件 mailparser 根本没看到，按结构补齐元数据
-    for (const part of pool) {
-      attachments.push({
-        id: "",
-        messageId: id,
-        filename: part.filename,
-        mime: part.mime,
-        size: codedToDecoded(part.size, part.encoding),
-        contentId: null,
-        localPath: null,
-        part: part.part
-      })
-    }
-  }
-  const html = typeof mail.html === "string" && mail.html.trim() ? clipHtml(mail.html, "mailparser") : null
-  return { text: text.slice(0, 512 * 1024), html, hasHtml: html !== null, attachments }
 }

@@ -14,12 +14,14 @@ import {
 } from "@shared/schema"
 import type { Account, TestResult } from "@shared/types"
 import { listAccounts, createAccount, updateAccount, removeAccount } from "../db/accounts"
+import { dropMessageCaches } from "../attachments"
 import { listFolders, setFolderSelection } from "../db/folders"
 import {
   getAttachment,
   getMessage,
   needsBody,
   listMessages,
+  messageIdsInAccount,
   searchMessages,
   setAttachmentPath,
   setFlagged,
@@ -189,7 +191,10 @@ export function registerIpc(): void {
   ipcMain.handle(CH.accountsRemove, async (_event, raw: unknown) => {
     const id = parse(idSchema, raw)
     stopAccountSync(id)
+    // 账户删除靠外键级联清库，不会经过引擎的删除路径：先记下 id，删完再清附件缓存
+    const cached = messageIdsInAccount(id)
     await removeAccount(id)
+    dropMessageCaches(cached)
   })
 
   ipcMain.handle(CH.foldersList, (_event, raw: unknown) => listFolders(parse(idSchema.optional(), raw)))

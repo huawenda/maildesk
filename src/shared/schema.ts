@@ -52,8 +52,6 @@ export const searchQuerySchema = z.object({
     .optional()
 })
 
-export const idsSchema = z.array(idSchema).min(1).max(500)
-
 export const attachmentRefSchema = z.object({
   messageId: idSchema,
   attachmentId: idSchema

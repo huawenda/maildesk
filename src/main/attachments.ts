@@ -82,10 +82,15 @@ export async function streamToFile(
   }
 }
 
-/** 删掉某个附件/某封邮件的缓存（删除邮件时调用）。 */
-export async function dropAttachmentCache(messageId: string, attachmentId?: string): Promise<void> {
-  const target = attachmentId ? join(cacheRoot(), messageId, attachmentId) : join(cacheRoot(), messageId)
-  await rm(target, { recursive: true, force: true }).catch(() => undefined)
+/** 删掉一封邮件的全部附件缓存（删邮件 / 删文件夹 / 换 UID 重拉时调用）。 */
+export async function dropMessageCache(messageId: string): Promise<void> {
+  if (!messageId) return
+  await rm(join(cacheRoot(), messageId), { recursive: true, force: true }).catch(() => undefined)
+}
+
+/** 批量版本：调用方在删库前拿到 id 列表，删库后 fire-and-forget 清缓存。 */
+export function dropMessageCaches(messageIds: Iterable<string>): void {
+  for (const id of messageIds) void dropMessageCache(id)
 }
 
 interface CacheEntry {
@@ -142,10 +147,4 @@ export async function pruneAttachmentCache(limit = CACHE_LIMIT): Promise<void> {
     await rm(entry.path, { force: true }).catch(() => undefined)
     total -= entry.size
   }
-}
-
-/** 当前缓存占用的字节数（同步状态面板 / 诊断用）。 */
-export async function attachmentCacheBytes(): Promise<number> {
-  const entries = await collectEntries()
-  return entries.reduce((sum, entry) => sum + entry.size, 0)
 }

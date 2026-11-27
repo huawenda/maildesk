@@ -82,8 +82,6 @@ interface ReaderProps {
   onDelete: () => void
   /** 在垃圾箱里是永久删除，其余是「移到垃圾箱」 */
   permanentDelete: boolean
-  /** 正在拖动列表分隔线：正文测量暂停，避免每帧重排整封邮件 */
-  resizing?: boolean
 }
 
 type SaveState = "saving" | "saved" | "error"
@@ -102,8 +100,7 @@ export function Reader({
   moveTargets,
   onMove,
   onDelete,
-  permanentDelete,
-  resizing
+  permanentDelete
 }: ReaderProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
   // 正文纵向滚动条：静止时隐藏，滚动后 700ms 内显示（样式见 globals.css 的 scrollbar-native）
@@ -498,7 +495,6 @@ export function Reader({
                     html={message.bodyHtml}
                     fontSize={fontSize}
                     remoteImages={remoteImages}
-                    paused={resizing}
                     onContextMenu={(x, y) => {
                       // 转成合成事件打到 trigger 上，让 Radix 在鼠标位置打开同一套菜单
                       bodyRef.current?.dispatchEvent(

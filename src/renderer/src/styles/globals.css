@@ -273,3 +273,16 @@
   }
 }
 
+
+/* 拖动列表分隔线：光标 / 禁选 / 分隔线高亮都交给根节点上的类。
+   用 React state 的话，按下那一刻要重渲染整棵树，用户能感觉到「按住第一下顿一下」。 */
+html.maildesk-resizing,
+html.maildesk-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* 拖动中分隔线点亮（原实现是 resizing ? "bg-primary" : ...） */
+html.maildesk-resizing .list-divider {
+  background-color: var(--primary);
+}

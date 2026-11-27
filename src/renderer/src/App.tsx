@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { Account, Folder, SyncEvent, SyncState } from "@shared/types"
 import { AccountDialog } from "@/components/AccountDialog"
 import { MessageList } from "@/components/MessageList"
@@ -7,15 +7,16 @@ import { Reader } from "@/components/Reader"
 import { FolderPickerDialog } from "@/components/FolderPickerDialog"
 import { SettingsDialog } from "@/components/SettingsDialog"
 import { SyncStatusDialog, type SyncEventLogEntry } from "@/components/SyncStatusDialog"
-import type { SearchScope } from "@/components/TitleBarSearch"
 import { DocumentTabs } from "@/components/DocumentTabs"
 import { Sidebar } from "@/components/Sidebar"
 import { TitleBar } from "@/components/TitleBar"
 import { useHotkeys } from "@/lib/hotkeys"
 import { useSidebarPeek } from "@/hooks/use-sidebar-peek"
+import { useListWidth } from "@/hooks/use-list-width"
+import { useSearch } from "@/hooks/use-search"
 import { setDragging } from "@/lib/drag-pause"
 import { describeIpcError, mail } from "@/lib/ipc"
-import { clampListWidth, LIST_DEFAULT, listMaxWidth, readStored, store } from "@/lib/preferences"
+import { readStored, store } from "@/lib/preferences"
 import { detailToMessage, navFolders, summaryToMessage, type NavFolder } from "@/lib/live"
 import { folders as demoFolders, messages as seedMessages } from "@/lib/mock"
 import type { Message } from "@/lib/message"
@@ -111,10 +112,6 @@ export default function App() {
   // 列表滚动位置：页签模式下列表被卸载，切回文件夹页签时用它把位置还原（不触发渲染）
   const listScrollRef = useRef(0)
   // 标题栏常驻搜索：query 为空的列表就是当前文件夹；有 query 时列表换成跨文件夹的搜索结果
-  const [searchQuery, setSearchQuery] = useState("")
-  const [searchScope, setSearchScope] = useState<SearchScope>("from")
-  const [searchResults, setSearchResults] = useState<Message[]>([])
-  const [searchFocusToken, setSearchFocusToken] = useState(0)
   const [density, setDensity] = useState<Density>(() => readStored("maildesk.density", "standard"))
   const [collapsed, setCollapsed] = useState<boolean>(() => readStored("maildesk.sidebarCollapsed", false))
   // ��栏：**始终绝对定位**的面板 + 一个只占位的 gap。
@@ -122,13 +119,8 @@ export default function App() {
   // 停靠/展开时 gap 从 0 过渡到 220，画布就是被它推向右的。
   // 参考 shadcn 的 Peek & Pin（gap + absolute panel）与 OpenCode 的 sidebar-peek。
   const peek = useSidebarPeek(collapsed)
+  const { width: listWidth, paneRef: listPaneRef, startResize, reset: resetListWidth } = useListWidth()
   const [fontSize, setFontSize] = useState<number>(() => readStored("maildesk.fontSize", 14))
-  const [listWidth, setListWidth] = useState<number>(() =>
-    clampListWidth(readStored("maildesk.listWidth", LIST_DEFAULT), window.innerWidth)
-  )
-  // 拖拽分隔线时用 documentElement 上的 .maildesk-resizing 类接管光标/选中，
-  // 不再用 React state（按下时一次重渲染就会让「按住第一下」顿一顿）
-  const dragRef = useRef<{ x: number; width: number } | null>(null)
   const [backfill, setBackfill] = useState<{ done: number; total: number } | null>(null)
   const [remoteImages, setRemoteImages] = useState<boolean>(true)
   const [standardThreeLines, setStandardThreeLines] = useState<boolean>(false)
@@ -154,6 +146,7 @@ export default function App() {
   const [clock, setClock] = useState(0)
 
   const live = accounts.length > 0
+  const search = useSearch({ live, items })
 
   // 设置以 SQLite 为准；localStorage 只做首帧防闪的缓存。
   const settingsReady = useRef(false)
@@ -306,16 +299,6 @@ export default function App() {
     itemsRef.current = items
   }, [items])
 
-  // 窗口变窄时把列表一起收回来，避免超过「窗口宽度的一半」
-  useEffect(() => {
-    const onResize = () => {
-      const next = window.innerWidth
-      setListWidth((current) => Math.min(current, listMaxWidth(next)))
-    }
-    window.addEventListener("resize", onResize)
-    return () => window.removeEventListener("resize", onResize)
-  }, [])
-
   // 未读数每次都从库里重算，避免用已加载的一页去数（那会得到 126 而不是 255 这种错数）
   useEffect(() => {
     if (!live) return
@@ -437,8 +420,6 @@ export default function App() {
   // 侧栏只展示用户勾选过的文件夹；hidden 的仍在库里，可以在「选择文件夹」里重新勾上
   const navList = live ? visibleNavList(liveFolders) : DEMO_NAV
 
-  const searchActive = searchQuery.trim().length > 0
-
   // 搜索结果跨文件夹：紧凑视图最后一列要显示每封邮件所在的文件夹名
   const folderLabelOf = useCallback(
     (id: string) => {
@@ -448,39 +429,6 @@ export default function App() {
     [live, liveFolders]
   )
 
-  // 输入停顿 200ms 才查；搜索是全局的，结果直接当列表数据用，不再弹候选窗口
-  useEffect(() => {
-    const keyword = searchQuery.trim()
-    if (!keyword) {
-      setSearchResults([])
-      return
-    }
-    if (!live) {
-      const fields: Record<SearchScope, (message: Message) => string[]> = {
-        from: (message) => [message.fromName, message.fromEmail],
-        to: (message) => message.to,
-        subject: (message) => [message.subject],
-        body: (message) => [...message.body, message.snippet]
-      }
-      const needle = keyword.toLowerCase()
-      setSearchResults(items.filter((message) => fields[searchScope](message).join(" ").toLowerCase().includes(needle)))
-      return
-    }
-    let cancelled = false
-    const timer = window.setTimeout(() => {
-      mail.search
-        .query(keyword, { limit: 200, scope: searchScope })
-        .then((result) => {
-          if (!cancelled) setSearchResults(result.map(summaryToMessage))
-        })
-        .catch(() => undefined)
-    }, 200)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [searchQuery, searchScope, live, items])
-
   // 演示模式在内存里分文件夹；真实模式 items 已经是当前文件夹的一页
   const folderMessages = useMemo(() => {
     const list = live ? items : items.filter((message) => message.folderId === folderId)
@@ -489,12 +437,12 @@ export default function App() {
   }, [items, folderId, activeLabel, live])
 
   // 搜索时列表数据换成跨文件夹的结果（2026-11-27 起没有「全部 / 未读 / 有附件」筛选页签，这一栏改成文档标签）
-  const baseMessages = searchActive ? searchResults : folderMessages
+  const baseMessages = search.active ? search.results : folderMessages
   const visible = baseMessages
 
   const selected = useMemo(() => {
     // 搜索结果可能来自别的文件夹，items 里找不到时回落到结果集
-    const base = items.find((message) => message.id === selectedId) ?? searchResults.find((message) => message.id === selectedId)
+    const base = items.find((message) => message.id === selectedId) ?? search.results.find((message) => message.id === selectedId)
     if (!base) return null
     if (detail && detail.id === base.id) {
       return {
@@ -506,7 +454,7 @@ export default function App() {
       }
     }
     return base
-  }, [items, searchResults, selectedId, detail])
+  }, [items, search.results, selectedId, detail])
 
   // 切换账户：文件夹/列表由 activeAccountId 依赖自动重取，这里只清掉跨账户的选中态
   const switchAccount = useCallback((id: string) => {
@@ -522,7 +470,7 @@ export default function App() {
       // 重复点同一个文件夹不再触发请求，否则骨架屏会永远停在那里
       if (next === folderId) return
       setFolderId(next)
-      setSearchQuery("")
+      search.setQuery("")
       setSelectedId(null)
       setSelectedIds([])
       // 真实模式的骨架屏由取数 effect 自己开关，避免两条 loading 路径互相打脸
@@ -553,7 +501,7 @@ export default function App() {
         }))
       }
       setItems((current) => current.map((message) => (message.id === id ? { ...message, unread: !read } : message)))
-      setSearchResults((current) =>
+      search.setResults((current) =>
         current.map((message) => (message.id === id ? { ...message, unread: !read } : message))
       )
       if (live) {
@@ -576,7 +524,7 @@ export default function App() {
           return { ...message, starred: next }
         })
       )
-      setSearchResults((current) =>
+      search.setResults((current) =>
         current.map((message) => (message.id === id ? { ...message, starred: !message.starred } : message))
       )
       if (live) void mail.messages.setFlagged([id], next).catch(() => undefined)
@@ -586,7 +534,7 @@ export default function App() {
 
   // 搜索结果是跨文件夹的：永久删除与否要看这封邮件自己所在的文件夹，而不是列表当前选中的箱子
   const inTrash = live
-    ? liveFolders.find((folder) => folder.id === (searchActive ? selected?.folderId : folderId))?.role === "trash"
+    ? liveFolders.find((folder) => folder.id === (search.active ? selected?.folderId : folderId))?.role === "trash"
     : false
 
   // 一次性操作失败提示（PRD 6.6）：3.5s 后自动消失，不打断阅读
@@ -641,7 +589,7 @@ export default function App() {
           if (result.failed > 0) showNotice("移动失败 · 服务器拒绝了其中 " + result.failed + " 封")
           if (result.moved === 0) return
           setItems((current) => current.filter((message) => !idSet.has(message.id)))
-          setSearchResults((current) => current.filter((message) => !idSet.has(message.id)))
+          search.setResults((current) => current.filter((message) => !idSet.has(message.id)))
           setSelectedId((current) => (current && idSet.has(current) ? null : current))
           setSelectedIds([])
           // 成功时不重取整箱：本地 filter 就是终态，重取只会让列表白闪一次。
@@ -678,7 +626,7 @@ export default function App() {
           if (result.failed > 0) showNotice("删除失败 · 服务器拒绝了其中 " + result.failed + " 封")
           if (result.deleted === 0) return
           setItems((current) => current.filter((message) => !idSet.has(message.id)))
-          setSearchResults((current) => current.filter((message) => !idSet.has(message.id)))
+          search.setResults((current) => current.filter((message) => !idSet.has(message.id)))
           setSelectedId((current) => (current && idSet.has(current) ? null : current))
           setSelectedIds([])
           // 删掉的邮件如果开着标签页，一起关掉（否则会留下一个打开就报错的空标签）
@@ -705,7 +653,7 @@ export default function App() {
         if (result.failed > 0) showNotice("删除失败 · 服务器拒绝了其中 " + result.failed + " 封")
         if (result.deleted === 0) return
         setItems((current) => current.filter((message) => !idSet.has(message.id)))
-        setSearchResults((current) => current.filter((message) => !idSet.has(message.id)))
+        search.setResults((current) => current.filter((message) => !idSet.has(message.id)))
         setSelectedId((current) => (current && idSet.has(current) ? null : current))
         setSelectedIds([])
         // 批量删同样不整箱重取；部分失败时再回库
@@ -756,16 +704,16 @@ export default function App() {
     const patch = (list: Message[]) =>
       list.map((message) => (idSet.has(message.id) ? { ...message, unread: false } : message))
     setItems(patch)
-    setSearchResults(patch)
+    search.setResults(patch)
     // 乐观清掉当前箱角标；搜索态是跨文件夹的，等 unreadTick 回读
-    if (!searchActive) setUnreadCounts((current) => ({ ...current, [folderId]: 0 }))
+    if (!search.active) setUnreadCounts((current) => ({ ...current, [folderId]: 0 }))
     if (live) {
       void mail.messages
         .setRead(ids, true)
         .then(() => setUnreadTick((tick) => tick + 1))
         .catch(() => undefined)
     }
-  }, [baseMessages, live, searchActive, folderId])
+  }, [baseMessages, live, search.active, folderId])
 
   // Ctrl+A：选中整个当前文件夹（不受过滤页签限制），并切回「全部」让每一行都可见地变蓝
   const selectAll = useCallback(() => {
@@ -838,14 +786,14 @@ export default function App() {
       delete: () => deleteSelected(),
       // Ctrl+A 只在已有选中时全选整箱（没有选中时什么也不做，但要吃掉浏览器的「全选文本」）
       "ctrl+a": () => selectAll(),
-      "/": () => setSearchFocusToken((token) => token + 1),
-      "ctrl+k": () => setSearchFocusToken((token) => token + 1),
+      "/": () => search.focus(),
+      "ctrl+k": () => search.focus(),
       "ctrl+r": () => runSync(),
       "ctrl+,": () => setSettingsOpen(true),
       // 垃圾箱里 Delete 是永久删除，其余是移到垃圾箱；没有确认弹窗，靠回收站兜底
       backspace: () => deleteSelected(),
       escape: () => {
-        setSearchQuery("")
+        search.setQuery("")
         setSettingsOpen(false)
       }
     }
@@ -879,88 +827,6 @@ export default function App() {
               ? "尚未同步"
               : "尚未连接账户"
 
-  // 拖拽用 window 级监听：分隔线只有 5px 宽，靠 setPointerCapture 在指针离开元素后
-  // 会丢掉后续 pointermove（实测拖一下只走一步就停），这里直接用全局监听。
-  const listWidthRef = useRef(listWidth)
-  listWidthRef.current = listWidth
-  // 拖动时直接改这个节点的 style.width：React 只在松手时更新一次，避免每帧重渲染整棵树
-  const listPaneRef = useRef<HTMLElement | null>(null)
-  // 拖动中的实时宽度：即使拖动期间因为别的状态（同步事件等）触发重渲染，
-  // 也要在 commit 之后把 DOM 宽度盖回去，否则会被 React 的 style={{width}} 拽回起点
-  const dragWidthRef = useRef(listWidth)
-
-  // 拖动期间任何一次重渲染（同步事件、通知……）都会把 style.width 写回旧值，
-  // commit 之后立刻用拖动中的实时宽度盖回去，保证全程跟手
-  useLayoutEffect(() => {
-    if (!dragRef.current) return
-    const pane = listPaneRef.current
-    if (pane) pane.style.width = `${dragWidthRef.current}px`
-  })
-
-  /**
-   * 开始拖分隔线。这里刻意**不 setState**：按下时任何一次 React 重渲染（列表 30 行 +
-   * 阅读器整棵树）都会让「按住的第一下」顿一下。光标、遮罩、冻结正文测量全部走 DOM/模块状态。
-   */
-  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    if (dragRef.current) return
-    dragRef.current = { x: event.clientX, width: listWidth }
-    dragWidthRef.current = listWidth
-    setDragging(true)
-    document.documentElement.classList.add("maildesk-resizing")
-
-    // 指针划进正文 iframe 后 pointerup 冒泡不到父文档，拖拽会卡住；盖一层遮罩把事件留在本文档
-    const shield = document.createElement("div")
-    shield.style.cssText = "position:fixed;inset:0;z-index:50;cursor:col-resize"
-    document.body.appendChild(shield)
-
-    let pendingX = event.clientX
-    let moved = false
-    let frame = 0
-    const apply = () => {
-      frame = 0
-      const pane = listPaneRef.current
-      if (pane) pane.style.width = `${dragWidthRef.current}px`
-      else setListWidth(dragWidthRef.current)
-    }
-    const finish = () => {
-      if (frame) {
-        cancelAnimationFrame(frame)
-        frame = 0
-      }
-      window.removeEventListener("pointermove", onMove)
-      window.removeEventListener("pointerup", finish)
-      window.removeEventListener("pointercancel", finish)
-      window.removeEventListener("blur", finish)
-      shield.remove()
-      document.documentElement.classList.remove("maildesk-resizing")
-      dragRef.current = null
-      setDragging(false)
-      if (moved) {
-        setListWidth(dragWidthRef.current)
-        store("maildesk.listWidth", dragWidthRef.current)
-      }
-    }
-    const onMove = (pointer: PointerEvent) => {
-      const drag = dragRef.current
-      if (!drag) return
-      // 兜底：在窗口外松开、或被别的程序抢走时收不到 pointerup
-      if (pointer.buttons === 0) {
-        finish()
-        return
-      }
-      pendingX = pointer.clientX
-      moved = true
-      dragWidthRef.current = clampListWidth(drag.width + pendingX - drag.x, window.innerWidth)
-      if (frame) return
-      frame = requestAnimationFrame(apply)
-    }
-    window.addEventListener("pointermove", onMove)
-    window.addEventListener("pointerup", finish)
-    window.addEventListener("pointercancel", finish)
-    window.addEventListener("blur", finish)
-  }
-
   // 侧栏展开/收起是 200ms 的宽度动画（动的是 gap，不是面板），期间正文宽度每帧都在变：先冻结测量，结束后补量一次
   const sidebarTimer = useRef<number | null>(null)
   const toggleSidebar = useCallback(() => {
@@ -985,7 +851,7 @@ export default function App() {
   )
 
   // 文档标签页（2026-11-27）：第一个固定是当前文件夹，双击邮件追加一个邮件标签
-  const folderTabLabel = searchActive
+  const folderTabLabel = search.active
     ? "搜索"
     : (navList.find((item) => item.id === folderId)?.label ?? "邮件")
   const activeTabMessage = openTabs.find((tab) => tab.id === activeTab) ?? null
@@ -1004,14 +870,14 @@ export default function App() {
 
   const openMessageTab = useCallback(
     (id: string) => {
-      const message = items.find((item) => item.id === id) ?? searchResults.find((item) => item.id === id) ?? null
+      const message = items.find((item) => item.id === id) ?? search.results.find((item) => item.id === id) ?? null
       if (!message) return
       setOpenTabs((tabs) => (tabs.some((tab) => tab.id === id) ? tabs : [...tabs, message]))
       setActiveTab(id)
       setSelectedId(id)
       setSelectedIds([id])
     },
-    [items, searchResults]
+    [items, search.results]
   )
 
   const closeTab = useCallback((id: string) => {
@@ -1029,11 +895,11 @@ export default function App() {
   // 换文件夹 / 进搜索 / 切标签页时回到「文件夹」页签：这几个动作都是导航，不该停在某封邮件的正文里
   useEffect(() => {
     setActiveTab("folder")
-  }, [folderId, searchActive, activeLabel])
+  }, [folderId, search.active, activeLabel])
 
   // 列表滚动位置只对「同一个列表」有效：换箱 / 换搜索时清零，避免把上一箱的位置带到新列表上
   // （在 render 期比这里做，MessageList 才能在同一次渲染里拿到正确的 initialScrollTop）
-  const listKey = `${folderId}|${activeLabel ?? ""}|${searchActive ? "search" : "folder"}`
+  const listKey = `${folderId}|${activeLabel ?? ""}|${search.active ? "search" : "folder"}`
   const listKeyRef = useRef(listKey)
   if (listKeyRef.current !== listKey) {
     listKeyRef.current = listKey
@@ -1057,7 +923,7 @@ export default function App() {
       onNavigate={(target: Message) => {
         // 抽屉里跳到别的文件夹的邮件：切箱、清搜索、选中并标已读
         setFolderId(target.folderId)
-        setSearchQuery("")
+        search.setQuery("")
         setActiveLabel(null)
         setSelectedId(target.id)
         setSelectedIds([target.id])
@@ -1080,11 +946,11 @@ export default function App() {
         collapsed={collapsed}
         onToggleCollapsed={toggleSidebar}
         onHoverCollapsed={(hovering) => (hovering ? peek.open() : peek.closeSoon())}
-        searchQuery={searchQuery}
-        onSearchQueryChange={setSearchQuery}
-        searchScope={searchScope}
-        onSearchScopeChange={setSearchScope}
-        searchFocusToken={searchFocusToken}
+        searchQuery={search.query}
+        onSearchQueryChange={search.setQuery}
+        searchScope={search.scope}
+        onSearchScopeChange={search.setScope}
+        searchFocusToken={search.focusToken}
         density={density}
         onDensityChange={setDensity}
       />
@@ -1136,7 +1002,7 @@ export default function App() {
             onManageFolders={() => setFolderPickerOpen(true)}
             onSelectLabel={(label) => {
               setActiveLabel((current) => (current === label ? null : label))
-              setSearchQuery("")
+              search.setQuery("")
               setSelectedId(null)
               if (collapsed) peek.close()
             }}
@@ -1190,11 +1056,11 @@ export default function App() {
               <MessageList
                 folderId={folderId}
                 messages={visible}
-                searching={searchActive}
-                resetKey={searchActive ? searchQuery + "|" + searchScope : undefined}
-                folderNameOf={searchActive ? folderLabelOf : undefined}
-                highlightQuery={searchActive ? searchQuery.trim() : undefined}
-                highlightScope={searchActive ? searchScope : undefined}
+                searching={search.active}
+                resetKey={search.active ? search.query + "|" + search.scope : undefined}
+                folderNameOf={search.active ? folderLabelOf : undefined}
+                highlightQuery={search.active ? search.query.trim() : undefined}
+                highlightScope={search.active ? search.scope : undefined}
                 syncing={syncing}
                 syncHint={syncLabel}
                 noAccounts={!live}
@@ -1235,10 +1101,7 @@ export default function App() {
                 aria-label="拖动调整列表宽度"
                 title="拖动调整列表宽度，双击复位"
                 onPointerDown={startResize}
-                onDoubleClick={() => {
-                  setListWidth(LIST_DEFAULT)
-                  store("maildesk.listWidth", LIST_DEFAULT)
-                }}
+                onDoubleClick={resetListWidth}
                 className="group relative z-10 -ml-[2px] mr-[-3px] w-[5px] shrink-0 cursor-col-resize"
               >
                 {/* 线固定落在整数像素上（left:2px），不能用 -translate-x-1/2，否则半像素会被抗锯齿成 2px */}

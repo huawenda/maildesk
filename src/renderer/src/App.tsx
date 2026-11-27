@@ -102,7 +102,8 @@ export default function App() {
     folderCount,
     setFolderCount,
     closeToTray,
-    setCloseToTray
+    setCloseToTray,
+    saveError
   } = useSettings()
   const peek = useSidebarPeek(collapsed)
   const { width: listWidth, paneRef: listPaneRef, startResize, reset: resetListWidth } = useListWidth()
@@ -370,6 +371,11 @@ export default function App() {
   useEffect(() => () => {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current)
   }, [])
+
+  // 设置写库失败不能静默：用户看到开关动了，但下次启动回弹会像 bug
+  useEffect(() => {
+    if (saveError) showNotice("设置未能保存，请重试")
+  }, [saveError, showNotice])
 
   // 「移动到」菜单：复用侧栏命名（收件箱/草稿箱/已发送…），排除 Noselect 容器与当前文件夹
   // 移动到…菜单的候选：只列可选文件夹（容器 / 草稿箱 / 已发送等照旧排除 Noselect 与当前文件夹）；
@@ -961,10 +967,23 @@ export default function App() {
         remoteImages={remoteImages}
         onRemoteImagesChange={setRemoteImages}
         accounts={accounts}
+        activeAccountId={activeAccountId}
         version={version}
         onManageAccounts={() => {
           setSettingsOpen(false)
           setAccountsOpen(true)
+        }}
+        onOpenSyncStatus={() => {
+          setSettingsOpen(false)
+          setSyncStatusOpen(true)
+        }}
+        onOpenLogs={() => {
+          void mail.app
+            .openLogFolder()
+            .then((ok) => {
+              if (!ok) showNotice("没有找到日志文件")
+            })
+            .catch(() => showNotice("打开日志文件夹失败"))
         }}
       />
 

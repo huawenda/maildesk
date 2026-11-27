@@ -158,9 +158,14 @@
     -webkit-user-drag: none;
   }
 
-  /* Chromium 在 Windows 上会用系统强调色画聚焦环（截图里那圈红框），应用内的按钮/菜单项
-     已经有 hover 与选中底色，这里统一去掉；输入框与文本域不受影响，仍保留原生的输入焦点样式 */
-  :where(button, a, [role="button"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):focus-visible {
+  /* Chromium 在 Windows 上会用系统强调色画聚焦环（截图里那圈红框），应用内统一改成品牌色内描边：
+     键盘焦点必须始终可见（2026-11-27 评审）。菜单项已有 focus 背景色，不叠描边。 */
+  :where(button, a, [role="button"]):focus-visible {
+    outline: 1px solid var(--ring);
+    outline-offset: -1px;
+  }
+
+  :where([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"]):focus-visible {
     outline: none;
   }
 

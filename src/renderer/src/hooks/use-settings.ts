@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { mail } from "@/lib/ipc"
 import { readStored, store, type Density } from "@/lib/preferences"
+import type { Settings } from "@shared/types"
 
 /**
  * 界面设置：SQLite 是唯一事实来源，localStorage 只做首帧防闪缓存。
@@ -49,55 +50,60 @@ export function useSettings() {
     }
   }, [])
 
+  const [saveError, setSaveError] = useState<number | null>(null)
+  const persist = useCallback((patch: Partial<Settings>) => {
+    void mail.settings.set(patch).catch(() => setSaveError(Date.now()))
+  }, [])
+
   useEffect(() => {
     store("maildesk.density", density)
-    if (ready.current) void mail.settings.set({ density }).catch(() => undefined)
-  }, [density])
+    if (ready.current) persist({ density })
+  }, [density, persist])
 
   useEffect(() => {
     store("maildesk.sidebarCollapsed", collapsed)
-    if (ready.current) void mail.settings.set({ sidebarCollapsed: collapsed }).catch(() => undefined)
-  }, [collapsed])
+    if (ready.current) persist({ sidebarCollapsed: collapsed })
+  }, [collapsed, persist])
 
   useEffect(() => {
     store("maildesk.fontSize", fontSize)
-    if (ready.current) void mail.settings.set({ fontSize }).catch(() => undefined)
-  }, [fontSize])
+    if (ready.current) persist({ fontSize })
+  }, [fontSize, persist])
 
   useEffect(() => {
     if (!ready.current) return
-    void mail.settings.set({ remoteImages }).catch(() => undefined)
-  }, [remoteImages])
+    persist({ remoteImages })
+  }, [remoteImages, persist])
 
   useEffect(() => {
     if (!ready.current) return
-    void mail.settings.set({ standardThreeLines }).catch(() => undefined)
-  }, [standardThreeLines])
+    persist({ standardThreeLines })
+  }, [standardThreeLines, persist])
 
   useEffect(() => {
     if (!ready.current) return
-    void mail.settings.set({ groupHeadersNonCompact }).catch(() => undefined)
-  }, [groupHeadersNonCompact])
+    persist({ groupHeadersNonCompact })
+  }, [groupHeadersNonCompact, persist])
 
   useEffect(() => {
     if (!ready.current) return
-    void mail.settings.set({ stickyGroupHeaders }).catch(() => undefined)
-  }, [stickyGroupHeaders])
+    persist({ stickyGroupHeaders })
+  }, [stickyGroupHeaders, persist])
 
   useEffect(() => {
     if (!ready.current) return
-    void mail.settings.set({ showTimeNonCompact }).catch(() => undefined)
-  }, [showTimeNonCompact])
+    persist({ showTimeNonCompact })
+  }, [showTimeNonCompact, persist])
 
   useEffect(() => {
     if (!ready.current) return
-    void mail.settings.set({ folderCount }).catch(() => undefined)
-  }, [folderCount])
+    persist({ folderCount })
+  }, [folderCount, persist])
 
   useEffect(() => {
     if (!ready.current) return
-    void mail.settings.set({ closeToTray }).catch(() => undefined)
-  }, [closeToTray])
+    persist({ closeToTray })
+  }, [closeToTray, persist])
 
   return {
     density,
@@ -119,6 +125,7 @@ export function useSettings() {
     folderCount,
     setFolderCount,
     closeToTray,
-    setCloseToTray
+    setCloseToTray,
+    saveError
   }
 }

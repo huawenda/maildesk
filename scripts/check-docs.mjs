@@ -24,7 +24,9 @@ const DOC_FILES = [
   "docs/sync.md",
   "docs/design-rules.md",
   "docs/pitfalls.md",
-  "docs/rendering.md"
+  "docs/rendering.md",
+  "docs/data-model.md",
+  "docs/testing.md"
 ]
 
 const problems = []
@@ -48,7 +50,13 @@ for (const file of DOC_FILES) {
 
 // 1b. AGENTS / design-rules 里引用的仓库路径必须存在 --------------------------
 // 拆分文档后最容易出现的错：引用了一个已经改名/删除的文件。
-const PATH_DOCS = ["AGENTS.md", "docs/design-rules.md", "docs/rendering.md"]
+const PATH_DOCS = [
+  "AGENTS.md",
+  "docs/design-rules.md",
+  "docs/rendering.md",
+  "docs/data-model.md",
+  "docs/testing.md"
+]
 const PATH_ROOTS = ["src/", "docs/", "resources/", "build/", "fixtures/", "scripts/"]
 const KNOWN_FILES = new Set([
   "AGENTS.md",

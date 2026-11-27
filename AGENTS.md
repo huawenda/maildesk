@@ -9,6 +9,8 @@ Windows 单平台的桌面邮件客户端，只走 IMAP 收信，不发信、不
 - 早期视觉参考（`docs/ui-refs/` 的对比页与产品截图、`docs/palette-compare.png` 调色对照）已于 2026-11-27 由用户删除，不要再引用或恢复；设计依据以 `DESIGN.md` 与实际 token 为准。
 - `DESIGN.md` 是设计语言的机器可读摘要（Stitch DESIGN.md 格式，给设计 agent 读：token / 字号 / 圆角 / 组件 / Do's & Don'ts）。**它只是镜像**：token 的唯一取值处仍然是 `globals.css` 的 `:root`，改颜色时必须同时更新 `globals.css`、`DESIGN.md` 和 `docs/PRD.md` 6.2 的取值表；`design-rules` / AGENTS 只写 token 名、不写色值。`npm run check:docs` 会核对这三处的 token 取值、所有文档正文里的 hex（必须在 CSS 或例外清单里）以及 PRD 目录，**不要在正文里复述 hex**。
 - `docs/design-rules.md` 是「设计红线」的全文（从 AGENTS 拆出）；`docs/pitfalls.md` 是「已知坑」全文（从 AGENTS 拆出）；`docs/rendering.md` 是阅读器正文渲染的实现说明（清洗 → CSP → iframe → 测量）。动 UI 前读第一个，动渲染前读第三个，动同步/打包/截图前按关键词查第二个。
+- `docs/data-model.md` 是 SQLite 实现说明（表身份、事务、搜索、迁移纪律与删除级联）；改 `src/main/db/**` 或加迁移时必须同步它并追加「迁移记录」。
+- `docs/testing.md` 是单测约定（哪些能进 vitest、临时库与 `window.mail` 桩、覆盖清单）；加测试前先读。
 - 有疑问不要猜产品意图，直接问用户；但实现细节（组件拆分、命名、状态管理）自己定，不要反问。
 
 ## 技术栈（已锁定，不要替换）
@@ -53,7 +55,7 @@ src/renderer/src/     React UI（唯一的重构区域）
   styles/globals.css 设计 token 唯一落地处
 src/shared/          主/渲染共用类型与 zod schema
 fixtures/            开发期假数据
-docs/                PRD、sync、rendering、design-rules、pitfalls、图标脚本
+docs/                PRD、sync、rendering、data-model、testing、design-rules、pitfalls、图标脚本
 ```
 
 ## 代码约定
@@ -86,9 +88,10 @@ docs/                PRD、sync、rendering、design-rules、pitfalls、图标�
 - **UI 改动由用户肉眼验收**：小改动不要跑自动截图，改完告知“已生效、请看窗口”即可。
 - 只有这三种情况才用自动化截图（`MAILDESK_CAPTURE` / `MAILDESK_CAPTURE_LIGHT`）：需要像素级比对、用户肉眼无法确认、以及 debug（白屏/溢出/渲染错误）。
 - 每次改完跑 `npm run typecheck`；结构性改动再跑 `npm run build`。
-- 改到纯逻辑（`src/main/sync/parse.ts`、`lib/grouping.ts`、`lib/format.ts`、数据库迁移/事务）时先补或改 `*.test.ts` 再跑 `npm test`，别只靠真实邮箱手测。
-- 改过 `PRD.md` / `DESIGN.md` / `AGENTS.md` / `README.md` / `sync.md` 或 `channels.ts` / `ipc/index.ts` 后，跑 `npm run check:docs`（相对链接、AGENTS/design-rules 引用的路径、DESIGN token 与 `globals.css` 的一致性、通道与 handler 对齐）。
+- 改到纯逻辑（`src/main/sync/parse.ts`、`lib/grouping.ts`、`lib/format.ts`、数据库迁移/事务）时先补或改 `*.test.ts` 再跑 `npm test`，别只靠真实邮箱手测；测试写法与边界见 `docs/testing.md`。
+- 改过 `PRD.md` / `DESIGN.md` / `AGENTS.md` / `README.md` / `sync.md` / `rendering.md` / `data-model.md` / `testing.md` 或 `channels.ts` / `ipc/index.ts` 后，跑 `npm run check:docs`（相对链接、AGENTS/design-rules 引用的路径、DESIGN token 与 `globals.css` 的一致性、PRD 目录与取值表、文档正文色值、通道与 handler 对齐）。
 - 改同步层（`src/main/sync/**`、`src/main/db/messages.ts` 的同步相关函数、`SyncEvent` 契约）后，除 typecheck 外必须更新 `docs/sync.md`：改对应行为小节，并在「变更记录」追加一条。
+- 改数据库 schema、迁移、删除级联或搜索 SQL（`src/main/db/**`）后，必须更新 `docs/data-model.md`：改对应小节，并在「迁移记录」追加一条。
 - 后台 `npm run dev` 属于用户资产：不要随手 kill。截图脚本与 dev 冲突（单实例锁），需要时先停 dev，截完立即重启并告知用户。
 - **提交与推送必须由用户明确指令触发**：不要自作主张 `git commit` / `git push`，改完代码停在“工作区脏”的状态等用户说提交。用户说“提交”只做 commit，说“推送”才 push。
 - **出包（`npm run package`）同样是明确指令才做**：改了主进程、图标、`resources/` 或配置都不算授权，不要顺手重打安装包；改完就停在源码/资产状态，等用户说“出包”再打。

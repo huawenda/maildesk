@@ -1,7 +1,7 @@
 # MailDesk
 
 Windows 单平台的桌面邮件客户端：**只收信（IMAP，不发信、不碰 SMTP）**，核心目标是可自由重构的 UI。
-产品与设计规格见 [docs/PRD.md](docs/PRD.md)，同步链路细节见 [docs/sync.md](docs/sync.md)，正文渲染实现见 [docs/rendering.md](docs/rendering.md)，设计 token 与组件规格见 [DESIGN.md](DESIGN.md)，UI 红线见 [docs/design-rules.md](docs/design-rules.md)，踩坑记录见 [docs/pitfalls.md](docs/pitfalls.md)。
+产品与设计规格见 [docs/PRD.md](docs/PRD.md)，同步链路见 [docs/sync.md](docs/sync.md)，正文渲染见 [docs/rendering.md](docs/rendering.md)，数据模型见 [docs/data-model.md](docs/data-model.md)，测试约定见 [docs/testing.md](docs/testing.md)，设计 token 与组件规格见 [DESIGN.md](DESIGN.md)，UI 红线见 [docs/design-rules.md](docs/design-rules.md)，踩坑记录见 [docs/pitfalls.md](docs/pitfalls.md)。
 
 ## 已具备的功能
 
@@ -56,7 +56,7 @@ electron-builder 二进制建议走镜像：
     resources      运行时资源（托盘图标，打包走 extraResources）
     build          打包图标（icon.ico / icon.png）
     fixtures       手写演示邮件，仅 dev 构建使用
-    docs           PRD、同步与渲染说明、设计红线、已知坑、图标脚本
+    docs           PRD、同步 / 渲染 / 数据模型说明、测试约定、设计红线、已知坑、图标脚本
 
 ## 技术栈
 

@@ -634,125 +634,37 @@
 
 ### 7.4 数据模型（SQLite）
 
-    -- 账户（凭据单独用 safeStorage 加密存储，不进此表）
-    CREATE TABLE account (
-      id TEXT PRIMARY KEY,
-      email TEXT NOT NULL,
-      display_name TEXT,
-      imap_host TEXT NOT NULL,
-      imap_port INTEGER NOT NULL DEFAULT 993,
-      security TEXT NOT NULL DEFAULT 'tls',      -- tls | starttls | none
-      username TEXT NOT NULL,
-      accent TEXT,
-      created_at INTEGER NOT NULL
-    );
+| 表 | 职责 | 关键约束 |
+| --- | --- | --- |
+| `account` | 账户与 IMAP 参数 | 密码不进此表 |
+| `folder` | 服务器文件夹 + 同步游标 | `UNIQUE(account_id, path)`；`uid_validity` / `uid_next` / `last_synced_uid` / `backfill_uid` / `enabled` |
+| `message` | 邮件头 + 正文 | `UNIQUE(folder_id, uid)`；`body_text`（搜索 / 纯文本）、`body_html`（原始 HTML） |
+| `message_fts` | FTS5 全文索引 | external content，增删改由触发器同步 |
+| `attachment` | 附件元数据 | 二进制不进库；`part` 记 BODYSTRUCTURE 号；内嵌图不算附件 |
+| `credential` | 凭据密文 | `safeStorage` 加密，明文永不落库 |
+| `setting` | key/value JSON | 替代 electron-store |
 
-    CREATE TABLE folder (
-      id TEXT PRIMARY KEY,
-      account_id TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
-      path TEXT NOT NULL,                        -- IMAP 原始路径
-      name TEXT NOT NULL,                        -- 解码后的展示名
-      delimiter TEXT,
-      role TEXT,                                 -- inbox|sent|drafts|trash|junk|archive|null
-      uid_validity INTEGER,
-      uid_next INTEGER,
-      last_synced_uid INTEGER DEFAULT 0,
-      total_count INTEGER DEFAULT 0,
-      unread_count INTEGER DEFAULT 0,
-      sort_order INTEGER DEFAULT 0,
-      UNIQUE(account_id, path)
-    );
-
-    CREATE TABLE message (
-      id TEXT PRIMARY KEY,
-      folder_id TEXT NOT NULL REFERENCES folder(id) ON DELETE CASCADE,
-      uid INTEGER NOT NULL,
-      message_id TEXT,
-      subject TEXT,
-      from_name TEXT,
-      from_addr TEXT,
-      to_json TEXT,                              -- [{name,address}]
-      cc_json TEXT,
-      sent_at INTEGER,
-      size INTEGER,
-      flags_json TEXT,
-      is_read INTEGER DEFAULT 0,
-      is_flagged INTEGER DEFAULT 0,
-      has_html INTEGER DEFAULT 0,
-      has_attachments INTEGER DEFAULT 0,
-      snippet TEXT,
-      body_text TEXT,                            -- 供搜索/纯文本渲染，超阈值置空
-      raw_path TEXT,                             -- .eml 落盘路径
-      UNIQUE(folder_id, uid)
-    );
-    CREATE INDEX idx_message_list ON message(folder_id, sent_at DESC);
-
-    CREATE VIRTUAL TABLE message_fts USING fts5(
-      subject, from_name, from_addr, body_text,
-      content='message', content_rowid='rowid', tokenize='unicode61'
-    );
-
-    CREATE TABLE attachment (
-      id TEXT PRIMARY KEY,
-      message_id TEXT NOT NULL REFERENCES message(id) ON DELETE CASCADE,
-      filename TEXT, mime TEXT, size INTEGER, content_id TEXT, local_path TEXT
-    );
-
-    -- 凭据：密码用 safeStorage（Windows DPAPI）加密后存 BLOB，明文永不落库
-    CREATE TABLE credential (
-      account_id TEXT PRIMARY KEY REFERENCES account(id) ON DELETE CASCADE,
-      scheme TEXT NOT NULL,                     -- dpapi | plain（加密不可用时的降级，便于识别需重登账户）
-      secret BLOB NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    -- 设置：key/value，替代 electron-store
-    CREATE TABLE setting (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL                       -- JSON
-    );
-
-迁移策略：`PRAGMA user_version` 当作迁移下标，`src/main/db/schema.ts` 里的 `MIGRATIONS` 数组按序执行未应用的条目；每次改 schema 只追加，不改历史项。
-
-存储约定：正文（`body_text` / `body_html`）随同步一起写进 SQLite，点开不再联网；附件二进制**不进库**，只存元数据（文件名、mime、尺寸、part 号），保存/预览时按 part 下载。数据库启用 WAL 模式。
+- 精确列定义与迁移以 `src/main/db/schema.ts` 为准；表身份、事务、搜索路径与迁移纪律见 [docs/data-model.md](data-model.md)。
+- 迁移：`PRAGMA user_version` 作下标，`MIGRATIONS` 只追加、不改历史项，每条单独事务。
+- 存储：正文随同步入库，点开不再联网；附件只存元数据，保存/预览时按 part 下载；库开 WAL。
 
 ### 7.5 IPC 契约
 
-    // src/shared/types.ts —— 唯一契约来源，main 与 renderer 共用（channel 名在 src/shared/channels.ts）
-    export interface MailApi {
-      accounts: {
-        list(): Promise<Account[]>;
-        test(input: AccountInput): Promise<TestResult>;   // TestResult = {ok:true,folders?} | {ok:false,code,message}
-        create(input: AccountInput): Promise<Account>;
-        update(id: string, patch: Partial<AccountInput>): Promise<Account>;
-        remove(id: string): Promise<void>;
-      };
-      folders: { list(accountId?: string): Promise<Folder[]> };
-      messages: {
-        list(folderId: string): Promise<MessageSummary[]>;          // 整箱一次返回，不分页
-        get(id: string): Promise<MessageDetail>;                 // 本地正文 + 附件（点开不再联网）
-        setRead(ids: string[], read: boolean): Promise<void>;
-        setFlagged(ids: string[], flagged: boolean): Promise<void>;
-      };
-      search: { query(q: string, opts?: SearchOptions): Promise<MessageSummary[]> };
-      sync: {
-        now(accountId?: string): Promise<void>;
-        status(): Promise<SyncStatus>;
-        onEvent(cb: (e: SyncEvent) => void): () => void;   // 订阅式，preload 内做监听清理
-      };
-      settings: { get(): Promise<Settings>; set(patch: Partial<Settings>): Promise<Settings> };
-      app: {
-        getInfo(): Promise<AppInfo>;
-        openExternal(url: string): Promise<void>;               // 仅 http/https
-        setChrome(color: { background: string; symbol: string }): Promise<void>;
-        minimizeWindow(): Promise<void>;                        // frame:false，标题栏自绘
-        toggleMaximizeWindow(): Promise<void>;
-        closeWindow(): Promise<void>;
-        onMaximizeChange(cb: (maximized: boolean) => void): () => void;
-      };
-    }
+| 分组 | 能力 |
+| --- | --- |
+| `accounts` | list / test / create / update / remove |
+| `folders` | list / scan / setEnabled |
+| `messages` | list / get / setRead / setFlagged / move / remove / unreadCounts |
+| `attachments` | save / saveAll / preview / open / reveal / progress / downloads / cancelDownload / clearDownloads |
+| `search` | query（scope / limit / folder / account） |
+| `sync` | now / status / overview / reconnect / onEvent |
+| `settings` | get / set |
+| `app` | getInfo / openExternal / setChrome / 窗口控制 / onMaximizeChange |
 
-约束：所有 IPC channel 名常量集中定义；主进程对每个入参做 zod 解析；渲染进程**不得**直接访问 `fs`/`net`。
+- 唯一契约来源是 `src/shared/types.ts` 的 `MailApi`，通道名在 `src/shared/channels.ts`；
+  本文只列能力分组，**不要在这里抄完整签名**（历来抄一次漂一次）；
+- `npm run check:docs` 校验通道与 handler 对齐；主进程对每个入参做 zod 解析；
+- 渲染进程不得直接访问 `fs` / `net`。
 
 ### 7.6 同步状态机
 
@@ -856,5 +768,5 @@
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
-| v0.4 | 2026-11-27 | 文档体系整理：补目录与维护约定；正文中的 token 色值改为 token 名（仅 6.2 保留取值表，由 `check:docs` 校验）；修正已移除的筛选行 / 页签描述、已读色、关窗与托盘行为、开放问题状态。 |
+| v0.4 | 2026-11-27 | 文档体系整理：补目录与维护约定；正文中的 token 色值改为 token 名（仅 6.2 保留取值表，由 `check:docs` 校验）；7.4 / 7.5 改为能力表，精确 DDL 与 API 签名指向 `schema.ts` / `types.ts`；修正已移除的筛选行 / 页签描述、已读色、关窗与托盘行为、开放问题状态。 |
 | v0.3 及更早 | — | 见 `git log -- docs/PRD.md`；版本号随行为变化递增，不回溯改写历史条目。 |

@@ -559,7 +559,7 @@ export function MessageList({
       {compact && messages.length > 0 ? (
         <div
           ref={headerRef}
-          className="flex h-7 shrink-0 items-stretch border-y border-table-line bg-foreground/[0.05] text-[11.5px] text-muted-foreground"
+          className="flex h-7 shrink-0 items-stretch border-y border-table-line bg-card text-[11.5px] text-muted-foreground"
           style={{ paddingRight: gutter }}
         >
           <span className={cn("col-sep flex shrink-0 items-center justify-center", COL_STATUS)}>
@@ -1028,9 +1028,7 @@ const MessageRow = memo(function MessageRow({
   const comfortable = density === "comfortable"
   // 已读行整体降一档明度（头像、发件人、主题、摘要、时间一起变淡），未读行保持原亮度
   const read = !message.unread
-  const mutedText = read
-    ? "text-muted-foreground/65"
-      : "text-muted-foreground"
+  const mutedText = read ? "text-ink-faint" : "text-muted-foreground"
   const sender = message.fromName || message.fromEmail
   // 只在搜索态高亮：范围决定标哪个字段（收件人不在列表展示，所以 to 不高亮）
   const highlightIn = (field: "sender" | "subject" | "snippet") => {
@@ -1041,7 +1039,7 @@ const MessageRow = memo(function MessageRow({
     return false
   }
   // 主题列的文字层次：日期、大小两列与它完全一致（字号 12.5、同样的已读/未读/选中明度）
-  const subjectText = read ? "text-foreground/65" : "text-foreground"
+  const subjectText = read ? "text-ink-read" : "text-foreground"
 
   // 紧凑视图：Foxmail 式表格式单行，不再显示头像与摘要
   if (compact) {
@@ -1074,7 +1072,7 @@ const MessageRow = memo(function MessageRow({
             <span
               className={cn(
                 "size-[9px] rounded-full transition-colors duration-100",
-                message.unread ? "bg-primary" : "bg-muted-foreground/35 hover:bg-muted-foreground/65"
+                message.unread ? "bg-primary" : "bg-dot-read hover:bg-ink-faint"
               )}
             />
           </button>
@@ -1086,7 +1084,7 @@ const MessageRow = memo(function MessageRow({
           title={sender}
           className={cn(
             "shrink-0 truncate pl-2 text-[12.5px]",
-            read ? "text-foreground/70" : "text-foreground",
+            read ? "text-ink-read" : "text-foreground",
             message.unread && !selected && "font-medium"
           )}
           style={{ width: cols.sender }}
@@ -1186,7 +1184,7 @@ const MessageRow = memo(function MessageRow({
             className={cn(
               "truncate font-medium",
               compact ? "text-[12.5px]" : "text-[13px]",
-              read ? "text-foreground/70" : "text-foreground"
+              read ? "text-ink-read" : "text-foreground"
             )}
           >
             {highlightIn("sender") ? (
@@ -1206,7 +1204,7 @@ const MessageRow = memo(function MessageRow({
               "truncate",
               compact ? "text-[13px] leading-[18px]" : "text-[14px] leading-5",
               message.unread ? "font-semibold" : "font-normal",
-              read ? "text-foreground/65" : "text-foreground"
+              read ? "text-ink-read" : "text-foreground"
             )}
           >
             {highlightIn("subject") ? (
@@ -1301,7 +1299,7 @@ function EmptyList({
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
         <Inbox className="size-8 opacity-40" />
         <span className="text-[13px]">还没有配置账户</span>
-        <span className="text-[12px] opacity-70">点标题栏左侧的账户胶囊，添加你的 IMAP 邮箱</span>
+        <span className="text-[12px] opacity-70">点标题栏左上角的 ☰ 菜单 →「管理账户…」添加你的 IMAP 邮箱</span>
       </div>
     )
   }

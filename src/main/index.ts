@@ -109,7 +109,7 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     // 首帧底色跟系统主题走：浅色用户不该在启动瞬间被闪一块深灰
-    backgroundColor: "#E6EDF5",
+    backgroundColor: "#F3F3F3",
     // 完全自绘标题栏：不要系统标题栏，也不要系统绘制的窗口按钮。
     // 保留 thickFrame（默认 true）才能继续用原生的缩放边框、Aero Snap 与阴影。
     frame: false,
@@ -126,6 +126,10 @@ function createWindow(): BrowserWindow {
     if (saved.maximized) win.maximize()
     win.show()
   })
+
+  // 界面缩放已移除（2026-11-27 用户要求）：Chromium 会按 origin 记住上次的 zoom factor，
+  // 老版本写进去的 90% 会在每次启动继续生效，这里在载入完成后显式归 1 一次。
+  win.webContents.on("did-finish-load", () => win.webContents.setZoomFactor(1))
 
   // 开发期快捷键：应用菜单是 null（自绘标题栏），Chromium 的 F12 / Ctrl+Shift+I 默认也就不生效了。
   // 只在未打包时挂，正式包不给用户开 DevTools、也不给整页刷新（会丢当前选中/滚动位置）。

@@ -3,7 +3,6 @@ export const CH = {
   appInfo: "app:info",
   appOpenExternal: "app:open-external",
   appChrome: "app:chrome",
-  appZoom: "app:zoom",
   appLogPath: "app:log-path",
   appOpenLogFolder: "app:open-log-folder",
 

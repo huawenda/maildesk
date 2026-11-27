@@ -390,7 +390,7 @@ export function Reader({
                         {saveAllState === "saving" ? (
                           <Loader2 className="size-4 animate-spin" />
                         ) : saveAllState === "saved" ? (
-                          <Check className="size-4 text-[#34D399]" />
+                          <Check className="size-4 text-success" />
                         ) : (
                           <Download className="size-4" />
                         )}
@@ -547,7 +547,7 @@ export function Reader({
           />
           <aside
             className={cn(
-              "absolute inset-y-0 right-0 z-20 flex w-[320px] max-w-full flex-col border-l border-border bg-popover shadow-2xl",
+              "absolute inset-y-0 right-0 z-20 flex w-[320px] max-w-full flex-col border-l border-border bg-popover elevation-menu",
               senderClosing ? "drawer-out" : "drawer-in"
             )}
           >
@@ -618,7 +618,7 @@ export function Reader({
         >
           <div className="max-w-[70vw] truncate text-[12.5px] text-white/70">{preview?.name ?? "图片预览"}</div>
           {previewBusy ? <Loader2 className="size-6 animate-spin text-white/70" /> : null}
-          {previewError ? <div className="text-[12.5px] text-[#E0655B]">{previewError}</div> : null}
+          {previewError ? <div className="text-[12.5px] text-destructive">{previewError}</div> : null}
           {preview ? (
             <img
               src={preview.dataUrl}
@@ -679,7 +679,7 @@ function AttachmentChip({
             "flex h-5 items-center gap-1.5 rounded-full bg-muted px-2 text-[11.5px] transition-colors",
             savable && "hover:bg-accent",
             !savable && "cursor-default",
-            state === "error" && "text-[#E0655B]"
+            state === "error" && "text-destructive"
           )}
         >
           {state === "saving" ? (
@@ -691,7 +691,7 @@ function AttachmentChip({
               <Loader2 className="size-3 animate-spin text-muted-foreground" />
             )
           ) : state === "saved" ? (
-            <Check className="size-3 text-[#34D399]" />
+            <Check className="size-3 text-success" />
           ) : (
             <Icon className="size-3 text-muted-foreground" />
           )}

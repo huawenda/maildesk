@@ -165,8 +165,6 @@ export interface Settings {
   folderCount: "unread" | "total"
   /** 点窗口关闭键时最小化到托盘，而不是退出应用 */
   closeToTray: boolean
-  /** 界面整体缩放：0 = 自动（小屏用 90%），其余为 0.9 / 1 / 1.1 / 1.25 */
-  uiScale: number
 }
 
 export type TestResult =
@@ -350,8 +348,6 @@ export interface MailApi {
     openExternal(url: string): Promise<void>
     /** 让窗口底色跟随页面主题，避免拖动/缩放时闪出白色。 */
     setChrome(color: { background: string; symbol: string }): Promise<void>
-    /** 整体界面缩放（webContents zoom factor） */
-    setZoom(factor: number): Promise<void>
     /** 自绘标题栏的窗口控制（窗口是 frame: false，系统按钮不存在）。 */
     minimizeWindow(): Promise<void>
     toggleMaximizeWindow(): Promise<void>

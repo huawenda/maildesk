@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useState } from "react"
 import { PanelLeftClose, PanelLeftOpen, Rows3 } from "lucide-react"
 import type { Density } from "@/App"
+import type { Account } from "@shared/types"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { mail } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
+import { AccountMenu } from "@/components/AccountMenu"
 import { DownloadsPopover } from "@/components/DownloadsPopover"
 import { TitleBarSearch, type SearchScope } from "@/components/TitleBarSearch"
 
@@ -64,9 +66,10 @@ function CloseGlyph() {
 }
 
 interface TitleBarProps {
-  /** 左段与侧栏同宽：左段延续侧栏底色，右段延续卡片底色，避免横向色带。 */
-  sidebarWidth: number
-  left: ReactNode
+  accounts: Account[]
+  activeAccountId: string | null
+  onSelectAccount: (id: string) => void
+  onManageAccounts: () => void
   collapsed: boolean
   onToggleCollapsed: () => void
   searchQuery: string
@@ -79,8 +82,10 @@ interface TitleBarProps {
 }
 
 export function TitleBar({
-  sidebarWidth,
-  left,
+  accounts,
+  activeAccountId,
+  onSelectAccount,
+  onManageAccounts,
   collapsed,
   onToggleCollapsed,
   searchQuery,
@@ -96,18 +101,17 @@ export function TitleBar({
   useEffect(() => mail.app.onMaximizeChange(setMaximized), [])
 
   return (
-    <div className="flex h-11 shrink-0 [-webkit-app-region:drag]">
-      <div
-        className={cn(
-          "flex shrink-0 items-center transition-[width] duration-150 ease-out",
-          collapsed ? "px-2" : "px-2.5"
-        )}
-        style={{ width: sidebarWidth }}
-      >
-        {left}
-      </div>
-
+    <div className="relative flex h-11 shrink-0 [-webkit-app-region:drag]">
       <div className="flex flex-1 items-center gap-1 bg-background pl-2">
+        {/* 左上角照 OpenCode：☰ 菜单（账户切换与账户管理都收在里面）+ 侧栏开关 */}
+        <AccountMenu
+          accounts={accounts}
+          activeAccountId={activeAccountId}
+          onSelect={onSelectAccount}
+          onManage={onManageAccounts}
+          triggerClassName={ICON_BUTTON}
+        />
+
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -134,16 +138,15 @@ export function TitleBar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* 中间常驻搜索胶囊，其余空间仍是拖动区 */}
-        <div className="relative h-full flex-1">
-          <TitleBarSearch
-            query={searchQuery}
-            onQueryChange={onSearchQueryChange}
-            scope={searchScope}
-            onScopeChange={onSearchScopeChange}
-            focusToken={searchFocusToken}
-          />
-        </div>
+        {/* 中间常驻搜索胶囊：相对整条标题栏居中（不是相对剩余空间），其余空间仍是拖动区 */}
+        <div className="h-full flex-1" />
+        <TitleBarSearch
+          query={searchQuery}
+          onQueryChange={onSearchQueryChange}
+          scope={searchScope}
+          onScopeChange={onSearchScopeChange}
+          focusToken={searchFocusToken}
+        />
 
         <DownloadsPopover triggerClassName={ICON_BUTTON} />
 

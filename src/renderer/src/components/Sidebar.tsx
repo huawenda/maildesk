@@ -30,7 +30,6 @@ const folderIcons = {
 } as const
 
 interface SidebarProps {
-  collapsed: boolean
   onOpenSettings: () => void
   folders: NavFolder[]
   folderId: string
@@ -52,7 +51,6 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  collapsed,
   onOpenSettings,
   folders,
   folderId,
@@ -83,12 +81,7 @@ export function Sidebar({
   }
 
   return (
-    <aside
-      className={cn(
-        "flex shrink-0 flex-col pb-2 pt-2.5 transition-[width] duration-150 ease-out",
-        collapsed ? "w-[50px] px-2" : "w-[220px] px-2.5"
-      )}
-    >
+    <aside className="flex h-full w-[220px] shrink-0 flex-col px-2.5 pb-2 pt-2.5">
       <nav
         ref={navRef}
         // 文件夹列表吃掉设置区以上的全部高度：公司邮箱的个人文件夹很多，
@@ -98,12 +91,8 @@ export function Sidebar({
       >
         {folders.map((folder) => {
           const Icon = folderIcons[folder.icon] ?? Folder
-          // 折叠态只保留系统文件夹：自建目录在 64px 的图标栏里既看不出层级，
-          // 也认不出是哪个箱子，统一藏起来（展开后从「其他文件夹」进）
-          if (collapsed && !folder.selectable) return null
-          if (collapsed && folder.icon === "folder") return null
-          if (!collapsed && hidden.has(folder.id)) return null
-          const indent = collapsed ? 0 : folder.depth * 14
+          if (hidden.has(folder.id)) return null
+          const indent = folder.depth * 14
           const expanded = !collapsedGroups.includes(folder.id)
 
           if (!folder.selectable) {
@@ -113,19 +102,14 @@ export function Sidebar({
                 title={folder.label}
                 aria-expanded={expanded}
                 onClick={() => toggleGroup(folder.id)}
-                className={cn(
-                  "flex h-7 shrink-0 items-center gap-2.5 rounded-md text-[12px] font-medium text-[#111111] transition-colors hover:bg-nav-hover",
-                  collapsed ? "justify-center px-0" : "px-2"
-                )}
+                className="flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-nav-hover"
                 style={indent ? { paddingLeft: 8 + indent } : undefined}
               >
                 <Icon className="size-[15px] shrink-0 text-muted-foreground" />
-                {collapsed ? null : <span className="truncate">{folder.label}</span>}
-                {collapsed ? null : (
-                  <span className="ml-auto text-muted-foreground">
-                    {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-                  </span>
-                )}
+                <span className="truncate">{folder.label}</span>
+                <span className="ml-auto text-muted-foreground">
+                  {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                </span>
               </button>
             )
           }
@@ -139,17 +123,16 @@ export function Sidebar({
               aria-current={active ? "true" : undefined}
               onClick={() => onSelectFolder(folder.id)}
               className={cn(
-                "flex h-7 shrink-0 items-center gap-2.5 rounded-md text-[12px] transition-colors",
-                collapsed ? "justify-center px-0" : "px-2",
+                "flex h-7 shrink-0 items-center gap-2.5 rounded-md px-2 text-[12px] transition-colors",
                 active
                   ? "bg-nav-selected font-bold text-foreground"
-                  : "text-[#111111] hover:bg-nav-hover"
+                  : "text-foreground hover:bg-nav-hover"
               )}
               style={indent ? { paddingLeft: 8 + indent } : undefined}
             >
               <Icon className={cn("size-[15px] shrink-0", active ? "text-primary" : "text-muted-foreground")} />
-              {collapsed ? null : <span className="truncate">{folder.label}</span>}
-              {!collapsed && count ? (
+              <span className="truncate">{folder.label}</span>
+              {count ? (
                 <span
                   className={cn(
                     "ml-auto text-[11px] tabular-nums",
@@ -165,7 +148,7 @@ export function Sidebar({
       </nav>
       <OverlayScrollbar target={navRef} />
 
-      {collapsed || !showLabels || labels.length === 0 ? null : (
+      {!showLabels || labels.length === 0 ? null : (
         <>
           <div className="mt-5 mb-1.5 px-2 text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
             标签
@@ -195,55 +178,38 @@ export function Sidebar({
         <button
           onClick={onManageFolders}
           title="选择要显示的文件夹"
-          className={cn(
-            "flex h-7 items-center gap-1.5 rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground",
-            collapsed ? "justify-center px-0" : "px-2"
-          )}
+          className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground"
         >
           <FolderCog className="size-3.5 shrink-0" />
-          {collapsed ? null : <span className="truncate">选择文件夹</span>}
+          <span className="truncate">选择文件夹</span>
         </button>
-        {collapsed ? (
+        <div className="flex h-7 items-center rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover">
+          <button
+            onClick={onSync}
+            title="手动同步 (Ctrl R)"
+            className="flex h-7 min-w-0 flex-1 items-center gap-1.5 px-2"
+          >
+            <RefreshCw className={cn("size-3 shrink-0", syncing && "animate-spin text-primary")} />
+            <span className="truncate">{syncLabel}</span>
+          </button>
           <button
             onClick={onOpenSyncStatus}
             title="同步详情"
             aria-label="同步详情"
-            className="flex h-7 items-center justify-center rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover"
+            className="mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
           >
-            <RefreshCw className={cn("size-3 shrink-0", syncing && "animate-spin text-primary")} />
+            <Activity className="size-3" />
           </button>
-        ) : (
-          <div className="flex h-7 items-center rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover">
-            <button
-              onClick={onSync}
-              title="手动同步 (Ctrl R)"
-              className="flex h-7 min-w-0 flex-1 items-center gap-1.5 px-2"
-            >
-              <RefreshCw className={cn("size-3 shrink-0", syncing && "animate-spin text-primary")} />
-              <span className="truncate">{syncLabel}</span>
-            </button>
-            <button
-              onClick={onOpenSyncStatus}
-              title="同步详情"
-              aria-label="同步详情"
-              className="mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
-            >
-              <Activity className="size-3" />
-            </button>
-          </div>
-        )}
+        </div>
 
         {/* 设置入口只在侧栏底部，标题栏不再重复 */}
         <button
           onClick={onOpenSettings}
           title="设置 (Ctrl ,)"
-          className={cn(
-            "flex h-7 items-center gap-1.5 rounded-md text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground",
-            collapsed ? "justify-center px-0" : "px-2"
-          )}
+          className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground"
         >
           <Settings className="size-4 shrink-0" />
-          {collapsed ? null : <span>设置</span>}
+          <span>设置</span>
         </button>
       </div>
     </aside>

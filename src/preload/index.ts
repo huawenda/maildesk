@@ -77,7 +77,6 @@ const api: MailApi = {
     getInfo: () => ipcRenderer.invoke(CH.appInfo),
     openExternal: (url) => ipcRenderer.invoke(CH.appOpenExternal, url),
     setChrome: (color) => ipcRenderer.invoke(CH.appChrome, color),
-    setZoom: (factor) => ipcRenderer.invoke(CH.appZoom, factor),
     minimizeWindow: () => ipcRenderer.invoke(CH.windowMinimize),
     toggleMaximizeWindow: () => ipcRenderer.invoke(CH.windowToggleMaximize),
     closeWindow: () => ipcRenderer.invoke(CH.windowClose),

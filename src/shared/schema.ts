@@ -31,9 +31,7 @@ export const settingsSchema = z.object({
   stickyGroupHeaders: z.boolean(),
   showTimeNonCompact: z.boolean(),
   folderCount: z.enum(["unread", "total"]),
-  closeToTray: z.boolean(),
-  // 0 = 自动；其余为实际缩放系数
-  uiScale: z.number().min(0).max(1.5)
+  closeToTray: z.boolean()
 })
 
 export const settingsPatchSchema = settingsSchema.partial()

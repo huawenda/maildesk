@@ -127,12 +127,6 @@ export function registerIpc(): void {
     windowOf(event)?.setBackgroundColor(background)
   })
 
-  // 界面缩放：影响整个 webContents（标题栏、列表、正文 iframe 一起缩放）
-  ipcMain.handle(CH.appZoom, (event, raw: unknown) => {
-    const factor = parse(z.number().min(0.5).max(2), raw)
-    windowOf(event)?.webContents.setZoomFactor(factor)
-  })
-
   // 同步状态面板：展示日志位置、在资源管理器里定位日志文件
   ipcMain.handle(CH.appLogPath, () => logger.transports.file.getFile().path)
   ipcMain.handle(CH.appOpenLogFolder, () => {

@@ -42,9 +42,6 @@ interface SettingsDialogProps {
   onFolderCountChange: (value: "unread" | "total") => void
   closeToTray: boolean
   onCloseToTrayChange: (value: boolean) => void
-  /** 0 = 自动 */
-  uiScale: number
-  onUiScaleChange: (value: number) => void
   remoteImages: boolean
   onRemoteImagesChange: (value: boolean) => void
   accounts: Account[]
@@ -136,8 +133,6 @@ export function SettingsDialog({
   onFolderCountChange,
   closeToTray,
   onCloseToTrayChange,
-  uiScale,
-  onUiScaleChange,
   remoteImages,
   onRemoteImagesChange,
   accounts,
@@ -218,19 +213,6 @@ export function SettingsDialog({
                       <Plus className="size-3.5" />
                     </button>
                   </div>
-                </Row>
-                <Row label="界面缩放" hint="自动：屏幕为 1080p 及以下时用 90%，2K 及以上保持 100%">
-                  <Segmented
-                    value={String(uiScale)}
-                    options={[
-                      { value: "0", label: "自动" },
-                      { value: "0.9", label: "90%" },
-                      { value: "1", label: "100%" },
-                      { value: "1.1", label: "110%" },
-                      { value: "1.25", label: "125%" }
-                    ]}
-                    onChange={(value) => onUiScaleChange(Number(value))}
-                  />
                 </Row>
                 <Row label="标准视图显示三行" hint="标准密度在主题下多显示一行摘要；宽松密度始终三行">
                   <Switch checked={standardThreeLines} onChange={onStandardThreeLinesChange} />

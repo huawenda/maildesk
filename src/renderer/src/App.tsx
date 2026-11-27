@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { Account, Folder, SyncEvent, SyncState } from "@shared/types"
-import { AccountCapsule } from "@/components/AccountCapsule"
 import { AccountDialog } from "@/components/AccountDialog"
 import { MessageList, type ListFilter } from "@/components/MessageList"
 import { Notice } from "@/components/Notice"
@@ -157,8 +156,6 @@ export default function App() {
   const [showTimeNonCompact, setShowTimeNonCompact] = useState<boolean>(true)
   const [folderCount, setFolderCount] = useState<"unread" | "total">("unread")
   const [closeToTray, setCloseToTray] = useState<boolean>(false)
-  // 界面整体缩放：0 = 自动（1080p 这类小屏默认 90%），避免公司电脑上元素显大
-  const [uiScale, setUiScale] = useState<number>(() => readStored("maildesk.uiScale", 0))
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [syncStatusOpen, setSyncStatusOpen] = useState(false)
   // 「同步状态」面板的事件时间线：只保留本次会话最近 200 条
@@ -196,7 +193,6 @@ export default function App() {
         setShowTimeNonCompact(settings.showTimeNonCompact)
         setFolderCount(settings.folderCount)
         setCloseToTray(settings.closeToTray)
-        setUiScale(settings.uiScale ?? 0)
       })
       .catch(() => undefined)
       .finally(() => {
@@ -221,17 +217,6 @@ export default function App() {
     store("maildesk.fontSize", fontSize)
     if (settingsReady.current) void mail.settings.set({ fontSize }).catch(() => undefined)
   }, [fontSize])
-
-  useEffect(() => {
-    store("maildesk.uiScale", uiScale)
-    if (settingsReady.current) void mail.settings.set({ uiScale }).catch(() => undefined)
-  }, [uiScale])
-
-  // 自动档：1080p 及以下（含 1080p/125% 的 1536×864）整体用 90%，2K 保持 100%
-  useEffect(() => {
-    const auto = window.screen.availWidth <= 1920 || window.screen.availHeight <= 1080 ? 0.9 : 1
-    void mail.app.setZoom(uiScale > 0 ? uiScale : auto).catch(() => undefined)
-  }, [uiScale])
 
   useEffect(() => {
     if (!settingsReady.current) return
@@ -1018,21 +1003,34 @@ export default function App() {
     window.addEventListener("blur", finish)
   }
 
+  // 侧栏收起/展开是 200ms 的宽度动画，期间正文宽度每帧都在变：先冻结测量，结束后补量一次
+  const sidebarTimer = useRef<number | null>(null)
+  const toggleSidebar = useCallback(() => {
+    setDragging(true)
+    setCollapsed((value) => !value)
+    if (sidebarTimer.current) window.clearTimeout(sidebarTimer.current)
+    sidebarTimer.current = window.setTimeout(() => {
+      sidebarTimer.current = null
+      setDragging(false)
+    }, 260)
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (sidebarTimer.current) window.clearTimeout(sidebarTimer.current)
+    },
+    []
+  )
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
       <TitleBar
-        sidebarWidth={collapsed ? 50 : 220}
-        left={
-          <AccountCapsule
-            accounts={accounts}
-            activeAccountId={activeAccountId}
-            collapsed={collapsed}
-            onSelect={switchAccount}
-            onManage={() => setAccountsOpen(true)}
-          />
-        }
+        accounts={accounts}
+        activeAccountId={activeAccountId}
+        onSelectAccount={switchAccount}
+        onManageAccounts={() => setAccountsOpen(true)}
         collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed((value) => !value)}
+        onToggleCollapsed={toggleSidebar}
         searchQuery={searchQuery}
         onSearchQueryChange={setSearchQuery}
         searchScope={searchScope}
@@ -1042,39 +1040,53 @@ export default function App() {
         onDensityChange={setDensity}
       />
       <div className="flex min-h-0 flex-1">
-        <Sidebar
-          collapsed={collapsed}
-          onOpenSettings={() => setSettingsOpen(true)}
-          folders={navList}
-          folderId={folderId}
-          activeLabel={activeLabel}
-          unreadOf={(id) => {
-            if (!live) {
-              return items.filter((message) => message.folderId === id && message.unread).length
-            }
-            // 一律读库里的统计：选中态不再回退到「已加载那一页」，切换文件夹也不会闪旧数字
-            return unreadCounts[id] ?? 0
-          }}
-          totalOf={(id) => {
-            if (!live) return items.filter((message) => message.folderId === id).length
-            return liveFolders.find((folder) => folder.id === id)?.totalCount ?? 0
-          }}
-          countMode={folderCount}
-          onSelectFolder={switchFolder}
-          onManageFolders={() => setFolderPickerOpen(true)}
-          onSelectLabel={(label) => {
-            setActiveLabel((current) => (current === label ? null : label))
-            setSearchQuery("")
-            setSelectedId(null)
-          }}
-          showLabels={!live}
-          syncing={syncing}
-          syncLabel={syncLabel}
-          onSync={runSync}
-          onOpenSyncStatus={() => setSyncStatusOpen(true)}
-        />
-        {/* 画布区（列表 + 阅读器）：整块抠成一张悬浮卡片，四周留出背景色（2026-11-24 用户要求） */}
-        <div className="mt-0 mb-0 ml-0 mr-3 flex min-w-0 flex-1 overflow-hidden rounded-t-lg bg-card">
+        {/* 侧栏不卸载、只把宽度收成 0：这样收起/展开才有动效，内部也不重排（内容始终 220 宽） */}
+        <div
+          className={cn(
+            "shrink-0 overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none",
+            collapsed ? "w-0" : "w-[220px]"
+          )}
+          inert={collapsed}
+        >
+          <Sidebar
+            onOpenSettings={() => setSettingsOpen(true)}
+            folders={navList}
+            folderId={folderId}
+            activeLabel={activeLabel}
+            unreadOf={(id) => {
+              if (!live) {
+                return items.filter((message) => message.folderId === id && message.unread).length
+              }
+              // 一律读库里的统计：选中态不再回退到「已加载那一页」，切换文件夹也不会闪旧数字
+              return unreadCounts[id] ?? 0
+            }}
+            totalOf={(id) => {
+              if (!live) return items.filter((message) => message.folderId === id).length
+              return liveFolders.find((folder) => folder.id === id)?.totalCount ?? 0
+            }}
+            countMode={folderCount}
+            onSelectFolder={switchFolder}
+            onManageFolders={() => setFolderPickerOpen(true)}
+            onSelectLabel={(label) => {
+              setActiveLabel((current) => (current === label ? null : label))
+              setSearchQuery("")
+              setSelectedId(null)
+            }}
+            showLabels={!live}
+            syncing={syncing}
+            syncLabel={syncLabel}
+            onSync={runSync}
+            onOpenSyncStatus={() => setSyncStatusOpen(true)}
+          />
+        </div>
+        {/* 画布区（列表 + 阅读器）：整块抠成一张悬浮卡片，四周留出背景色（2026-11-24 用户要求）；
+            侧栏收起时左边也补 7px，卡片三边对称；外圈 1px --border 勾边（2026-11-27 用户要求） */}
+        <div
+          className={cn(
+            "mb-[7px] mt-0 mr-[7px] flex min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-card transition-[margin-left] duration-200 ease-out motion-reduce:transition-none",
+            collapsed ? "ml-[7px]" : "ml-0"
+          )}
+        >
           <MessageList
             folderId={folderId}
             messages={visible}
@@ -1183,8 +1195,6 @@ export default function App() {
         onFolderCountChange={setFolderCount}
         closeToTray={closeToTray}
         onCloseToTrayChange={setCloseToTray}
-        uiScale={uiScale}
-        onUiScaleChange={setUiScale}
         remoteImages={remoteImages}
         onRemoteImagesChange={setRemoteImages}
         accounts={accounts}

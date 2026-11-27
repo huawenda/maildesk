@@ -40,7 +40,7 @@ export function TitleBarSearch({ query, onQueryChange, scope, onScopeChange, foc
   }, [focusToken])
 
   return (
-    <div className="pointer-events-auto absolute left-1/2 top-1/2 w-[min(420px,calc(100vw-640px))] -translate-x-1/2 -translate-y-1/2 [-webkit-app-region:no-drag]">
+    <div className="pointer-events-auto absolute left-1/2 top-1/2 w-[min(420px,calc(100vw-420px))] -translate-x-1/2 -translate-y-1/2 [-webkit-app-region:no-drag]">
       <div className="flex h-6 items-center rounded-full bg-card pr-1 shadow-sm ring-1 ring-border transition-shadow focus-within:ring-foreground/25">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

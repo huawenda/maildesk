@@ -3,25 +3,19 @@ import type { MessageStructureObject } from "imapflow"
 import type {
   Account,
   AccountSyncSnapshot,
-  Address,
   Folder,
-  FolderRole,
   SyncEvent,
   SyncState,
   SyncStatus
 } from "@shared/types"
 import { ipcError } from "@shared/errors"
 import {
-  findFolderByPath,
-  deleteFolder,
   getFolder,
   listFolders,
-  setFolderEnabled,
   updateFolderCounts,
   resetBackfillUid,
   updateBackfillUid,
-  updateFolderCursor,
-  upsertFolder
+  updateFolderCursor
 } from "../db/folders"
 import {
   clearFolderMessages,
@@ -38,12 +32,9 @@ import {
   messageIdsInFolder,
   messagesNeedingBody,
   oldestUid,
-  messagesNeedingAttachmentFlags,
   saveIncoming,
-  setHasAttachments,
   setMessageBody,
   setReadById,
-  setRecipients,
   setSnippet
 } from "../db/messages"
 import type { IncomingMessage, LocalUidRow } from "../db/messages"
@@ -55,6 +46,12 @@ import {
 import { openPassword } from "../security/credentials"
 import { buildImapOptions } from "./connection"
 import { AttachmentDownloader } from "./attachment-download"
+import { refreshAttachmentFlags as runRefreshAttachmentFlags, refreshRecipientNames as runRefreshRecipientNames } from "./maintenance"
+import {
+  refreshFolders as runRefreshFolders,
+  refreshInboxStatus as runRefreshInboxStatus,
+  type FolderRefreshContext
+} from "./folder-refresh"
 import {
   attachmentsFromParts,
   bodyFromParts,
@@ -63,13 +60,9 @@ import {
   collectTextParts,
   decodeBinaryPart,
   embedCidImages,
-  headerField,
-  inspectStructure,
-  parseAddressHeader,
   toIncoming,
   toSnippet
 } from "./parse"
-import { get, run } from "../db"
 
 /** 首次同步只拉最近的若干封（PRD FR-05.1），其余靠翻页时再补。 */
 const FIRST_SYNC_LIMIT = 500
@@ -127,27 +120,6 @@ const DEEP_RECONCILE_EVERY = 5
 const RECONCILE_MAX_MESSAGES = 20_000
 /** 对账补头部时一次取的 UID 数。 */
 const RECONCILE_FETCH = 200
-/** 历史修正（收件人姓名等）按本地 UID 分批取，避免把服务器上整箱几万封都拉一遍。 */
-const REPAIR_FETCH = 200
-
-const roleOf = (specialUse?: string): FolderRole => {
-  switch (specialUse) {
-    case "\\Inbox":
-      return "inbox"
-    case "\\Sent":
-      return "sent"
-    case "\\Drafts":
-      return "drafts"
-    case "\\Trash":
-      return "trash"
-    case "\\Junk":
-      return "junk"
-    // \Archive / \All 不提升为系统「归档」：用户要求服务器上的「存档」留在自建目录树里，
-    // 由 navFolders 归到「其他文件夹」分组下，按服务器名字显示。
-    default:
-      return null
-  }
-}
 
 /**
  * 列表头 + BODYSTRUCTURE：BODYSTRUCTURE 用来定位正文块与附件 part。
@@ -810,118 +782,27 @@ export class SyncEngine {
     }
   }
 
-  /**
-   * 一次性修正历史邮件的「有附件」标记：旧判定把正文内嵌图（cid / inline 图片）算成附件。
-   * 只处理「标了有附件、但还没解析过附件」的邮件，按文件夹批量取 BODYSTRUCTURE 重算；
-   * 处理完写明 marker，之后不再跑（新邮件在同步时就用新判定）。
-   */
-  private async refreshAttachmentFlags(): Promise<void> {
-    const markerKey = `attachFlagsV6:${this.account.id}`
-    const marker = get<{ value: string }>("SELECT value FROM setting WHERE key = ?", markerKey)
-    if (marker) return
-    const candidates = messagesNeedingAttachmentFlags(this.account.id, 500)
-    if (candidates.length === 0) {
-      run("INSERT OR REPLACE INTO setting (key, value) VALUES ('attachFlagsV6', 'true')")
-      return
-    }
-    const byFolder = new Map<string, { id: string; uid: number }[]>()
-    for (const item of candidates) {
-      const list = byFolder.get(item.folderId) ?? []
-      list.push({ id: item.id, uid: item.uid })
-      byFolder.set(item.folderId, list)
-    }
-    let failed = 0
-    for (const [folderId, list] of byFolder) {
-      const folder = getFolder(folderId)
-      const client = this.client
-      if (!folder || !client) continue
-      if (folder.accountId !== this.account.id || !folder.enabled) continue
-      try {
-        const lock = await client.getMailboxLock(folder.path)
-        try {
-          const byUid = new Map(list.map((item) => [item.uid, item.id]))
-          const range = list.map((item) => item.uid).join(",")
-          for await (const msg of client.fetch(range, { bodyStructure: true }, { uid: true })) {
-            const id = byUid.get(Number(msg.uid))
-            if (!id) continue
-            const structure = inspectStructure((msg as { bodyStructure?: Parameters<typeof inspectStructure>[0] }).bodyStructure)
-            setHasAttachments(id, structure.hasAttachments)
-          }
-        } finally {
-          lock.release()
-        }
-      } catch (error) {
-        failed += 1
-        console.error("[sync] attachment flags failed", folder.path, String(error))
-      }
-    }
-    // 这一批就把当时的候选全部处理完了才落 marker；超过上限或有文件夹失败就留到下次启动重试
-    if (candidates.length < 500 && failed === 0) {
-      run("INSERT OR REPLACE INTO setting (key, value) VALUES (?, 'true')", markerKey)
-    }
+  /** 历史数据修补见 sync/maintenance.ts：附件标记与收件人姓名都只跑一次。 */
+  private refreshAttachmentFlags(): Promise<void> {
+    return runRefreshAttachmentFlags({
+      accountId: this.account.id,
+      accountEmail: this.account.email,
+      client: () => this.client,
+      stopped: () => this.stopped,
+      emitRecipients: (updated) =>
+        this.hooks.emit({ type: "recipients", accountId: this.account.id, updated })
+    })
   }
 
-  /**
-   * 一次性修正历史邮件的收件人/抄送姓名：旧数据直接取 ENVELOPE，QQ 会把 personal name
-   * 填成地址本地部分（zhang.wei / 1036902640）。这里逐文件夹重读 To/Cc 原始头覆盖。
-   *
-   * 只按本地已落库的 UID 分批取：新邮件在 toIncoming 里已经用原始头解析过，真正需要修正的
-   * 只有库里的旧行。之前用 `1:*` 会把服务器整箱几万封全拉一遍，新账户首次同步白白卡住。
-   */
-  private async refreshRecipientNames(): Promise<void> {
-    // marker 按账户记：全局 key 会让第二个账户永远得不到修正，第一个账户替所有人买单
-    const markerKey = `recipientNamesV1:${this.account.id}`
-    const marker = get<{ value: string }>("SELECT value FROM setting WHERE key = ?", markerKey)
-    if (marker) return
-    const client = this.client
-    if (!client) return
-    let updated = 0
-    let failed = 0
-    for (const folder of listFolders(this.account.id)) {
-      if (this.stopped) return
-      if (!folder.enabled) continue
-      // 新文件夹的 UID 体系还没建立，交给随后的同步
-      if (folder.uidValidity === null) continue
-      try {
-        const lock = await client.getMailboxLock(folder.path)
-        try {
-          const index = folderUidIndex(folder.id)
-          if (index.size === 0) continue
-          const uids = [...index.keys()].sort((a, b) => a - b)
-          const updates: { id: string; to: Address[]; cc: Address[] }[] = []
-          for (let offset = 0; offset < uids.length; offset += REPAIR_FETCH) {
-            const chunk = uids.slice(offset, offset + REPAIR_FETCH)
-            for await (const message of client.fetch(
-              chunk.join(","),
-              { uid: true, headers: ["to", "cc"] },
-              { uid: true }
-            )) {
-              if (typeof message.uid !== "number" || !message.headers) continue
-              const row = index.get(message.uid)
-              if (!row) continue
-              const to = parseAddressHeader(headerField(message.headers, "to"))
-              const cc = parseAddressHeader(headerField(message.headers, "cc"))
-              if (to.length === 0 && cc.length === 0) continue
-              updates.push({ id: row.id, to, cc })
-            }
-          }
-          for (const update of updates) setRecipients(update.id, update.to, update.cc)
-          updated += updates.length
-        } finally {
-          lock.release()
-        }
-      } catch (error) {
-        failed += 1
-        console.error("[sync] recipient names failed", folder.path, String(error))
-      }
-    }
-    // 有文件夹失败就不落 marker，下次启动再补，免得这一批漏掉的姓名永远停在旧值
-    if (failed === 0) {
-      run("INSERT OR REPLACE INTO setting (key, value) VALUES (?, 'true')", markerKey)
-    }
-    console.log("[sync] recipient names refreshed", this.account.email, updated)
-    // 界面可能在修正前就已经把列表读进内存了，补一个刷新信号
-    if (updated > 0) this.hooks.emit({ type: "recipients", accountId: this.account.id, updated })
+  private refreshRecipientNames(): Promise<void> {
+    return runRefreshRecipientNames({
+      accountId: this.account.id,
+      accountEmail: this.account.email,
+      client: () => this.client,
+      stopped: () => this.stopped,
+      emitRecipients: (updated) =>
+        this.hooks.emit({ type: "recipients", accountId: this.account.id, updated })
+    })
   }
 
   private startReconcileTimer(): void {
@@ -1057,78 +938,30 @@ export class SyncEngine {
     })
   }
 
-  /** 拉文件夹清单与计数。UIDVALIDITY / 游标保留本地值，等同步时再核对。 */
-  private async refreshFolders(): Promise<number> {
-    const client = this.client
-    if (!client) return 0
-    // UIDNEXT 一起要：对账先用它判断这箱有没有变化，避免每 3 分钟全量扫一遍 UID+FLAGS
-    const listed = await client.list({ statusQuery: { messages: true, unseen: true, uidNext: true } })
-    this.folderStatus = new Map()
-    for (const item of listed) {
-      const existing = findFolderByPath(this.account.id, item.path)
-      const role = roleOf(item.specialUse) ?? existing?.role ?? null
-      // \Noselect 容器没有自己的邮件：SELECT 拿不到 uidValidity/uidNext，
-      // 旧版本会把它当普通箱子同步，往游标里写 NaN。
-      const noSelect = [...(item.flags ?? [])].some((flag) => flag.toLowerCase() === "\\noselect")
-      const folder: Folder = {
-        id: existing?.id ?? crypto.randomUUID(),
-        accountId: this.account.id,
-        path: item.path,
-        name: item.name || item.path,
-        delimiter: item.delimiter || null,
-        role,
-        uidValidity: existing?.uidValidity ?? null,
-        uidNext: existing?.uidNext ?? null,
-        lastSyncedUid: existing?.lastSyncedUid ?? 0,
-        totalCount: item.status?.messages ?? existing?.totalCount ?? 0,
-        unreadCount: item.status?.unseen ?? existing?.unreadCount ?? 0,
-        sortOrder: existing?.sortOrder ?? 0,
-        backfillUid: existing?.backfillUid ?? null,
-        // 新发现的文件夹：系统箱子默认显示；自建目录默认隐藏，由用户「选择文件夹」勾选
-        enabled: noSelect ? false : (existing?.enabled ?? role !== null)
+  /** 文件夹刷新见 sync/folder-refresh.ts；这里只把引擎状态接进去。 */
+  private folderContext(): FolderRefreshContext {
+    return {
+      accountId: this.account.id,
+      accountEmail: this.account.email,
+      client: () => this.client,
+      inbox: () => this.inboxFolder(),
+      resetStatus: () => {
+        this.folderStatus = new Map()
+      },
+      setStatus: (folderId, status) => this.folderStatus.set(folderId, status),
+      setServerCount: (folderId, count) => this.serverCounts.set(folderId, count),
+      markRefreshed: () => {
+        this.lastFolderRefreshAt = Date.now()
       }
-      upsertFolder(folder)
-      // upsertFolder 不覆盖 enabled（那是用户选择），容器文件夹要在刷新时显式关掉旧值
-      if (noSelect && existing?.enabled) setFolderEnabled(folder.id, false)
-      this.folderStatus.set(
-        folder.id,
-        `${item.status?.messages ?? -1}:${item.status?.unseen ?? -1}:${item.status?.uidNext ?? -1}`
-      )
-      if (typeof item.status?.messages === "number") this.serverCounts.set(folder.id, item.status.messages)
     }
-    // 服务器上删掉的文件夹（网页版/手机端）要跟着删，否则侧栏会永远留着空壳
-    const seen = new Set(listed.map((item) => item.path))
-    let removed = 0
-    for (const folder of listFolders(this.account.id)) {
-      if (seen.has(folder.path)) continue
-      // 附件缓存按 messageId 建目录：删文件夹时先取 id，库删完再把目录清掉
-      dropMessageCaches(messageIdsInFolder(folder.id))
-      deleteFolder(folder.id)
-      removed += 1
-      console.log("[sync] folder removed", this.account.email, folder.path)
-    }
-    this.lastFolderRefreshAt = Date.now()
-    return removed
   }
 
-  /**
-   * 两次文件夹树刷新之间只问收件箱的 STATUS：新邮件改 uidNext、手机端读信改 unseen，
-   * 对账据此决定要不要扫收件箱；其余文件夹等下一次整树刷新或深度扫描。
-   */
-  private async refreshInboxStatus(): Promise<void> {
-    const client = this.client
-    const inbox = this.inboxFolder()
-    if (!client || !inbox) return
-    try {
-      const status = await client.status(inbox.path, { messages: true, unseen: true, uidNext: true })
-      if (!status) return
-      this.folderStatus.set(
-        inbox.id,
-        `${status.messages ?? -1}:${status.unseen ?? -1}:${status.uidNext ?? -1}`
-      )
-    } catch (error) {
-      console.error("[sync] inbox status failed", this.account.email, String(error))
-    }
+  private refreshFolders(): Promise<number> {
+    return runRefreshFolders(this.folderContext())
+  }
+
+  private refreshInboxStatus(): Promise<void> {
+    return runRefreshInboxStatus(this.folderContext())
   }
 
   private async syncAll(): Promise<void> {

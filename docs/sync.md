@@ -25,6 +25,8 @@
 | --- | --- |
 | `src/main/sync/engine.ts` | 同步引擎：连接、队列、增量、正文、回溯、对账、本地操作（附件下载已拆到下一个文件） |
 | `src/main/sync/attachment-download.ts` | 附件下载器：缓存优先、流式落盘、去重、取消、预取（`AttachmentDownloader`） |
+| `src/main/sync/maintenance.ts` | 一次性历史修补：附件标记（BODYSTRUCTURE 重算）、收件人姓名（重读 To/Cc 原始头） |
+| `src/main/sync/folder-refresh.ts` | 文件夹清单 / 收件箱 STATUS 刷新（含服务器删除文件夹的本地清理） |
 | `src/main/sync/manager.ts` | 引擎注册表、事件广播、按账户路由、下载管理器、状态聚合 |
 | `src/main/sync/parse.ts` | BODYSTRUCTURE 解析、正文/内嵌图/附件收集、MIME 解码与尺寸折算 |
 | `src/main/sync/connection.ts` | `buildImapOptions`：测试连接与真实同步共用的连接参数 |
@@ -447,3 +449,5 @@ FTS5 的触发器挂在 `message` 的 INSERT/DELETE/UPDATE 上；删文件夹必
 | 2026-11-27 | 附件缓存随删除清理：永久删除邮件 / 删除文件夹 / 删除账户 / UIDVALIDITY 清空重拉时 `dropMessageCaches(ids)` 删除 `<messageId>` 目录，不再只靠 1GB LRU 兜底 |
 | 2026-11-27 | 批量写入改事务：`saveIncoming` 的每批 upsert 与 `setMessageBody`（正文 + 附件元数据）都在 `transaction()` 里，避免半截状态并减少提交开销 |
 | 2026-11-27 | 附件下载从 `engine.ts` 拆到 `sync/attachment-download.ts`（`AttachmentDownloader`），行为不变；engine 只保留三个转发方法 |
+| 2026-11-27 | 历史修补（附件标记 / 收件人姓名）拆到 `sync/maintenance.ts`；顺手修正附件标记 marker 写错 key（无候选时写成了全局 key，导致每个账户每轮都重跑） |
+| 2026-11-27 | 文件夹清单与收件箱 STATUS 刷新拆到 `sync/folder-refresh.ts`，engine 只接状态回调；engine 2065 → 1730 行 |

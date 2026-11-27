@@ -373,7 +373,7 @@ const previewText = (msg: FetchMessageObject, part: NonNullable<StructureInfo["t
 }
 
 /** 没有 text/plain 时，用 HTML 去标签兜出纯文本（搜索与摘要用）。 */
-const htmlToText = (html: string): string =>
+export const htmlToText = (html: string): string =>
   html
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n\n")

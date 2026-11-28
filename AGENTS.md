@@ -47,7 +47,7 @@ src/preload/         contextBridge，唯一对外出口 window.mail
 src/renderer/src/     React UI（唯一的重构区域）
   components/        业务组件（TitleBar/Sidebar/MessageList/Reader）
   components/ui/     shadcn 生成物，除必要调整外不要手改
-                     现有 context-menu / dropdown-menu / input / select / dialog / popover；
+                     现有 context-menu / dropdown-menu / input / select / dialog / popover / toggle / toggle-group；
                      input 与 select 的 trigger 已改成项目口径（bg-muted、border-input、rounded-lg、13px、focus 只换边框色），
                      新增表单不要再写 fieldClass，直接用 <Input> / <Select>；账户、设置、文件夹选择三个弹窗都已切到 ui/dialog 封装；`DialogOverlay` **透明**（不加暗色、不做 blur），只保留一层透明命中区接「点弹层外关闭」，不要改回 `bg-black/40`
   hooks/             renderer 侧有状态逻辑（useSidebarPeek 抽屉 / useListWidth 列表宽度 / useSearch 搜索 / useSyncFeed 同步事件 / useDocumentTabs 页签 / useSettings 设置读写）
@@ -77,6 +77,7 @@ docs/                PRD、sync、rendering、data-model、testing、design-rule
 - **画布**：四边距 0，只保留上边框；左边框仅侧栏展开时画，右/下不画；侧栏展开时左上圆角。
 - **侧栏 = gap + 绝对定位面板**：peek 只动 transform（画布一帧不动），停靠动 gap；浮层描边用绝对定位线，不能用 border（会挤 1px）。
 - **交互色全应用一套**：`--row-hover` / `--row-selected`；已读用实色 `ink-read` / `ink-faint`，不用透明度。
+- **hover 与选中不能连成一块**：圆角块状导航项之间必须留 `gap`（≥1px），0 间隙会让选中块和相邻 hover 块拼成一个大色块；表格行靠行线分隔，不在此列。
 - **线条**：表格与行用 `--table-line` / `--row-line`，浮层描边用 `--border`，弹窗内部用 `--table-line`。
 - **阅读器正文是 iframe 原版式**：不 zoom、不压宽、不套白卡；滚动条交给阅读区；cid 内嵌图同步时落库。
 - **附件 chip**：双击打开、右键菜单，单击不动作。
@@ -93,6 +94,7 @@ docs/                PRD、sync、rendering、data-model、testing、design-rule
 - 改同步层（`src/main/sync/**`、`src/main/db/messages.ts` 的同步相关函数、`SyncEvent` 契约）后，除 typecheck 外必须更新 `docs/sync.md`：改对应行为小节，并在「变更记录」追加一条。
 - 改数据库 schema、迁移、删除级联或搜索 SQL（`src/main/db/**`）后，必须更新 `docs/data-model.md`：改对应小节，并在「迁移记录」追加一条。
 - 后台 `npm run dev` 属于用户资产：不要随手 kill。截图脚本与 dev 冲突（单实例锁），需要时先停 dev，截完立即重启并告知用户。
+- **Shell**：默认只用 `pwsh`（PowerShell 7）。不要用 `cmd /c` 包命令（`%VAR%` 改用 `$env:VAR`），也不要调用 Windows PowerShell 5.1（`powershell.exe`）；只有确实需要 `.bat` / `.cmd` 批处理语义时才例外，并在命令里说明。其他 shell / 运行时（bash、node、npx 等）不限制。需要 shell 打印中文时，先写 `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)` 和 `$OutputEncoding = [System.Text.UTF8Encoding]::new($false)`（`chcp 65001` 改不动 .NET 缓存的 936，仍会输出 GBK 字节变成乱码）；更稳的做法是用 read/grep 工具读文件，不靠 shell 打印中文。
 - **提交与推送必须由用户明确指令触发**：不要自作主张 `git commit` / `git push`，改完代码停在“工作区脏”的状态等用户说提交。用户说“提交”只做 commit，说“推送”才 push。
 - **出包（`npm run package`）同样是明确指令才做**：改了主进程、图标、`resources/` 或配置都不算授权，不要顺手重打安装包；改完就停在源码/资产状态，等用户说“出包”再打。
 - 仓库分支 `main`。提交信息用中文 Conventional Commits（`feat:` / `fix:` / `docs:` / `chore:` / `refactor:`），一次提交只做一件事，body 写清“为什么”。

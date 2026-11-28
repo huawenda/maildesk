@@ -25,10 +25,40 @@ function DialogContent({
   showCloseButton = false,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & { showCloseButton?: boolean }) {
+  const [element, setElement] = React.useState<HTMLDivElement | null>(null)
+
+  // 居中弹窗按整数像素定位：top/left 直接取整，不用 translate(-50%)。
+  // 半像素位置会让 1px 标题线被抗锯齿摊成两行（账户 vs 设置），窗口缩放或内容改高时重算。
+  React.useLayoutEffect(() => {
+    if (!element) return
+    let frame = 0
+    const place = () => {
+      const left = Math.round((window.innerWidth - element.offsetWidth) / 2)
+      const top = Math.round((window.innerHeight - element.offsetHeight) / 2)
+      element.style.left = `${left}px`
+      element.style.top = `${top}px`
+      element.style.setProperty("translate", "none")
+    }
+    const schedule = () => {
+      if (frame) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(place)
+    }
+    place()
+    const observer = new ResizeObserver(schedule)
+    observer.observe(element)
+    window.addEventListener("resize", schedule)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("resize", schedule)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [element])
+
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
+        ref={setElement}
         data-slot="dialog-content"
         className={cn(
           "fixed left-1/2 top-1/2 z-50 flex max-h-[86vh] w-[min(560px,calc(100vw-48px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden",

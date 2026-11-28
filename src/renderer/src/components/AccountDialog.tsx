@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { ArrowLeft, Check, CircleNotch, PencilSimple, Plus, Trash } from "@phosphor-icons/react"
+import { Check, CircleNotch } from "@phosphor-icons/react"
 import type { Account, Security } from "@shared/types"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
@@ -14,9 +14,6 @@ const SECURITY_OPTIONS: { value: Security; label: string }[] = [
   { value: "none", label: "不加密" }
 ]
 
-const securityLabel = (value: Security): string =>
-  SECURITY_OPTIONS.find((option) => option.value === value)?.label ?? value
-
 type TestState =
   | { kind: "idle" }
   | { kind: "testing" }
@@ -27,6 +24,8 @@ interface AccountDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   accounts: Account[]
+  /** null 表示新增；否则编辑该账户 */
+  editingId: string | null
   onChanged: (accounts: Account[]) => void
 }
 
@@ -34,11 +33,13 @@ function Label({ children }: { children: React.ReactNode }) {
   return <div className="mb-1.5 text-[11.5px] text-muted-foreground">{children}</div>
 }
 
-export function AccountDialog({ open, onOpenChange, accounts, onChanged }: AccountDialogProps) {
+/**
+ * 账户表单：只负责新增 / 编辑一档，不再有账户列表。
+ * 列表、切换、编辑、删除都在标题栏的 ☰ 浮层里（2026-11-28 用户要求），
+ * 这样弹窗只有一种形态，不会因为“列表 ↔ 表单”切换而改高度。
+ */
+export function AccountDialog({ open, onOpenChange, accounts, editingId, onChanged }: AccountDialogProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
-  const [view, setView] = useState<"list" | "form">("list")
-  // 正在编辑的账户 id：null 表示新增
-  const [editingId, setEditingId] = useState<string | null>(null)
   const [email, setEmail] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [password, setPassword] = useState("")
@@ -52,11 +53,17 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
 
   useEffect(() => {
     if (!open) return
-    setView(accounts.length === 0 ? "form" : "list")
-    setEditingId(null)
-    setError(null)
+    const account = editingId ? accounts.find((item) => item.id === editingId) ?? null : null
+    setEmail(account?.email ?? "")
+    setDisplayName(account?.displayName ?? "")
+    setPassword("")
+    setHost(account?.imapHost ?? "")
+    setPort(String(account?.imapPort ?? 993))
+    setSecurity(account?.security ?? "tls")
+    setUsername(account?.username ?? "")
     setTest({ kind: "idle" })
-  }, [open, accounts.length])
+    setError(null)
+  }, [open, editingId, accounts])
 
   const buildInput = () => ({
     email: email.trim(),
@@ -64,35 +71,9 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
     imapHost: host.trim(),
     imapPort: Number(port) || 993,
     security,
-    username: (username.trim() || email.trim()),
+    username: username.trim() || email.trim(),
     password
   })
-
-  const startEdit = (account: Account) => {
-    setEditingId(account.id)
-    setEmail(account.email)
-    setDisplayName(account.displayName ?? "")
-    setPassword("")
-    setHost(account.imapHost)
-    setPort(String(account.imapPort))
-    setSecurity(account.security)
-    setUsername(account.username)
-    setTest({ kind: "idle" })
-    setError(null)
-    setView("form")
-  }
-
-  const resetForm = () => {
-    setEditingId(null)
-    setEmail("")
-    setDisplayName("")
-    setPassword("")
-    setHost("")
-    setPort("993")
-    setSecurity("tls")
-    setUsername("")
-    setTest({ kind: "idle" })
-  }
 
   const runTest = async () => {
     setTest({ kind: "testing" })
@@ -119,18 +100,11 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
         const patch = password ? input : { ...input, password: undefined }
         const account = await mail.accounts.update(editingId, patch)
         onChanged(accounts.map((item) => (item.id === account.id ? account : item)))
-        resetForm()
-        setView("list")
       } else {
         const account = await mail.accounts.create(buildInput())
         onChanged([...accounts, account])
-        setEmail("")
-        setDisplayName("")
-        setPassword("")
-        setUsername("")
-        setTest({ kind: "idle" })
-        setView("list")
       }
+      onOpenChange(false)
     } catch (cause) {
       setError(ipcErrorMessage(cause))
     } finally {
@@ -138,211 +112,141 @@ export function AccountDialog({ open, onOpenChange, accounts, onChanged }: Accou
     }
   }
 
-  const remove = async (account: Account) => {
-    try {
-      await mail.accounts.remove(account.id)
-      const next = accounts.filter((item) => item.id !== account.id)
-      onChanged(next)
-      if (next.length === 0) setView("form")
-    } catch (cause) {
-      setError(ipcErrorMessage(cause))
-    }
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent aria-describedby={undefined}>
-          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-table-line px-4">
-            {view === "form" && accounts.length > 0 ? (
-              <button
-                onClick={() => {
-                  resetForm()
-                  setView("list")
-                }}
-                className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-                title="返回账户列表"
-              >
-                <ArrowLeft className="size-4" />
-              </button>
-            ) : null}
-            <DialogTitle>{view === "list" ? "账户" : editingId ? "编辑账户" : "添加账户"}</DialogTitle>
-            <kbd className="ml-auto rounded border border-border px-1 py-px text-[10.5px] text-muted-foreground">Esc</kbd>
-          </div>
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-table-line px-4">
+          <DialogTitle>{editingId ? "编辑账户" : "添加账户"}</DialogTitle>
+          <kbd className="ml-auto rounded border border-border px-1 py-px text-[10.5px] text-muted-foreground">Esc</kbd>
+        </div>
 
-          <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto p-4">
-            {view === "list" ? (
-              <div className="flex flex-col gap-1.5">
-                {accounts.map((account) => (
-                  <div
-                    key={account.id}
-                    className="flex items-center gap-3 rounded-lg border border-border bg-muted/60 px-3 py-2.5"
-                  >
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/15 text-[12px] font-semibold text-primary">
-                      {(account.displayName || account.email).slice(0, 1).toUpperCase()}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px]">{account.displayName || account.email}</div>
-                      <div className="truncate text-[11.5px] text-muted-foreground">
-                        {account.email} · {account.imapHost}:{account.imapPort} · {securityLabel(account.security)}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => startEdit(account)}
-                      title="编辑账户"
-                      className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground"
-                    >
-                      <PencilSimple className="size-3.5" />
-                    </button>
-                    <button
-                      onClick={() => remove(account)}
-                      title="移除此账户"
-                      className="flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
-                    >
-                      <Trash className="size-3.5" />
-                    </button>
-                  </div>
-                ))}
-                <button
-                  onClick={() => setView("form")}
-                  className="mt-1 flex h-10 items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-[12.5px] text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
-                >
-                  <Plus className="size-3.5" />
-                  添加账户
-                </button>
+        <div ref={bodyRef} className="scrollbar-overlay min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>邮箱地址</Label>
+                <Input
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@example.com"
+                  autoComplete="off"
+                />
               </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>邮箱地址</Label>
-                    <Input
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      placeholder="you@example.com"
-                      autoComplete="off"
-                    />
-                  </div>
-                  <div>
-                    <Label>显示名（可选）</Label>
-                    <Input
-                      value={displayName}
-                      onChange={(event) => setDisplayName(event.target.value)}
-                      placeholder="Personal"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <Label>密码 / 授权码</Label>
-                  <Input
-                    type="password"
-                    value={password}
-                    onChange={(event) => {
-                      setPassword(event.target.value)
-                      setTest({ kind: "idle" })
-                    }}
-                    placeholder={editingId ? "留空则不修改密码" : "使用 DPAPI 加密后单独存储"}
-                    autoComplete="new-password"
-                  />
-                </div>
-
-                <div className="grid grid-cols-[1fr_105px] gap-3">
-                  <div>
-                    <Label>IMAP 主机</Label>
-                    <Input value={host} onChange={(event) => setHost(event.target.value)} />
-                  </div>
-                  <div>
-                    <Label>端口</Label>
-                    <Input
-                      value={port}
-                      onChange={(event) => setPort(event.target.value.replace(/\D/g, "").slice(0, 5))}
-                      inputMode="numeric"
-                      className="tabular-nums"
-                    />
-                  </div>
-                </div>
-
-                <div className="-mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
-                  只用 IMAP 收信，不需要填发件服务器
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>加密方式</Label>
-                    <Select value={security} onValueChange={(value) => setSecurity(value as Security)}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SECURITY_OPTIONS.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>用户名（默认同邮箱）</Label>
-                    <Input
-                      value={username}
-                      onChange={(event) => setUsername(event.target.value)}
-                      placeholder={email || "用户名"}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={runTest}
-                    disabled={test.kind === "testing" || !host || !port}
-                    className="flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] text-foreground/90 transition-colors hover:bg-accent disabled:opacity-50"
-                  >
-                    {test.kind === "testing" ? <CircleNotch className="size-3.5 animate-spin" /> : null}
-                    测试连接
-                  </button>
-                  {test.kind === "ok" ? (
-                    <span className="flex items-center gap-1 text-[12px] text-emerald-400">
-                      <Check className="size-3.5" /> {test.message}
-                    </span>
-                  ) : null}
-                </div>
-
-                {test.kind === "fail" ? (
-                  <div className="rounded-lg bg-destructive/10 px-3 py-2 text-[12px] leading-relaxed text-destructive">
-                    {test.message}
-                  </div>
-                ) : null}
-
-                {error ? <div className="rounded-lg bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{error}</div> : null}
+              <div>
+                <Label>显示名（可选）</Label>
+                <Input
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  placeholder="Personal"
+                />
               </div>
-            )}
-          </div>
-          <OverlayScrollbar target={bodyRef} />
-
-          {view === "form" ? (
-            <div className="flex shrink-0 items-center justify-end gap-2 border-t border-table-line px-4 py-3">
-              {accounts.length > 0 ? (
-                <button
-                  onClick={() => {
-                    resetForm()
-                    setView("list")
-                  }}
-                  className="h-8 rounded-lg px-3 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  取消
-                </button>
-              ) : null}
-              <button
-                onClick={save}
-                disabled={saving || !email || !host || (!editingId && !password)}
-                className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-              >
-                {saving ? <CircleNotch className="size-3.5 animate-spin" /> : null}
-                {editingId ? "保存修改" : "保存账户"}
-              </button>
             </div>
-          ) : null}
+
+            <div>
+              <Label>密码 / 授权码</Label>
+              <Input
+                type="password"
+                value={password}
+                onChange={(event) => {
+                  setPassword(event.target.value)
+                  setTest({ kind: "idle" })
+                }}
+                placeholder={editingId ? "留空则不修改密码" : "使用 DPAPI 加密后单独存储"}
+                autoComplete="new-password"
+              />
+            </div>
+
+            <div className="grid grid-cols-[1fr_105px] gap-3">
+              <div>
+                <Label>IMAP 主机</Label>
+                <Input value={host} onChange={(event) => setHost(event.target.value)} />
+              </div>
+              <div>
+                <Label>端口</Label>
+                <Input
+                  value={port}
+                  onChange={(event) => setPort(event.target.value.replace(/\D/g, "").slice(0, 5))}
+                  inputMode="numeric"
+                  className="tabular-nums"
+                />
+              </div>
+            </div>
+
+            <div className="-mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+              只用 IMAP 收信，不需要填发件服务器
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>加密方式</Label>
+                <Select value={security} onValueChange={(value) => setSecurity(value as Security)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SECURITY_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>用户名（默认同邮箱）</Label>
+                <Input
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder={email || "用户名"}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={runTest}
+                disabled={test.kind === "testing" || !host || !port}
+                className="flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12.5px] text-foreground/90 transition-colors hover:bg-accent disabled:opacity-50"
+              >
+                {test.kind === "testing" ? <CircleNotch className="size-3.5 animate-spin" /> : null}
+                测试连接
+              </button>
+              {test.kind === "ok" ? (
+                <span className="flex items-center gap-1 text-[12px] text-emerald-400">
+                  <Check className="size-3.5" /> {test.message}
+                </span>
+              ) : null}
+            </div>
+
+            {test.kind === "fail" ? (
+              <div className="rounded-lg bg-destructive/10 px-3 py-2 text-[12px] leading-relaxed text-destructive">
+                {test.message}
+              </div>
+            ) : null}
+
+            {error ? (
+              <div className="rounded-lg bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{error}</div>
+            ) : null}
+          </div>
+        </div>
+        <OverlayScrollbar target={bodyRef} />
+
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-table-line px-4 py-3">
+          <button
+            onClick={() => onOpenChange(false)}
+            className="h-8 rounded-lg px-3 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            取消
+          </button>
+          <button
+            onClick={save}
+            disabled={saving || !email || !host || (!editingId && !password)}
+            className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            {saving ? <CircleNotch className="size-3.5 animate-spin" /> : null}
+            {editingId ? "保存修改" : "保存账户"}
+          </button>
+        </div>
       </DialogContent>
     </Dialog>
   )

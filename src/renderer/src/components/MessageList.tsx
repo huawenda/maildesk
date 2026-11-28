@@ -1237,7 +1237,7 @@ function EmptyList({
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
         <Tray className="size-8 opacity-40" />
         <span className="text-[13px]">还没有配置账户</span>
-        <span className="text-[12px] opacity-70">点标题栏左上角的 ☰ 菜单 →「管理账户…」添加你的 IMAP 邮箱</span>
+        <span className="text-[12px] opacity-70">点标题栏左上角的 ☰ 菜单 →「添加账户…」添加你的 IMAP 邮箱</span>
       </div>
     )
   }

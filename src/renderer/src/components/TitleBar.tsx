@@ -69,7 +69,9 @@ interface TitleBarProps {
   accounts: Account[]
   activeAccountId: string | null
   onSelectAccount: (id: string) => void
-  onManageAccounts: () => void
+  onAddAccount: () => void
+  onEditAccount: (id: string) => void
+  onDeleteAccount: (id: string) => void
   collapsed: boolean
   onToggleCollapsed: () => void
   /** 鼠标移入/移出折叠按钮：收起状态下据此临时弹出侧栏抽屉（传 true/false） */
@@ -87,7 +89,9 @@ export function TitleBar({
   accounts,
   activeAccountId,
   onSelectAccount,
-  onManageAccounts,
+  onAddAccount,
+  onEditAccount,
+  onDeleteAccount,
   collapsed,
   onToggleCollapsed,
   onHoverCollapsed,
@@ -111,7 +115,9 @@ export function TitleBar({
           accounts={accounts}
           activeAccountId={activeAccountId}
           onSelect={onSelectAccount}
-          onManage={onManageAccounts}
+          onAdd={onAddAccount}
+          onEdit={onEditAccount}
+          onDelete={onDeleteAccount}
           triggerClassName={ICON_BUTTON}
         />
 

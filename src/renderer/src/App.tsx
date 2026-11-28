@@ -59,6 +59,7 @@ export default function App() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [activeAccountId, setActiveAccountId] = useState<string | null>(null)
   const [accountsOpen, setAccountsOpen] = useState(false)
+  const [accountEditingId, setAccountEditingId] = useState<string | null>(null)
   const [folderPickerOpen, setFolderPickerOpen] = useState(false)
   const [liveFolders, setLiveFolders] = useState<Folder[]>([])
   const [folderTick, setFolderTick] = useState(0)
@@ -376,6 +377,40 @@ export default function App() {
   useEffect(() => {
     if (saveError) showNotice("设置未能保存，请重试")
   }, [saveError, showNotice])
+
+  const openAddAccount = useCallback(() => {
+    setAccountEditingId(null)
+    setAccountsOpen(true)
+  }, [])
+
+  const openEditAccount = useCallback((id: string) => {
+    setAccountEditingId(id)
+    setAccountsOpen(true)
+  }, [])
+
+  const removeAccount = useCallback(
+    async (id: string) => {
+      const account = accounts.find((item) => item.id === id)
+      if (!account) return
+      const ok = window.confirm(`删除账户「${account.email}」？本地邮件与附件缓存会一并删除。`)
+      if (!ok) return
+      try {
+        await mail.accounts.remove(id)
+        const next = accounts.filter((item) => item.id !== id)
+        setAccounts(next)
+        if (activeAccountId === id) {
+          setActiveAccountId(next[0]?.id ?? null)
+          setFolderId("inbox")
+          setSelectedId(null)
+          setSelectedIds([])
+        }
+        showNotice("账户已删除")
+      } catch (cause) {
+        showNotice(describeIpcError(cause))
+      }
+    },
+    [accounts, activeAccountId, showNotice]
+  )
 
   // 「移动到」菜单：复用侧栏命名（收件箱/草稿箱/已发送…），排除 Noselect 容器与当前文件夹
   // 移动到…菜单的候选：只列可选文件夹（容器 / 草稿箱 / 已发送等照旧排除 Noselect 与当前文件夹）；
@@ -767,7 +802,9 @@ export default function App() {
         accounts={accounts}
         activeAccountId={activeAccountId}
         onSelectAccount={switchAccount}
-        onManageAccounts={() => setAccountsOpen(true)}
+        onAddAccount={openAddAccount}
+        onEditAccount={openEditAccount}
+        onDeleteAccount={(id) => void removeAccount(id)}
         collapsed={collapsed}
         onToggleCollapsed={toggleSidebar}
         onHoverCollapsed={(hovering) => (hovering ? peek.open() : peek.closeSoon())}
@@ -969,9 +1006,9 @@ export default function App() {
         accounts={accounts}
         activeAccountId={activeAccountId}
         version={version}
-        onManageAccounts={() => {
+        onAddAccount={() => {
           setSettingsOpen(false)
-          setAccountsOpen(true)
+          openAddAccount()
         }}
         onOpenSyncStatus={() => {
           setSettingsOpen(false)
@@ -991,12 +1028,12 @@ export default function App() {
         open={accountsOpen}
         onOpenChange={setAccountsOpen}
         accounts={accounts}
+        editingId={accountEditingId}
         onChanged={(next) => {
           setAccounts(next)
-          setActiveAccountId(next[0]?.id ?? null)
-          setFolderId("inbox")
-          setSelectedId(null)
-          setFolderTick((tick) => tick + 1)
+          setActiveAccountId((current) =>
+            current && next.some((item) => item.id === current) ? current : next[0]?.id ?? null
+          )
         }}
       />
 

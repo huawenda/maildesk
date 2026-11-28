@@ -1,4 +1,7 @@
-export type Density = "compact" | "standard" | "comfortable"
+export type Density = "compact" | "standard"
+
+/** 老版本持久化过 "comfortable"（宽松已删除），读到就归到标准视图 */
+export const normalizeDensity = (value: unknown): Density => (value === "compact" ? "compact" : "standard")
 
 /** 渲染层的本地偏好：localStorage 读写与列表宽度的取值范围。 */
 

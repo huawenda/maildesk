@@ -4,7 +4,7 @@
 > 定时器、错误恢复或数据写入的提交，都必须在同一提交里更新对应小节，并在文末「变更记录」追加一条。
 > 只改实现不改文档，视为未完成。
 >
-> 最后同步：2026-11-25（对应 `main@52c85ff`）
+> 最后同步：2026-11-28
 
 内容分工：产品规格看 `docs/PRD.md`；项目通用规则看 `AGENTS.md`；本文只讲同步链路怎么跑。
 
@@ -57,7 +57,7 @@ Manager (单例)
 ### 串行 vs 并行（最容易读错的地方）
 
 - **队列内严格串行**：`schedule()` 把任务串成 Promise 链。bootstrap、手动同步、IDLE 触发的增量、
-  60s 轮询、3min 对账、已读推送、移动/删除、点开补正文、附件下载，全部排同一条链。
+  60s 轮询、3min 对账、已读推送、移动/删除、点开补正文，全部排同一条链；**附件下载走独立连接，不进 `schedule()`**（见 §7.1）。
 - **后台维护链不在队列里**：`startBackfill()` 起的那条链（历史修正 → 正文补齐 → 历史回溯）
   故意不排队，靠 `getMailboxLock` 与队列里的任务互斥。用户点同步能插进历史批次之间。
 - **账户之间真并行**：每个引擎独立连接；多账户同时 bootstrap 互不阻塞。
@@ -78,6 +78,19 @@ Manager (单例)
 
 `accounts:update` 只有连接参数（email/host/port/security/username/password）变化才
 `stopAccountSync` + `startAccountSync`；只改显示名不重连。
+
+加密方式共五种（`src/main/sync/connection.ts` 的 `buildImapOptions`，测试连接与同步共用）：
+
+| `security` | 传输 | `doSTARTTLS` | 证书校验 |
+| --- | --- | --- | --- |
+| `tls` | 993 直连 TLS | — | 校验 |
+| `starttls` | 143 明文握手后升级 | `true`（服务器不提供就失败） | 校验 |
+| `tls-insecure` | 993 直连 TLS | — | 跳过 |
+| `starttls-insecure` | 143 明文握手后升级 | `true`（服务器不提供就失败） | 跳过 |
+| `none` | 按端口直连 | 不传，imapflow 机会式升级 | 跳过 |
+
+`none` 是唯一允许退回明文的模式：服务器广告 STARTTLS 就静默升级（测试连接会提示
+「服务器自动升级为 TLS」），不广告就明文登录；需要防降级或校验证书时改用显式项。
 
 ### 4.3 手动同步
 
@@ -108,7 +121,7 @@ Manager (单例)
 
 失败处理：外层 try/catch → `recover("bootstrap", error)`：
 - 连接已建立 → 状态置 `error`，但保留连接并启动轮询/对账，下一轮自愈；
-- 连接没建立 → `scheduleReconnect()` 指数退避（1s 起，最多 60s）。
+- 连接没建立 → `scheduleReconnect()` 指数退避（2s 起，4s、8s…最多 60s；`failures` 先自增再算 `1000 * 2 ** failures`）。
 
 ## 6. 常规增量（`syncFolder`）
 
@@ -117,7 +130,7 @@ Manager (单例)
 1. `getMailboxLock(path)` → SELECT。
 2. 读 `mailbox.uidValidity` / `uidNext`（`Number()` 转换，bigint 不能直接绑 SQLite）。
    - 任一为 `NaN`（`\Noselect` 容器或异常 SELECT）→ 直接跳过，绝不把无效值写进游标。
-3. **UIDVALIDITY 变化**：`clearFolderMessages` + `resetBackfillUid` + `lastSyncedUid = 0`，整箱重拉。
+3. **UIDVALIDITY 变化**：`clearFolderMessages` + `resetBackfillUid` + `lastSyncedUid = 0`，先按首屏窗口重拉最新一批，剩余历史由回溯循环补满整箱（不是一次 `1:*` 全拉）。
 4. 计算起点：
    - 增量：`from = lastSyncedUid + 1`；
    - 首次：`from = max(1, highest - limit + 1)`（`highest = uidNext - 1`）。
@@ -171,7 +184,7 @@ Manager (单例)
     服务端拒绝并发会话时 connect 失败 → 只记日志并退回主连接，不影响同步。
     `MAILDESK_BODY_CONCURRENCY=1` 可强制单连接。
   - 每完成一块才推 `bodies { done, total }`（只按真正落库的封数前进），整轮结束再发一次
-    `messages { added: 0, bodiesDone: true }` 让摘要刷新。
+    `messages { added: 0, bodiesDone: true }` 让摘要刷新（**每个 `BODY_BATCH` 批次结束后都会发一次**，不是整轮结束才发）。
 - 兜底 `fetchBody(messageId)`：点开缺正文的邮件时走同一条 BODYSTRUCTURE + part 路径
   （旧实现只取整封前 2MB 的 MIME 源，内嵌图拿不到）。
 - 单批 `FETCH` 的估算字节上限 `BODY_FETCH_BUDGET=32MB`（图片编码尺寸 + 每块正文 64KB），
@@ -199,7 +212,7 @@ Manager (单例)
   连不上退回主连接），不会被正文补齐/历史回溯堵住；`attachmentJobs` 按 attachmentId 去重，
   预取与手动保存共用同一次下载，进度监听器按调用方各自挂。
 - **预取**：`messagesGet`（打开邮件）之后调 `prefetchMessageAttachments`，逐个下载该邮件的附件
-  （单封 >200MB 跳过）。预取静默：不推进度、不进下载管理器。
+  （**单个附件** >200MB 跳过，不是按整封邮件体积判断）。预取静默：不推进度、不进下载管理器。
 - 保存/打开/预览：一律先查缓存。命中时保存是 `copyFile`、打开是 `shell.openPath(缓存文件)`、
   预览是 `readFile` → data URL，都不再联网。
 
@@ -267,7 +280,7 @@ Manager (单例)
    - `\Flagged` 这类不进 STATUS 的变化由深度扫描兜底。
 4. 对每个目标文件夹：SELECT → `FETCH 1:* (UID FLAGS)` → `serverIndex`。
    - 服务端封数 > `RECONCILE_MAX_MESSAGES (20000)` 的箱子跳过，只靠增量。
-   - UIDVALIDITY 变化跳过，交给 `syncFolder` 整箱重拉。
+   - UIDVALIDITY 变化跳过，交给 `syncFolder` 清空后重拉最新窗口（其余靠回溯补齐）。
 5. 本地与服务端做差集：
    - 只在服务端（arrival）→ 分块 200 取头部；若 `Message-ID` 命中「本地消失行」，
      直接 `moveMessageRow` 认领（保留正文/附件/已读态），否则插入新行并取正文；
@@ -289,7 +302,7 @@ Manager (单例)
 - **3min 对账**：见第 10 节；走队列。
 - **重连**：`close`/`error` → `client = null` → `scheduleReconnect`；
   失败次数映射 1s、2s、4s…最多 60s；连续 3 次失败状态变 `error: 连接中断，正在重试`。
-- 所有定时器都在 `idling` 之后才注册；`stop()` 会清空定时器与连接。
+- bootstrap 成功进入 `idling` 后注册定时器；`syncNow` 失败收尾与 `recover()` 在 `error` 状态下也会补注册轮询/对账。`stop()` 会清空定时器与连接。
 
 ## 12. 本地操作（服务器先行）
 
@@ -367,11 +380,11 @@ Manager (单例)
 
 | 位置 | 含义 |
 | --- | --- |
-| `folder.uid_validity` | 上次同步看到的 UID 体系；变化即整箱重拉 |
+| `folder.uid_validity` | 上次同步看到的 UID 体系；变化即清空重拉（先窗口、后回溯） |
 | `folder.uid_next` | 上次同步看到的 uidNext |
 | `folder.last_synced_uid` | 增量起点（下一封从 +1 开始） |
 | `folder.backfill_uid` | 历史回溯游标（`null` 未开始 / `< 1` 到底） |
-| `folder.total_count` | **本地**行数，不是服务端封数 |
+| `folder.total_count` | 通常是**本地**行数；整树刷新（`refreshFolders`）时会临时写入服务端 STATUS 封数，下一次计数更新恢复本地行数 |
 | `message` UNIQUE(folder_id, uid) | 重复同步只更新 flags/摘要，不覆盖正文 |
 | `message.body_text/body_html` | 同步时预下载；`idsNeedingBody` 判断是否缺 |
 | `attachment.part` | BODYSTRUCTURE part 号，下载时免一次结构查询 |
@@ -399,7 +412,7 @@ FTS5 的触发器挂在 `message` 的 INSERT/DELETE/UPDATE 上；删文件夹必
 | `MAILDESK_SELFTEST=1` | 主进程跑数据层自检并退出 |
 | `MAILDESK_TEST_EMAIL/HOST/PORT/PASSWORD` | 自检用的临时账户 |
 | `MAILDESK_SEED_EMAIL` / `MAILDESK_SYNC_EMAIL` | 预置/指定同步自检账户 |
-| `MAILDESK_IMAP_OP='delete\|主题'` / `move\|主题\|目标` / `folders` / `peek\|箱` / `moveall\|源\|目标` / `append\|邮箱` / `raw\|UID` / `unseen\|` | 服务器侧诊断 |
+| `MAILDESK_IMAP_OP='delete\|主题'` / `move\|主题\|目标` / `folders` / `peek\|箱` / `moveall\|源\|目标` / `append\|邮箱` / `appendfile\|文件` / `raw\|UID` / `unseen\|` / `probe` / `flag\|主题` / `deleteuid\|主题\|箱` | 服务器侧诊断 |
 | `MAILDESK_UIDCHECK_EMAIL=<邮箱>` | 比对服务端 UID 与本地库 |
 | `MAILDESK_FETCH_BODY=<messageId>` | 触发一次正文懒加载并打印附件元数据 |
 
@@ -462,3 +475,5 @@ FTS5 的触发器挂在 `message` 的 INSERT/DELETE/UPDATE 上；删文件夹必
 | 2026-11-27 | 对账扫描拆到 `sync/reconcile.ts`，engine 只保留「何时对账 / 选哪些文件夹 / 快照更新」；engine 1429 → 1273 行 |
 | 2026-11-27 | 同步层日志从 `console.*` 改为 electron-log（`logger.info/warn/error`），事件与错误开始落 `main.log`；`parse.ts` 保持 console（纯模块，单测不引 electron） |
 | 2026-11-27 | 正文分块逻辑抽到 `sync/body-chunks.ts` 并补单测；新增搜索单测（LIKE 转义 `%` `_`、中文子串、cc 命中、时间倒序），测试总数 24 → 33 |
+| 2026-11-28 | 新增加密方式 `starttls-insecure`（强制 STARTTLS 升级 + 跳过证书校验，给公司自签名证书用）；§4.2 补五种 security 的传输 / doSTARTTLS / 证书校验对照表 |
+| 2026-11-28 | 按实现审计修正文档：退避从 2s 起、回溯每批 500、UIDVALIDITY 先重拉窗口、bodiesDone 每批发、附件预取按单附件 200MB 判断、定时器注册时机、`folder.total_count` 与服务端 STATUS 的关系、`MAILDESK_IMAP_OP` 补全 |

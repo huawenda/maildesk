@@ -11,6 +11,7 @@ const SECURITY_OPTIONS: { value: Security; label: string }[] = [
   { value: "tls", label: "TLS（993）" },
   { value: "starttls", label: "STARTTLS（143）" },
   { value: "tls-insecure", label: "TLS · 忽略证书（993）" },
+  { value: "starttls-insecure", label: "STARTTLS · 忽略证书（143）" },
   { value: "none", label: "不加密" }
 ]
 
@@ -127,7 +128,17 @@ export function AccountDialog({ open, onOpenChange, accounts, editingId, onChang
                 <Label>邮箱地址</Label>
                 <Input
                   value={email}
-                  onChange={(event) => setEmail(event.target.value)}
+                  onChange={(event) => {
+                    const next = event.target.value
+                    // 编辑时用户名若还是旧邮箱（或空，等于默认用邮箱），跟着一起改；
+                    // 用户手填过 DOMAIN\user 这类账号名则原样保留
+                    if (editingId) {
+                      setUsername((current) =>
+                        current.trim() === "" || current.trim() === email.trim() ? next : current
+                      )
+                    }
+                    setEmail(next)
+                  }}
                   placeholder="you@example.com"
                   autoComplete="off"
                 />

@@ -17,8 +17,7 @@ import { TitleBarSearch, type SearchScope } from "@/components/TitleBarSearch"
 
 const densityOptions: { id: Density; label: string }[] = [
   { id: "compact", label: "紧凑" },
-  { id: "standard", label: "标准" },
-  { id: "comfortable", label: "宽松" }
+  { id: "standard", label: "标准" }
 ]
 
 const CONTROL =
@@ -134,7 +133,7 @@ export function TitleBar({
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" title="列表密度" className={ICON_BUTTON}>
+            <button type="button" title="列表视图" className={ICON_BUTTON}>
               <Rows className="size-4" />
             </button>
           </DropdownMenuTrigger>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { mail } from "@/lib/ipc"
-import { readStored, store, type Density } from "@/lib/preferences"
+import { readStored, normalizeDensity, store, type Density } from "@/lib/preferences"
 import type { Settings } from "@shared/types"
 
 /**
@@ -11,7 +11,9 @@ import type { Settings } from "@shared/types"
  * 否则会把默认值覆盖掉用户已保存的设置。
  */
 export function useSettings() {
-  const [density, setDensity] = useState<Density>(() => readStored("maildesk.density", "standard"))
+  const [density, setDensity] = useState<Density>(() =>
+    normalizeDensity(readStored("maildesk.density", "standard"))
+  )
   const [collapsed, setCollapsed] = useState<boolean>(() => readStored("maildesk.sidebarCollapsed", false))
   const [fontSize, setFontSize] = useState<number>(() => readStored("maildesk.fontSize", 14))
   const [remoteImages, setRemoteImages] = useState<boolean>(true)
@@ -30,7 +32,7 @@ export function useSettings() {
       .get()
       .then((settings) => {
         if (cancelled) return
-        setDensity(settings.density)
+        setDensity(normalizeDensity(settings.density))
         setCollapsed(settings.sidebarCollapsed)
         setFontSize(settings.fontSize)
         setRemoteImages(settings.remoteImages)

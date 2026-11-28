@@ -18,8 +18,7 @@ const SECTIONS: { id: Section; label: string }[] = [
 
 const DENSITIES: { id: Density; label: string }[] = [
   { id: "compact", label: "紧凑" },
-  { id: "standard", label: "标准" },
-  { id: "comfortable", label: "宽松" }
+  { id: "standard", label: "标准" }
 ]
 
 const FONT_SIZES = [13, 14, 15, 16]
@@ -203,12 +202,12 @@ export function SettingsDialog({
             {section === "appearance" ? (
               <>
                 <Section label="列表与正文">
-                  <Row label="列表密度" hint="每行高度，影响一屏能看多少封">
+                  <Row label="列表视图" hint="每行高度，影响一屏能看多少封">
                     <ToggleGroup
                       type="single"
                       value={density}
                       onValueChange={(value) => value && onDensityChange(value as Density)}
-                      aria-label="列表密度"
+                      aria-label="列表视图"
                       size="sm" className="gap-0.5 rounded-md bg-foreground/[0.05] p-0.5"
                     >
                       {DENSITIES.map((item) => (
@@ -245,8 +244,8 @@ export function SettingsDialog({
                     label="标准视图显示三行"
                     hint={
                       compact
-                        ? "紧凑密度不显示摘要；切到标准或宽松密度后生效"
-                        : "标准密度在主题下方多显示一行摘要；宽松密度始终三行"
+                        ? "紧凑视图不显示摘要；切到标准视图后生效"
+                        : "开启后主题下方多一行摘要，关闭时只显示发件人与主题"
                     }
                   >
                     <Switch
@@ -257,15 +256,15 @@ export function SettingsDialog({
                     />
                   </Row>
                   <Row
-                    label="非紧凑模式显示日期分组"
+                    label="标准视图显示日期分组"
                     hint={
                       compact
-                        ? "紧凑密度始终按日期分组；此开关只影响标准 / 宽松密度"
-                        : "关闭后，标准与宽松密度不再显示「今天 / 本周」这类组头条"
+                        ? "紧凑视图始终按日期分组；此开关只影响标准视图"
+                        : "关闭后，标准视图不再显示「今天 / 本周」这类组头条"
                     }
                   >
                     <Switch
-                      label="非紧凑模式显示日期分组"
+                      label="标准视图显示日期分组"
                       checked={groupHeadersNonCompact}
                       disabled={compact}
                       onChange={onGroupHeadersNonCompactChange}
@@ -279,15 +278,15 @@ export function SettingsDialog({
                     />
                   </Row>
                   <Row
-                    label="非紧凑模式显示时分"
+                    label="标准视图显示时分"
                     hint={
                       compact
-                        ? "紧凑模式始终显示时分；此开关只影响标准 / 宽松密度"
-                        : "关闭后，标准与宽松密度只显示日期，不带 HH:mm"
+                        ? "紧凑视图始终显示时分；此开关只影响标准视图"
+                        : "关闭后，标准视图只显示日期，不带 HH:mm"
                     }
                   >
                     <Switch
-                      label="非紧凑模式显示时分"
+                      label="标准视图显示时分"
                       checked={showTimeNonCompact}
                       disabled={compact}
                       onChange={onShowTimeNonCompactChange}

@@ -46,7 +46,7 @@
   `default-src 'none'`、`script-src 'none'`、`object-src 'none'`、`base-uri 'none'`、`form-action 'none'`、
   `style-src 'unsafe-inline'`，图片与字体在放行态才允许 `*`。
 - `FORBID_TAGS` / `FORBID_ATTR` 见 `HtmlBody.tsx`；`srcset`、`ping`、`target` 会被丢掉。
-- 远程图片默认拦截：顶部提示条给出「已拦截 N 张远程图片 / 显示图片」，设置变化对当前这封立即生效。
+- 远程图片默认**放行**（`remoteImages: true`）；设置里关闭后，`prepare()` 把外链图片换成透明占位并计数，顶部提示条给出「已拦截 N 张远程图片 / 显示图片」，设置变化对当前这封立即生效。
 - 链接：页内 `#` 交给 iframe；`http(s)`、协议相对、`mailto:`、`tel:` 走 `mail.app.openExternal`；
   其余相对路径 / `file:` 一律阻止。中键点击链接也阻止，避免新开窗口。
 - 失败图片：声明尺寸 ≤ 2px 的追踪像素直接删除；正常尺寸的换成同尺寸浅灰占位，**不暴露 Chrome 碎图图标**。
@@ -87,3 +87,4 @@
 | 日期 | 变更 |
 | --- | --- |
 | 2026-11-27 | 建立文档，对应 `HtmlBody` 582 行现状：清洗、CSP、宽度两段式测量、跨文档 RO 禁用、引用折叠与失败图片处理。 |
+| 2026-11-28 | 修正 §4：远程图片默认是**放行**（`remoteImages: true`），关闭后才走拦截占位，与实现和 PRD 一致。 |

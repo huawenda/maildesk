@@ -15,18 +15,17 @@ import type { SearchScope } from "@/components/TitleBarSearch"
 const ROW_HEIGHT: Record<Density, number> = {
   // 紧凑视图是 Foxmail 式表格式单行，行高贴近 Foxmail 的 26px
   compact: 26,
-  standard: 60,
-  comfortable: 88
+  standard: 60
 }
 
 /** 日期分组条高度（紧凑视图全宽表格） */
 const GROUP_HEIGHT = 24
-/** 标准/宽松视图里组头条下方留 6px（与组内第一封 / 下一个组头）；
+/** 标准视图里组头条下方留 6px（与组内第一封 / 下一个组头）；
  *  上方不再额外加上边距——上一项自己的 6px 下间距就是组与组之间的呼吸。
  *  紧凑视图两者都不留（2026-11-27 用户要求）：组头条 24px 紧贴上一封邮件，
  *  组与组之间改用 1px 分隔线区分。 */
 const GROUP_BOTTOM_GAP = 6
-/** 标准/宽松视图里邮件行之间的间距，必须和组头条到第一封邮件的 6px 一致 */
+/** 标准视图里邮件行之间的间距，必须和组头条到第一封邮件的 6px 一致 */
 const ROW_GAP = 6
 
 /* 紧凑视图的列宽：状态 / 附件固定，发件人 / 日期 / 大小可拖动列分隔线调整（持久化到 localStorage） */
@@ -132,13 +131,13 @@ interface MessageListProps {
   /** 「标为垃圾邮件」的目标文件夹；当前就在垃圾箱时为 undefined，菜单项隐藏 */
   junkFolderId?: string
   density: Density
-  /** 标准密度是否显示第三行摘要（宽松始终三行） */
+  /** 标准视图是否显示第三行摘要（默认两行） */
   standardThreeLines: boolean
-  /** 非紧凑密度是否显示日期分组组头 */
+  /** 标准视图是否显示日期分组组头（紧凑始终分组） */
   groupHeadersNonCompact: boolean
   /** 组头条是否滚动吸顶 */
   stickyGroupHeaders: boolean
-  /** 非紧凑密度的日期后是否补 HH:mm */
+  /** 标准视图的日期后是否补 HH:mm（紧凑始终带时间） */
   showTimeNonCompact: boolean
   /** 搜索模式：列表里展示的是搜索结果，空状态与分组记忆都按搜索处理 */
   searching?: boolean
@@ -368,15 +367,15 @@ export function MessageList({
     [collapseKey]
   )
 
-  // 标准密度的行高跟着「两行 / 三行」设置走；宽松固定三行 88px
+  // 标准视图的行高跟着「两行 / 三行」设置走
   const rowHeight = density === "standard" ? (standardThreeLines ? 72 : 60) : ROW_HEIGHT[density]
-  const showSnippet = !compact && (density === "comfortable" || standardThreeLines)
+  const showSnippet = !compact && standardThreeLines
   const grouped = compact || groupHeadersNonCompact
   const groupRowHeight = compact ? GROUP_HEIGHT : GROUP_HEIGHT + GROUP_BOTTOM_GAP
   // 行高是内容高度，槽位再额外加行间距；紧凑视图是表格，不加
   const rowSlot = compact ? rowHeight : rowHeight + ROW_GAP
 
-  // 分组：紧凑始终分组；标准/宽松由设置决定
+  // 分组：紧凑始终分组；标准视图由设置决定
   const collapsedSet = useMemo(() => new Set(collapsedGroups), [collapsedGroups])
   const rows = useMemo<ListRow[]>(() => {
     // 置顶：带 starred 标记的邮件单独成组排在最前，组头固定叫「置顶」，不再混进日期/大小分组
@@ -455,7 +454,7 @@ export function MessageList({
     getItemKey
   })
 
-  // 密度切换后行高变化，必须重新测量（PRD FR-03.2）
+  // 视图切换后行高变化，必须重新测量（PRD FR-03.2）
   useEffect(() => {
     virtualizer.measure()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -476,7 +475,7 @@ export function MessageList({
 
   return (
     <section ref={paneRef} className="flex shrink-0 flex-col bg-card" style={{ width }}>
-      {/* 紧凑视图是 Foxmail 式表格：列头固定（不随列表滚动），标准/宽松仍是三行卡片，不加列头。
+      {/* 紧凑视图是 Foxmail 式表格：列头固定（不随列表滚动），标准视图仍是卡片行，不加列头。
           列头只看「有没有数据」，不能看 loading —— 刷新时卸载列头会让内容整体上移 28px，表现成闪烁 */}
       {compact && messages.length > 0 ? (
         <div
@@ -575,7 +574,7 @@ export function MessageList({
         </div>
       ) : null}
 
-      {/* 标准/宽松：列表顶部留 6px，避免第一个组头贴住上方横线（2026-11-27）。
+      {/* 标准视图：列表顶部留 6px，避免第一个组头贴住上方横线（2026-11-27）。
           放在滚动容器外面，不动虚拟滚动的坐标系与吸顶锚点。 */}
       {compact ? null : <div className="h-1.5 shrink-0" aria-hidden />}
       <div
@@ -802,7 +801,7 @@ function GroupHeader({
   collapsed: boolean
   onToggle: () => void
 }) {
-  // 非紧凑（标准/宽松）保留原来的灰底圆角条：有上下箭头、半角括号计数
+  // 标准视图保留原来的灰底圆角条：有上下箭头、半角括号计数
   if (!compact) {
     return (
       <button
@@ -931,7 +930,7 @@ interface RowProps {
   showSnippet: boolean
   /** 日期列够宽：日期后面加「(周X)」 */
   dateWithWeekday: boolean
-  /** 非紧凑视图的日期后是否补 HH:mm */
+  /** 标准视图的日期后是否补 HH:mm */
   showTime: boolean
   /** 紧凑表格最后一列的文件夹名（仅搜索时给） */
   folderName?: string
@@ -963,7 +962,6 @@ const MessageRow = memo(function MessageRow({
   onOpenTab
 }: RowProps) {
   const compact = density === "compact"
-  const comfortable = density === "comfortable"
   // 已读行整体降一档明度（头像、发件人、主题、摘要、时间一起变淡），未读行保持原亮度
   const read = !message.unread
   const mutedText = read ? "text-ink-faint" : "text-muted-foreground"
@@ -1077,7 +1075,7 @@ const MessageRow = memo(function MessageRow({
     )
   }
 
-  // 标准视图只展示「发件人 + 主题」，附件挤在主题行右侧；宽松视图才是完整三行（含摘要）
+  // 标准视图默认只展示「发件人 + 主题」，附件挤在主题行右侧；开启三行后才是完整三行（含摘要）
   const indicators = (
     <span className="ml-auto flex shrink-0 items-center gap-1.5">
       {message.hasAttachments ? <Paperclip className={cn("size-3.5", mutedText)} /> : null}
@@ -1099,7 +1097,7 @@ const MessageRow = memo(function MessageRow({
       <span
         className={cn(
           "flex shrink-0 items-center justify-center rounded-full font-semibold text-white",
-          compact ? "size-6 text-[10.5px]" : comfortable ? "size-8 text-[12px]" : "size-7 text-[11.5px]",
+          compact ? "size-6 text-[10.5px]" : "size-7 text-[11.5px]",
           read && "opacity-60"
         )}
         style={{ backgroundColor: avatarColor(sender) }}
@@ -1110,7 +1108,7 @@ const MessageRow = memo(function MessageRow({
       <div
         className={cn(
           "flex min-w-0 flex-1 flex-col justify-center",
-          compact ? "gap-[2px]" : comfortable ? "gap-1" : "gap-[3px]"
+          compact ? "gap-[2px]" : "gap-[3px]"
         )}
       >
         <div className="flex items-center gap-2">

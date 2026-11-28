@@ -182,12 +182,12 @@ export function runCapture(win: BrowserWindow, target: string): void {
             console.log("capture-sync", JSON.stringify(opened))
             await new Promise((resolve) => setTimeout(resolve, 1200))
           }
-          // 列表密度：先打开标题栏密度下拉，再按文字选「紧凑 / 标准 / 宽松」
+          // 列表视图：先打开标题栏视图下拉，再按文字选「紧凑 / 标准」
           const density = process.env.MAILDESK_CAPTURE_DENSITY
           if (density) {
             await win.webContents
               .executeJavaScript(
-                "(() => { const el = [...document.querySelectorAll('button')].find((b) => b.getAttribute('title') === '列表密度'); if (!el) return false; const opts = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }; el.dispatchEvent(new PointerEvent('pointerdown', opts)); el.dispatchEvent(new MouseEvent('mousedown', opts)); el.dispatchEvent(new PointerEvent('pointerup', opts)); el.dispatchEvent(new MouseEvent('mouseup', opts)); return true })()"
+                "(() => { const el = [...document.querySelectorAll('button')].find((b) => b.getAttribute('title') === '列表视图'); if (!el) return false; const opts = { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }; el.dispatchEvent(new PointerEvent('pointerdown', opts)); el.dispatchEvent(new MouseEvent('mousedown', opts)); el.dispatchEvent(new PointerEvent('pointerup', opts)); el.dispatchEvent(new MouseEvent('mouseup', opts)); return true })()"
               )
               .catch(() => undefined)
             await new Promise((resolve) => setTimeout(resolve, 400))

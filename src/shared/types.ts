@@ -4,8 +4,8 @@ export interface AppInfo {
   platform: string
 }
 
-export type Density = "compact" | "standard" | "comfortable"
-export type Security = "tls" | "starttls" | "tls-insecure" | "none"
+export type Density = "compact" | "standard"
+export type Security = "tls" | "starttls" | "tls-insecure" | "starttls-insecure" | "none"
 export type FolderRole = "inbox" | "sent" | "drafts" | "trash" | "junk" | "archive" | null
 
 /** 归一化错误码，UI 只展示这张表里的值（PRD 7.6）。 */
@@ -153,13 +153,13 @@ export interface Settings {
   pageSize: number
   /** 是否默认放行邮件里的远程图片 */
   remoteImages: boolean
-  /** 标准密度是否显示第三行摘要（宽松始终三行） */
+  /** 标准视图是否显示第三行摘要（默认两行） */
   standardThreeLines: boolean
-  /** 非紧凑密度是否显示日期分组组头 */
+  /** 标准视图是否显示日期分组组头（紧凑始终分组） */
   groupHeadersNonCompact: boolean
   /** 组头条是否滚动吸顶 */
   stickyGroupHeaders: boolean
-  /** 非紧凑密度（标准 / 宽松）的列表日期后是否补 HH:mm */
+  /** 标准视图的列表日期后是否补 HH:mm（紧凑始终带时间） */
   showTimeNonCompact: boolean
   /** 侧栏文件夹角标显示未读数还是邮件总数 */
   folderCount: "unread" | "total"

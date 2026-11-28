@@ -33,7 +33,7 @@ export async function probeImap(input: AccountInput): Promise<TestResult> {
     }
     const folders = client.mailboxList?.length ?? 0
     const suffix =
-      input.security === "tls-insecure"
+      input.security === "tls-insecure" || input.security === "starttls-insecure"
         ? "（连接已加密，但未校验证书）"
         : input.security === "none" && client.secureConnection
           ? "（服务器自动升级为 TLS）"
@@ -66,7 +66,7 @@ function mapImapError(error: unknown, security: Security): { code: ErrCode; mess
   if (/certificate|self.signed|UNABLE_TO_VERIFY|CERT_|depth zero/i.test(text)) {
     const hint =
       security === "tls" || security === "starttls"
-        ? "服务器证书不被信任（自签名或公司内网 CA）。公司自建服务器可以把加密方式改成「TLS · 忽略证书」——仍然加密但不校验证书；或者把公司根证书导入 Windows「受信任的根证书颁发机构」后继续用校验证书的方式。"
+        ? "服务器证书不被信任（自签名或公司内网 CA）。公司自建服务器可以把加密方式改成「TLS · 忽略证书」或「STARTTLS · 忽略证书」——仍然加密但不校验证书；或者把公司根证书导入 Windows「受信任的根证书颁发机构」后继续用校验证书的方式。"
         : "服务器证书校验失败。"
     return { code: "tls", message: hint + "原始错误：" + text }
   }

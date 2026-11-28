@@ -19,15 +19,21 @@ export function buildImapOptions(
   password: string,
   overrides: Partial<ImapFlowOptions> = {}
 ): ImapFlowOptions {
-  // tls-insecure 是显式选项：仍然加密，但跳过证书校验（公司自签名证书）
+  // tls-insecure / starttls-insecure 是显式选项：仍然加密，但跳过证书校验（公司自签名证书）
   const secure = target.security === "tls" || target.security === "tls-insecure"
-  const verify = target.security !== "none" && target.security !== "tls-insecure"
+  const verify =
+    target.security !== "none" &&
+    target.security !== "tls-insecure" &&
+    target.security !== "starttls-insecure"
+  // starttls-insecure 同样要求升级，只是不校验证书
+  const requireStartTls =
+    target.security === "starttls" || target.security === "starttls-insecure"
   return {
     host: target.host,
     port: target.port,
     secure,
     // 标了 STARTTLS 就必须升级；之前是机会式升级，服务端不提供时会静默退回明文
-    ...(target.security === "starttls" ? { doSTARTTLS: true } : {}),
+    ...(requireStartTls ? { doSTARTTLS: true } : {}),
     auth: { user: target.username, pass: password },
     clientInfo: { name: "MailDesk", version: app.getVersion(), vendor: "local" },
     logger: false,

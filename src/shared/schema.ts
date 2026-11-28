@@ -1,7 +1,7 @@
 import { z } from "zod"
 
-export const securitySchema = z.enum(["tls", "starttls", "tls-insecure", "none"])
-export const densitySchema = z.enum(["compact", "standard", "comfortable"])
+export const securitySchema = z.enum(["tls", "starttls", "tls-insecure", "starttls-insecure", "none"])
+export const densitySchema = z.enum(["compact", "standard"])
 
 export const accountInputSchema = z.object({
   email: z.string().trim().email(),

@@ -24,7 +24,7 @@
 | `message` | 邮件头 + 正文 | `UNIQUE(folder_id, uid)`；`body_text`（搜索 / 纯文本降级）、`body_html`（原始 HTML） |
 | `message_fts` | FTS5 全文索引 | external content，`content='message'`，随 `message` 增删改由触发器同步 |
 | `attachment` | 附件元数据 | 二进制不进库；`part` 记 BODYSTRUCTURE part 号；`local_path` 是用户保存后的副本 |
-| `credential` | 凭据密文 | `safeStorage`（Windows DPAPI）加密，明文永不落库 |
+| `credential` | 凭据密文 | 优先 `safeStorage`（Windows DPAPI）加密；加密不可用时降级为明文，并在 `scheme` 标 `plain` |
 | `setting` | key/value JSON | 替代 electron-store |
 
 `message.raw_path` 是早期 `.eml` 落盘的预留列，当前没有读写方；保留是为了避免为删列重建表，
@@ -47,7 +47,7 @@
   渲染前必须过 `HtmlBody` 的 DOMPurify/CSP（见 `docs/rendering.md`）。
 - `has_html` / `has_attachments` 是列表用的冗余标记；内嵌 cid 图片**不算附件**（迁移 v6）。
 - `setMessageBody` 在同一个事务里更新正文并按 `attachment` 全量重建附件元数据；
-  `attachments` 为空时只更新正文，不留下上一轮的旧附件行。
+  `attachments` 为空时只更新正文；旧附件行保留（同步路径不会出现「正文有附件却传空数组」的组合）。
 - 附件二进制不落库：`attachments.ts` 把下载结果写到
   `<userData>/attachments/<messageId>/<attachmentId>/<文件名>`，库里只记 `local_path`；
   缓存清理、1GB LRU、预取与取消见 `docs/sync.md` §7.1 / §13，不要在本文重复实现细节。

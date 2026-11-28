@@ -24,6 +24,7 @@ const SECURITY_LABEL: Record<string, string> = {
   tls: "TLS",
   starttls: "STARTTLS",
   "tls-insecure": "TLS（不校验证书）",
+  "starttls-insecure": "STARTTLS（不校验证书）",
   none: "不加密"
 }
 

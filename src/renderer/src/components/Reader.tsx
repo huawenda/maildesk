@@ -47,6 +47,9 @@ function isPreviewable(attachment: Attachment): boolean {
 
 interface ReaderProps {
   message: Message | null
+  /** 当前账户的显示名与地址：收件人是自己且邮件头没写姓名时，用它补上（不编造别人的名字） */
+  ownName?: string
+  ownEmail?: string
   /** 正文字号（px），来自设置；纯文本与 HTML 正文共用 */
   fontSize: number
   /** 是否默认放行远程图片，来自设置 */
@@ -76,6 +79,8 @@ type SaveState = "saving" | "saved" | "error"
 
 export function Reader({
   message,
+  ownName,
+  ownEmail,
   fontSize,
   remoteImages,
   onToggleStar,
@@ -444,7 +449,7 @@ export function Reader({
                 </div>
               </div>
 
-              <Recipients message={message} />
+              <Recipients message={message} ownName={ownName} ownEmail={ownEmail} />
 
               {message.labels.length > 0 || message.attachments.length > 0 ? (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -841,10 +846,24 @@ function ContactSection({ label, contacts }: { label: string; contacts: Contact[
   )
 }
 
-function Recipients({ message }: { message: Message }) {
+function Recipients({ message, ownName, ownEmail }: { message: Message; ownName?: string; ownEmail?: string }) {
   const [open, setOpen] = useState(false)
-  const to = message.to.map(parseContact)
-  const cc = message.cc.map(parseContact)
+  // 邮件头里收件人常常只有地址或只把地址本地部分当姓名写（QQ/腾讯云通知都是这样），
+  // 自己是收件人时用账户显示名补上；只补「自己」这一条，别人的姓名保持原样，不猜。
+  const isPlaceholderName = (contact: Contact): boolean => {
+    const name = contact.name.trim().toLowerCase()
+    if (!name) return true
+    const address = contact.address.trim().toLowerCase()
+    return name === address || name === address.split("@")[0]
+  }
+  const fillSelf = (contact: Contact): Contact => {
+    if (!ownName || !ownEmail) return contact
+    if (contact.address.trim().toLowerCase() !== ownEmail.trim().toLowerCase()) return contact
+    if (!isPlaceholderName(contact)) return contact
+    return { ...contact, name: ownName, full: `${ownName} <${contact.address}>` }
+  }
+  const to = message.to.map(parseContact).map(fillSelf)
+  const cc = message.cc.map(parseContact).map(fillSelf)
   const summary = summarizeContacts(to, "发给") + (cc.length > 0 ? ` · 抄送 ${cc.length} 人` : "")
 
   return (

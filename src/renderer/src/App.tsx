@@ -90,6 +90,8 @@ export default function App() {
     setCollapsed,
     fontSize,
     setFontSize,
+    pageSize,
+    setPageSize,
     remoteImages,
     setRemoteImages,
     standardThreeLines,
@@ -768,9 +770,27 @@ export default function App() {
 
   // 列表栏与邮件标签共用同一个阅读器：邮件标签模式下让正文独占整块画布，
   // 并把 900px 版心放开（宽版正文），换来的才是「双击真的看到更多宽度」
+  const selfAccount = accounts.find((item) => item.id === activeAccountId) ?? null
+  // 从设置里打开的子弹层（账户 / 同步状态 / 选择文件夹）：关闭后回到设置，
+  // 而不是让用户重新点一次设置（2026-11-28 用户反馈）
+  const returnToSettings = useRef(false)
+  const openFromSettings = (open: () => void) => {
+    returnToSettings.current = true
+    setSettingsOpen(false)
+    open()
+  }
+  const closeChildDialog = (setOpen: (open: boolean) => void) => (open: boolean) => {
+    setOpen(open)
+    if (!open && returnToSettings.current) {
+      returnToSettings.current = false
+      setSettingsOpen(true)
+    }
+  }
   const readerFor = (message: Message | null, wideBody = false) => (
     <Reader
       message={message}
+      ownName={selfAccount?.displayName ?? undefined}
+      ownEmail={selfAccount?.email}
       wideBody={wideBody}
       fontSize={fontSize}
       remoteImages={remoteImages}
@@ -989,6 +1009,8 @@ export default function App() {
         onDensityChange={setDensity}
         fontSize={fontSize}
         onFontSizeChange={setFontSize}
+        pageSize={pageSize}
+        onPageSizeChange={setPageSize}
         standardThreeLines={standardThreeLines}
         onStandardThreeLinesChange={setStandardThreeLines}
         groupHeadersNonCompact={groupHeadersNonCompact}
@@ -1006,14 +1028,9 @@ export default function App() {
         accounts={accounts}
         activeAccountId={activeAccountId}
         version={version}
-        onAddAccount={() => {
-          setSettingsOpen(false)
-          openAddAccount()
-        }}
-        onOpenSyncStatus={() => {
-          setSettingsOpen(false)
-          setSyncStatusOpen(true)
-        }}
+        onAddAccount={() => openFromSettings(openAddAccount)}
+        onOpenSyncStatus={() => openFromSettings(() => setSyncStatusOpen(true))}
+        onOpenFolderPicker={() => openFromSettings(() => setFolderPickerOpen(true))}
         onOpenLogs={() => {
           void mail.app
             .openLogFolder()
@@ -1026,7 +1043,7 @@ export default function App() {
 
       <AccountDialog
         open={accountsOpen}
-        onOpenChange={setAccountsOpen}
+        onOpenChange={closeChildDialog(setAccountsOpen)}
         accounts={accounts}
         editingId={accountEditingId}
         onChanged={(next) => {
@@ -1039,14 +1056,14 @@ export default function App() {
 
       <SyncStatusDialog
         open={syncStatusOpen}
-        onOpenChange={setSyncStatusOpen}
+        onOpenChange={closeChildDialog(setSyncStatusOpen)}
         events={syncEventLog}
         folderLabel={folderLabelOfPath}
       />
 
       <FolderPickerDialog
         open={folderPickerOpen}
-        onOpenChange={setFolderPickerOpen}
+        onOpenChange={closeChildDialog(setFolderPickerOpen)}
         accountId={activeAccountId}
         onSaved={() => setFolderTick((tick) => tick + 1)}
       />

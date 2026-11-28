@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Check, CircleNotch } from "@phosphor-icons/react"
+import { Check, CircleNotch, Eye, EyeSlash } from "@phosphor-icons/react"
 import type { Account, Security } from "@shared/types"
 import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
@@ -44,6 +44,16 @@ export function AccountDialog({ open, onOpenChange, accounts, editingId, onChang
   const [email, setEmail] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [password, setPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
+  // 打开时的初始值：与它不一致就算「有未保存改动」，此时点遮罩不关闭
+  const initialRef = useRef<{
+    email: string
+    displayName: string
+    host: string
+    port: string
+    security: Security
+    username: string
+  } | null>(null)
   const [host, setHost] = useState("")
   const [port, setPort] = useState("993")
   const [security, setSecurity] = useState<Security>("tls")
@@ -58,13 +68,33 @@ export function AccountDialog({ open, onOpenChange, accounts, editingId, onChang
     setEmail(account?.email ?? "")
     setDisplayName(account?.displayName ?? "")
     setPassword("")
+    setShowPassword(false)
     setHost(account?.imapHost ?? "")
     setPort(String(account?.imapPort ?? 993))
     setSecurity(account?.security ?? "tls")
     setUsername(account?.username ?? "")
     setTest({ kind: "idle" })
     setError(null)
+    initialRef.current = {
+      email: account?.email ?? "",
+      displayName: account?.displayName ?? "",
+      host: account?.imapHost ?? "",
+      port: String(account?.imapPort ?? 993),
+      security: account?.security ?? "tls",
+      username: account?.username ?? ""
+    }
   }, [open, editingId, accounts])
+
+  const initial = initialRef.current
+  const dirty =
+    password !== "" ||
+    (initial !== null &&
+      (email !== initial.email ||
+        displayName !== initial.displayName ||
+        host !== initial.host ||
+        port !== initial.port ||
+        security !== initial.security ||
+        username !== initial.username))
 
   const buildInput = () => ({
     email: email.trim(),
@@ -115,7 +145,7 @@ export function AccountDialog({ open, onOpenChange, accounts, editingId, onChang
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent aria-describedby={undefined}>
+      <DialogContent aria-describedby={undefined} blockOutsideClose={dirty}>
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-table-line px-4">
           <DialogTitle>{editingId ? "编辑账户" : "添加账户"}</DialogTitle>
           <kbd className="ml-auto rounded border border-border px-1 py-px text-[10.5px] text-muted-foreground">Esc</kbd>
@@ -155,16 +185,28 @@ export function AccountDialog({ open, onOpenChange, accounts, editingId, onChang
 
             <div>
               <Label>密码 / 授权码</Label>
-              <Input
-                type="password"
-                value={password}
-                onChange={(event) => {
-                  setPassword(event.target.value)
-                  setTest({ kind: "idle" })
-                }}
-                placeholder={editingId ? "留空则不修改密码" : "使用 DPAPI 加密后单独存储"}
-                autoComplete="new-password"
-              />
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => {
+                    setPassword(event.target.value)
+                    setTest({ kind: "idle" })
+                  }}
+                  placeholder={editingId ? "留空则不修改密码" : "使用 DPAPI 加密后单独存储"}
+                  autoComplete="new-password"
+                  className="pr-9"
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                  title={showPassword ? "隐藏密码" : "显示密码"}
+                  onClick={() => setShowPassword((value) => !value)}
+                  className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {showPassword ? <EyeSlash className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-[1fr_105px] gap-3">

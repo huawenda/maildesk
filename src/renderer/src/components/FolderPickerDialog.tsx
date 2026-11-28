@@ -38,10 +38,14 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  // 打开时的勾选状态：与它不一致就算有未保存改动，点遮罩不关闭
+  const initialSelected = useRef<Set<string> | null>(null)
 
   const apply = (list: FolderRow[]) => {
+    const next = new Set(list.filter((folder) => folder.enabled).map((folder) => folder.path))
     setFolders(list)
-    setSelected(new Set(list.filter((folder) => folder.enabled).map((folder) => folder.path)))
+    setSelected(next)
+    initialSelected.current = new Set(next)
   }
 
   useEffect(() => {
@@ -101,6 +105,11 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
     )
   }, [ordered, query])
 
+  const initial = initialSelected.current
+  const dirty =
+    initial !== null &&
+    (selected.size !== initial.size || Array.from(selected).some((path) => !initial.has(path)))
+
   const toggle = (folder: FolderRow) => {
     if (folder.role === "inbox") return
     setSelected((current) => {
@@ -138,12 +147,9 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(620px,calc(100vw-48px))]">
+      <DialogContent className="w-[min(620px,calc(100vw-48px))]" blockOutsideClose={dirty}>
         <div className="flex h-11 shrink-0 items-center gap-2 border-b border-table-line px-4">
           <DialogTitle>选择文件夹</DialogTitle>
-          <span className="text-[11.5px] text-muted-foreground">
-            勾选的文件夹会显示在侧栏并参与同步
-          </span>
           <kbd className="ml-auto rounded border border-border px-1 py-px text-[10.5px] text-muted-foreground">
             Esc
           </kbd>
@@ -234,7 +240,7 @@ export function FolderPickerDialog({ open, onOpenChange, accountId, onSaved }: F
 
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-table-line px-4 py-3">
           <span className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-muted-foreground">
-            {note ?? `已选 ${selected.size} 个文件夹；未勾选的不同步，本地已有的邮件会保留`}
+            {note ?? `已选 ${selected.size} 个文件夹`}
           </span>
           <div className="flex shrink-0 items-center gap-2">
             <button

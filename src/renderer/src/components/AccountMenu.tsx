@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import type { Account } from "@shared/types"
 
-const accountName = (account: Account) => account.displayName || account.email.split("@")[0]
+const accountName = (account: Account) => account.displayName || account.email
 
 interface AccountMenuProps {
   accounts: Account[]
@@ -65,7 +65,9 @@ export function AccountMenu({
                 <DropdownMenuRadioItem value={item.id} className="min-w-0 flex-1 text-[13px]">
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate">{accountName(item)}</span>
-                    <span className="truncate text-[11px] text-muted-foreground">{item.email}</span>
+                    {item.displayName ? (
+                      <span className="truncate text-[11px] text-muted-foreground">{item.email}</span>
+                    ) : null}
                   </span>
                 </DropdownMenuRadioItem>
                 <DropdownMenuItem

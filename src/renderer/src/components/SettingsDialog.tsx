@@ -5,6 +5,7 @@ import { OverlayScrollbar } from "@/components/OverlayScrollbar"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import type { Density } from "@/App"
+import { mail } from "@/lib/ipc"
 import { cn } from "@/lib/utils"
 
 type Section = "appearance" | "accounts" | "sync" | "about"
@@ -23,6 +24,16 @@ const DENSITIES: { id: Density; label: string }[] = [
 
 const FONT_SIZES = [13, 14, 15, 16]
 
+/** 同步时间：`yyyy/m/d hh:mm`，不显示周几（2026-11-28 用户要求） */
+const formatSyncTime = (ms: number): string => {
+  const date = new Date(ms)
+  const pad = (value: number) => String(value).padStart(2, "0")
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+const PAGE_SIZES = [100, 200, 500, 1000]
+const SECONDARY_BUTTON =
+  "h-8 rounded-md bg-foreground/[0.05] px-3 text-[12.5px] text-foreground transition-colors hover:bg-foreground/[0.08]"
+
 interface SettingsDialogProps {
   open: boolean
   onClose: () => void
@@ -30,6 +41,8 @@ interface SettingsDialogProps {
   onDensityChange: (density: Density) => void
   fontSize: number
   onFontSizeChange: (size: number) => void
+  pageSize: number
+  onPageSizeChange: (size: number) => void
   standardThreeLines: boolean
   onStandardThreeLinesChange: (value: boolean) => void
   groupHeadersNonCompact: boolean
@@ -49,6 +62,7 @@ interface SettingsDialogProps {
   version?: string
   onAddAccount: () => void
   onOpenSyncStatus: () => void
+  onOpenFolderPicker: () => void
   onOpenLogs: () => void
 }
 
@@ -119,6 +133,8 @@ export function SettingsDialog({
   onDensityChange,
   fontSize,
   onFontSizeChange,
+  pageSize,
+  onPageSizeChange,
   standardThreeLines,
   onStandardThreeLinesChange,
   groupHeadersNonCompact,
@@ -138,6 +154,7 @@ export function SettingsDialog({
   version,
   onAddAccount,
   onOpenSyncStatus,
+  onOpenFolderPicker,
   onOpenLogs
 }: SettingsDialogProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -149,6 +166,33 @@ export function SettingsDialog({
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: 0 })
   }, [section])
+
+  // 同步分区打开时拉一次只读快照，给「最近一次同步」补时间与错误摘要
+  const [syncSummary, setSyncSummary] = useState<{ lastSyncAt: number | null; error: string | null } | null>(
+    null
+  )
+  useEffect(() => {
+    if (!open || section !== "sync") return
+    let cancelled = false
+    mail.sync
+      .overview()
+      .then((overview) => {
+        if (cancelled) return
+        const lastSyncAt = Math.max(0, ...overview.accounts.map((item) => item.lastSyncAt ?? 0)) || null
+        const error = overview.accounts.find((item) => item.error)?.error ?? null
+        setSyncSummary({ lastSyncAt, error })
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [open, section])
+
+  const syncTimeLabel = syncSummary?.lastSyncAt
+    ? formatSyncTime(syncSummary.lastSyncAt)
+    : syncSummary
+      ? "还没有同步记录"
+      : "读取中…"
 
   const fontIndex = Math.max(0, FONT_SIZES.indexOf(fontSize))
 
@@ -202,7 +246,7 @@ export function SettingsDialog({
             {section === "appearance" ? (
               <>
                 <Section label="列表与正文">
-                  <Row label="列表视图" hint="每行高度，影响一屏能看多少封">
+                  <Row label="列表视图">
                     <ToggleGroup
                       type="single"
                       value={density}
@@ -217,14 +261,14 @@ export function SettingsDialog({
                       ))}
                     </ToggleGroup>
                   </Row>
-                  <Row label="正文字号" hint="影响纯文本与 HTML 正文">
+                  <Row label="正文字号">
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         aria-label="减小字号"
                         disabled={fontIndex === 0}
                         onClick={() => onFontSizeChange(FONT_SIZES[Math.max(0, fontIndex - 1)])}
-                        className="flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35"
+                        className="flex size-7 items-center justify-center rounded-md bg-foreground/[0.05] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35"
                       >
                         <Minus className="size-3.5" />
                       </button>
@@ -234,7 +278,7 @@ export function SettingsDialog({
                         aria-label="增大字号"
                         disabled={fontIndex === FONT_SIZES.length - 1}
                         onClick={() => onFontSizeChange(FONT_SIZES[Math.min(FONT_SIZES.length - 1, fontIndex + 1)])}
-                        className="flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35"
+                        className="flex size-7 items-center justify-center rounded-md bg-foreground/[0.05] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35"
                       >
                         <Plus className="size-3.5" />
                       </button>
@@ -371,7 +415,7 @@ export function SettingsDialog({
                   <button
                     type="button"
                     onClick={onAddAccount}
-                    className="mt-3 h-8 rounded-md bg-muted px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground"
+                    className="mt-3 h-8 rounded-md bg-foreground/[0.05] px-3 text-[12.5px] text-foreground transition-colors hover:bg-foreground/[0.08]"
                   >
                     添加账户…
                   </button>
@@ -380,15 +424,51 @@ export function SettingsDialog({
             ) : null}
 
             {section === "sync" ? (
-              <div className="pt-3">
-                <button
-                  type="button"
-                  onClick={onOpenSyncStatus}
-                  className="h-8 rounded-md bg-muted px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  打开同步状态
-                </button>
-              </div>
+              <>
+                <Section label="同步">
+                  <Row label="同步文件夹" hint="只同步勾选的文件夹，未勾选的不出现在侧栏">
+                    <button type="button" onClick={onOpenFolderPicker} className={SECONDARY_BUTTON}>
+                      选择文件夹…
+                    </button>
+                  </Row>
+                  <Row
+                    label="首屏封数"
+                    hint="首次连接时收件箱先拉多少封，剩余历史后台补齐"
+                  >
+                    <ToggleGroup
+                      type="single"
+                      value={String(pageSize)}
+                      onValueChange={(value) => value && onPageSizeChange(Number(value))}
+                      aria-label="首屏封数"
+                      size="sm"
+                      className="gap-0.5 rounded-md bg-foreground/[0.05] p-0.5"
+                    >
+                      {PAGE_SIZES.map((size) => (
+                        <ToggleGroupItem key={size} value={String(size)}>
+                          {size}
+                        </ToggleGroupItem>
+                      ))}
+                    </ToggleGroup>
+                  </Row>
+                </Section>
+                <Section label="同步状态">
+                  <Row
+                    label="最近一次同步"
+                    hint={
+                      syncSummary?.error
+                        ? "最近错误：" + syncSummary.error
+                        : "进度、文件夹游标、定时器与事件"
+                    }
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-[12px] tabular-nums text-muted-foreground">{syncTimeLabel}</span>
+                      <button type="button" onClick={onOpenSyncStatus} className={SECONDARY_BUTTON}>
+                        打开同步状态
+                      </button>
+                    </div>
+                  </Row>
+                </Section>
+              </>
             ) : null}
 
             {section === "about" ? (
@@ -400,7 +480,7 @@ export function SettingsDialog({
                 <button
                   type="button"
                   onClick={onOpenLogs}
-                  className="mt-4 h-8 rounded-md bg-muted px-3 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground"
+                  className="mt-4 h-8 rounded-md bg-foreground/[0.05] px-3 text-[12.5px] text-foreground transition-colors hover:bg-foreground/[0.08]"
                 >
                   打开日志文件夹
                 </button>

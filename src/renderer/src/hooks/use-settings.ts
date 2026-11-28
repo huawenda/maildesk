@@ -16,6 +16,7 @@ export function useSettings() {
   )
   const [collapsed, setCollapsed] = useState<boolean>(() => readStored("maildesk.sidebarCollapsed", false))
   const [fontSize, setFontSize] = useState<number>(() => readStored("maildesk.fontSize", 14))
+  const [pageSize, setPageSize] = useState<number>(200)
   const [remoteImages, setRemoteImages] = useState<boolean>(true)
   const [standardThreeLines, setStandardThreeLines] = useState<boolean>(false)
   const [groupHeadersNonCompact, setGroupHeadersNonCompact] = useState<boolean>(true)
@@ -35,6 +36,7 @@ export function useSettings() {
         setDensity(normalizeDensity(settings.density))
         setCollapsed(settings.sidebarCollapsed)
         setFontSize(settings.fontSize)
+        setPageSize(settings.pageSize)
         setRemoteImages(settings.remoteImages)
         setStandardThreeLines(settings.standardThreeLines)
         setGroupHeadersNonCompact(settings.groupHeadersNonCompact)
@@ -71,6 +73,11 @@ export function useSettings() {
     store("maildesk.fontSize", fontSize)
     if (ready.current) persist({ fontSize })
   }, [fontSize, persist])
+
+  useEffect(() => {
+    if (!ready.current) return
+    persist({ pageSize })
+  }, [pageSize, persist])
 
   useEffect(() => {
     if (!ready.current) return
@@ -113,6 +120,8 @@ export function useSettings() {
     collapsed,
     setCollapsed,
     fontSize,
+  pageSize,
+  setPageSize,
     setFontSize,
     remoteImages,
     setRemoteImages,

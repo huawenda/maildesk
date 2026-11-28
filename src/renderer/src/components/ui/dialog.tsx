@@ -23,8 +23,14 @@ function DialogContent({
   className,
   children,
   showCloseButton = false,
+  blockOutsideClose = false,
+  onInteractOutside,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content> & { showCloseButton?: boolean }) {
+}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  showCloseButton?: boolean
+  /** 有未保存改动时传 true：点遮罩不关闭（Esc / 取消按钮不受影响） */
+  blockOutsideClose?: boolean
+}) {
   const [element, setElement] = React.useState<HTMLDivElement | null>(null)
 
   // 居中弹窗按整数像素定位：top/left 直接取整，不用 translate(-50%)。
@@ -66,6 +72,10 @@ function DialogContent({
           className
         )}
         {...props}
+        onInteractOutside={(event) => {
+          onInteractOutside?.(event)
+          if (blockOutsideClose) event.preventDefault()
+        }}
       >
         {children}
         {showCloseButton ? (
